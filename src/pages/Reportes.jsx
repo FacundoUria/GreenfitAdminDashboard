@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
   Line,
   LineChart,
@@ -13,23 +15,55 @@ import { supabase } from '../lib/supabaseClient'
 import { calcularEstadoCuota, esDelMesActual } from '../utils/fecha'
 import { useConfiguracion } from '../context/useConfiguracion'
 
-function ultimosNMeses(n) {
-  const meses = []
+const DIAS_SEMANA_LABELS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
+
+const RANGOS = [
+  { value: '6m', label: 'Últimos 6 meses' },
+  { value: '12m', label: 'Últimos 12 meses' },
+  { value: '3a', label: 'Últimos 3 años' },
+  { value: 'origen', label: 'Desde el origen' },
+]
+
+function calcularInicioRango(rango, fechaOrigen) {
   const ahora = new Date()
-  for (let i = n - 1; i >= 0; i--) {
-    meses.push(new Date(ahora.getFullYear(), ahora.getMonth() - i, 1))
+
+  switch (rango) {
+    case '12m':
+      return new Date(ahora.getFullYear(), ahora.getMonth() - 11, 1)
+    case '3a':
+      return new Date(ahora.getFullYear(), ahora.getMonth() - 35, 1)
+    case 'origen':
+      return fechaOrigen ?? new Date(ahora.getFullYear(), ahora.getMonth() - 5, 1)
+    case '6m':
+    default:
+      return new Date(ahora.getFullYear(), ahora.getMonth() - 5, 1)
   }
+}
+
+function generarMeses(inicio) {
+  const ahora = new Date()
+  const meses = []
+  const cursor = new Date(inicio.getFullYear(), inicio.getMonth(), 1)
+  const limite = new Date(ahora.getFullYear(), ahora.getMonth(), 1)
+
+  while (cursor <= limite) {
+    meses.push(new Date(cursor))
+    cursor.setMonth(cursor.getMonth() + 1)
+  }
+
   return meses
 }
 
-function nombreMes(fecha) {
+function formatearMes(fecha, conAnio) {
   const nombre = fecha.toLocaleDateString('es-AR', { month: 'short' }).replace('.', '')
-  return nombre.charAt(0).toUpperCase() + nombre.slice(1)
+  const capitalizado = nombre.charAt(0).toUpperCase() + nombre.slice(1)
+  return conAnio ? `${capitalizado} '${String(fecha.getFullYear()).slice(-2)}` : capitalizado
 }
 
-function downloadCSV(filename, rows) {
-  const header = 'Mes,Valor\n'
-  const body = rows.map((row) => `${row.mes},${row.valor}`).join('\n')
+function downloadCSV(filename, rows, columnaEtiqueta) {
+  const encabezado = columnaEtiqueta === 'dia' ? 'Día' : 'Mes'
+  const header = `${encabezado},Valor\n`
+  const body = rows.map((row) => `${row[columnaEtiqueta]},${row.valor}`).join('\n')
   const blob = new Blob([header + body], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
 
@@ -55,14 +89,16 @@ function KpiCard({ label, value, icon: Icon }) {
   )
 }
 
-function ChartCard({ title, data, exportFilename }) {
+function ChartCard({ title, data, exportFilename, tipo = 'line', dataKeyX = 'mes' }) {
   const [exporting, setExporting] = useState(false)
 
   const handleExport = () => {
     setExporting(true)
-    downloadCSV(exportFilename, data)
+    downloadCSV(exportFilename, data, dataKeyX)
     setTimeout(() => setExporting(false), 1200)
   }
+
+  const intervaloEjeX = data.length > 24 ? Math.ceil(data.length / 12) : 0
 
   return (
     <div className="rounded-xl bg-greenfit-card p-5">
@@ -80,28 +116,56 @@ function ChartCard({ title, data, exportFilename }) {
       </div>
 
       <ResponsiveContainer width="100%" height={260}>
-        <LineChart data={data} margin={{ top: 5, right: 12, left: -12, bottom: 0 }}>
-          <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
-          <XAxis dataKey="mes" stroke="rgba(255,255,255,0.4)" tick={{ fill: '#9CA3AF', fontSize: 12 }} />
-          <YAxis stroke="rgba(255,255,255,0.4)" tick={{ fill: '#9CA3AF', fontSize: 12 }} />
-          <Tooltip
-            contentStyle={{
-              backgroundColor: '#1E1E1E',
-              border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: '8px',
-              color: '#ffffff',
-            }}
-            labelStyle={{ color: '#9CA3AF' }}
-          />
-          <Line
-            type="monotone"
-            dataKey="valor"
-            stroke="#80C026"
-            strokeWidth={2}
-            dot={{ r: 3, fill: '#80C026' }}
-            activeDot={{ r: 5 }}
-          />
-        </LineChart>
+        {tipo === 'bar' ? (
+          <BarChart data={data} margin={{ top: 5, right: 12, left: -12, bottom: 0 }}>
+            <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
+            <XAxis dataKey={dataKeyX} stroke="rgba(255,255,255,0.4)" tick={{ fill: '#9CA3AF', fontSize: 12 }} />
+            <YAxis
+              stroke="rgba(255,255,255,0.4)"
+              tick={{ fill: '#9CA3AF', fontSize: 12 }}
+              allowDecimals={false}
+            />
+            <Tooltip
+              contentStyle={{
+                backgroundColor: '#1E1E1E',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: '8px',
+                color: '#ffffff',
+              }}
+              labelStyle={{ color: '#9CA3AF' }}
+              cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+            />
+            <Bar dataKey="valor" fill="#80C026" radius={[6, 6, 0, 0]} />
+          </BarChart>
+        ) : (
+          <LineChart data={data} margin={{ top: 5, right: 12, left: -12, bottom: 0 }}>
+            <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
+            <XAxis
+              dataKey={dataKeyX}
+              stroke="rgba(255,255,255,0.4)"
+              tick={{ fill: '#9CA3AF', fontSize: 12 }}
+              interval={intervaloEjeX}
+            />
+            <YAxis stroke="rgba(255,255,255,0.4)" tick={{ fill: '#9CA3AF', fontSize: 12 }} allowDecimals={false} />
+            <Tooltip
+              contentStyle={{
+                backgroundColor: '#1E1E1E',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: '8px',
+                color: '#ffffff',
+              }}
+              labelStyle={{ color: '#9CA3AF' }}
+            />
+            <Line
+              type="monotone"
+              dataKey="valor"
+              stroke="#80C026"
+              strokeWidth={2}
+              dot={data.length <= 24}
+              activeDot={{ r: 5 }}
+            />
+          </LineChart>
+        )}
       </ResponsiveContainer>
     </div>
   )
@@ -113,6 +177,7 @@ function Reportes() {
   const [socios, setSocios] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [rango, setRango] = useState('6m')
 
   const fetchSocios = async () => {
     setLoading(true)
@@ -166,30 +231,84 @@ function Reportes() {
     [socios, diasTolerancia],
   )
 
+  // Fecha de alta del socio más antiguo (para "Desde el origen").
+  const fechaOrigen = useMemo(() => {
+    const fechas = socios
+      .map((s) => s.created_at)
+      .filter(Boolean)
+      .map((valor) => new Date(valor))
+      .filter((f) => !Number.isNaN(f.getTime()))
+
+    if (fechas.length === 0) return null
+
+    const minTime = Math.min(...fechas.map((f) => f.getTime()))
+    const min = new Date(minTime)
+    return new Date(min.getFullYear(), min.getMonth(), 1)
+  }, [socios])
+
+  const meses = useMemo(
+    () => generarMeses(calcularInicioRango(rango, fechaOrigen)),
+    [rango, fechaOrigen],
+  )
+  const conAnio = meses.length > 12
+
+  // "Activos por mes": no guardamos un historial de vencimientos pasados, solo
+  // el ciclo vigente de cada socio. Como mejor aproximación, para cada mes
+  // evaluamos si SU fecha_vencimiento actual ya estaba vencida a esa altura
+  // (respetando la tolerancia configurada) en vez de comparar siempre contra
+  // hoy — así un socio que dejó de pagar en 2024 deja de contar como activo
+  // a partir de ese mes, en lugar de sumarse para siempre al total acumulado.
   const sociosActivosData = useMemo(
     () =>
-      ultimosNMeses(6).map((fecha) => {
+      meses.map((fecha) => {
         const finDeMes = new Date(fecha.getFullYear(), fecha.getMonth() + 1, 0, 23, 59, 59)
-        const valor = socios.filter(
-          (s) => s.created_at && new Date(s.created_at) <= finDeMes,
-        ).length
-        return { mes: nombreMes(fecha), valor }
+
+        const valor = socios.filter((s) => {
+          if (!s.created_at) return false
+          const alta = new Date(s.created_at)
+          if (alta > finDeMes) return false
+
+          const estadoEnEsePeriodo = calcularEstadoCuota(s.fecha_vencimiento, diasTolerancia, finDeMes)
+          if (estadoEnEsePeriodo) return estadoEnEsePeriodo === 'activo'
+          return (s.estado ?? '').toLowerCase() === 'activo'
+        }).length
+
+        return { mes: formatearMes(fecha, conAnio), valor }
       }),
-    [socios],
+    [socios, meses, conAnio, diasTolerancia],
   )
 
   const sociosNuevosData = useMemo(
     () =>
-      ultimosNMeses(6).map((fecha) => {
+      meses.map((fecha) => {
         const valor = socios.filter((s) => {
           if (!s.created_at) return false
           const inicio = new Date(s.created_at)
           return inicio.getFullYear() === fecha.getFullYear() && inicio.getMonth() === fecha.getMonth()
         }).length
-        return { mes: nombreMes(fecha), valor }
+        return { mes: formatearMes(fecha, conAnio), valor }
       }),
-    [socios],
+    [socios, meses, conAnio],
   )
+
+  // Altas agrupadas por día de la semana, dentro del rango seleccionado.
+  const altasPorDiaSemana = useMemo(() => {
+    const inicioRango = meses[0]
+    const conteos = new Array(7).fill(0)
+
+    socios.forEach((s) => {
+      if (!s.created_at) return
+      const fecha = new Date(s.created_at)
+      if (Number.isNaN(fecha.getTime())) return
+      if (inicioRango && fecha < inicioRango) return
+
+      const diaJs = fecha.getDay() // 0 = domingo ... 6 = sábado
+      const indice = diaJs === 0 ? 6 : diaJs - 1 // remapeado: 0 = lunes ... 6 = domingo
+      conteos[indice] += 1
+    })
+
+    return DIAS_SEMANA_LABELS.map((dia, i) => ({ dia, valor: conteos[i] }))
+  }, [socios, meses])
 
   if (loading) {
     return (
@@ -223,6 +342,21 @@ function Reportes() {
         ))}
       </div>
 
+      <div className="flex items-center justify-between">
+        <h2 className="text-base font-semibold text-white">Evolución histórica</h2>
+        <select
+          value={rango}
+          onChange={(event) => setRango(event.target.value)}
+          className="rounded-lg border border-white/10 bg-greenfit-card px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
+        >
+          {RANGOS.map((r) => (
+            <option key={r.value} value={r.value}>
+              {r.value === 'origen' && fechaOrigen ? `Desde el origen (${fechaOrigen.getFullYear()})` : r.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <ChartCard
           title="Socios Activos (mensual)"
@@ -235,6 +369,14 @@ function Reportes() {
           exportFilename="socios-nuevos.csv"
         />
       </div>
+
+      <ChartCard
+        title="Altas de Socios por Día de la Semana"
+        data={altasPorDiaSemana}
+        exportFilename="altas-por-dia-semana.csv"
+        tipo="bar"
+        dataKeyX="dia"
+      />
     </div>
   )
 }

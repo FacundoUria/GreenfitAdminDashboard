@@ -46,18 +46,21 @@ export function proximoVencimiento(fechaBase, diaCorte) {
 
 // Estado visual de la cuota según la fecha de vencimiento fija. `diasTolerancia`
 // viene de la Configuración del gimnasio (por defecto 5, igual que en la base).
-export function calcularEstadoCuota(fechaVencimiento, diasTolerancia = 5) {
+// `fechaReferencia` permite evaluar "¿cómo estaba esta cuota en tal fecha?" en vez
+// de siempre comparar contra hoy — lo usan los reportes históricos, ya que no
+// guardamos un historial de vencimientos pasados, solo el ciclo vigente.
+export function calcularEstadoCuota(fechaVencimiento, diasTolerancia = 5, fechaReferencia = new Date()) {
   if (!fechaVencimiento) return null
 
   const vencimiento = fechaVencimiento instanceof Date ? fechaVencimiento : new Date(`${fechaVencimiento}T00:00:00`)
   if (Number.isNaN(vencimiento.getTime())) return null
 
-  const hoy = new Date()
-  hoy.setHours(0, 0, 0, 0)
+  const referencia = new Date(fechaReferencia)
+  referencia.setHours(0, 0, 0, 0)
   vencimiento.setHours(0, 0, 0, 0)
 
   const msPorDia = 1000 * 60 * 60 * 24
-  const diasVencido = Math.round((hoy.getTime() - vencimiento.getTime()) / msPorDia)
+  const diasVencido = Math.round((referencia.getTime() - vencimiento.getTime()) / msPorDia)
 
   if (diasVencido <= 0) return 'activo'
   if (diasVencido <= diasTolerancia) return 'tolerancia'
