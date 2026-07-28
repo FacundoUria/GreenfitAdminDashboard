@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   CartesianGrid,
   Line,
@@ -8,32 +8,24 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { Users, AlertCircle, Clock, UserPlus, Download } from 'lucide-react'
+import { AlertCircle, Clock, Download, Loader2, UserPlus, Users } from 'lucide-react'
+import { supabase } from '../lib/supabaseClient'
+import { calcularEstadoCuota, esDelMesActual } from '../utils/fecha'
+import { useConfiguracion } from '../context/useConfiguracion'
 
-const kpis = [
-  { label: 'Socios Activos', value: '482', icon: Users },
-  { label: 'Cuota Vencida', value: '37', icon: AlertCircle },
-  { label: 'Socios Pendientes', value: '12', icon: Clock },
-  { label: 'Nuevos del mes', value: '28', icon: UserPlus },
-]
+function ultimosNMeses(n) {
+  const meses = []
+  const ahora = new Date()
+  for (let i = n - 1; i >= 0; i--) {
+    meses.push(new Date(ahora.getFullYear(), ahora.getMonth() - i, 1))
+  }
+  return meses
+}
 
-const sociosActivosData = [
-  { mes: 'Feb', valor: 398 },
-  { mes: 'Mar', valor: 412 },
-  { mes: 'Abr', valor: 405 },
-  { mes: 'May', valor: 430 },
-  { mes: 'Jun', valor: 461 },
-  { mes: 'Jul', valor: 482 },
-]
-
-const sociosNuevosData = [
-  { mes: 'Feb', valor: 14 },
-  { mes: 'Mar', valor: 19 },
-  { mes: 'Abr', valor: 11 },
-  { mes: 'May', valor: 22 },
-  { mes: 'Jun', valor: 17 },
-  { mes: 'Jul', valor: 28 },
-]
+function nombreMes(fecha) {
+  const nombre = fecha.toLocaleDateString('es-AR', { month: 'short' }).replace('.', '')
+  return nombre.charAt(0).toUpperCase() + nombre.slice(1)
+}
 
 function downloadCSV(filename, rows) {
   const header = 'Mes,Valor\n'
@@ -116,6 +108,113 @@ function ChartCard({ title, data, exportFilename }) {
 }
 
 function Reportes() {
+  const { configuracion } = useConfiguracion()
+  const diasTolerancia = configuracion?.dias_tolerancia ?? 5
+  const [socios, setSocios] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  const fetchSocios = async () => {
+    setLoading(true)
+    setError(null)
+
+    const { data, error: fetchError } = await supabase.from('socios').select('*')
+
+    if (fetchError) {
+      console.error('Error al cargar socios para Reportes:', fetchError.message)
+      setError('No se pudieron cargar los datos. Verificá la conexión con Supabase.')
+      setSocios([])
+    } else {
+      setSocios(data ?? [])
+    }
+
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchSocios()
+  }, [])
+
+  const kpis = useMemo(
+    () => [
+      {
+        label: 'Socios Activos',
+        value: socios.filter((s) => calcularEstadoCuota(s.fecha_vencimiento, diasTolerancia) === 'activo')
+          .length,
+        icon: Users,
+      },
+      {
+        label: 'Cuota Vencida',
+        value: socios.filter((s) => calcularEstadoCuota(s.fecha_vencimiento, diasTolerancia) === 'vencido')
+          .length,
+        icon: AlertCircle,
+      },
+      {
+        label: 'En Tolerancia',
+        value: socios.filter(
+          (s) => calcularEstadoCuota(s.fecha_vencimiento, diasTolerancia) === 'tolerancia',
+        ).length,
+        icon: Clock,
+      },
+      {
+        label: 'Nuevos del mes',
+        value: socios.filter((s) => esDelMesActual(s.created_at)).length,
+        icon: UserPlus,
+      },
+    ],
+    [socios, diasTolerancia],
+  )
+
+  const sociosActivosData = useMemo(
+    () =>
+      ultimosNMeses(6).map((fecha) => {
+        const finDeMes = new Date(fecha.getFullYear(), fecha.getMonth() + 1, 0, 23, 59, 59)
+        const valor = socios.filter(
+          (s) => s.created_at && new Date(s.created_at) <= finDeMes,
+        ).length
+        return { mes: nombreMes(fecha), valor }
+      }),
+    [socios],
+  )
+
+  const sociosNuevosData = useMemo(
+    () =>
+      ultimosNMeses(6).map((fecha) => {
+        const valor = socios.filter((s) => {
+          if (!s.created_at) return false
+          const inicio = new Date(s.created_at)
+          return inicio.getFullYear() === fecha.getFullYear() && inicio.getMonth() === fecha.getMonth()
+        }).length
+        return { mes: nombreMes(fecha), valor }
+      }),
+    [socios],
+  )
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center gap-2 rounded-xl bg-greenfit-card p-10 text-sm text-gray-400">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Cargando reportes...
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center gap-3 rounded-xl border border-red-500/20 bg-red-500/5 p-10 text-center text-sm text-red-400">
+        <p>{error}</p>
+        <button
+          type="button"
+          onClick={fetchSocios}
+          className="rounded-lg border border-red-400/40 px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-red-500/10"
+        >
+          Reintentar
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">

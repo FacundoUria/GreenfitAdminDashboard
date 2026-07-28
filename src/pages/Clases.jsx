@@ -1,179 +1,52 @@
-import { useMemo, useState } from 'react'
-import { CalendarDays, Percent, Plus, Users } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { CalendarDays, Loader2, Percent, Plus, Users } from 'lucide-react'
+import { supabase } from '../lib/supabaseClient'
+import { DIAS_SEMANA, diaActualPorDefecto, mapearClases } from '../utils/clases'
 import ClasesGrid from '../components/ClasesGrid'
 import InscriptosModal from '../components/InscriptosModal'
 import NuevaClaseModal from '../components/NuevaClaseModal'
 
-const dias = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
-
-const sociosPool = [
-  ['Lucía', 'Gómez'],
-  ['Martín', 'Fernández'],
-  ['Sofía', 'Ramírez'],
-  ['Nicolás', 'Torres'],
-  ['Valentina', 'Suárez'],
-  ['Diego', 'Molina'],
-  ['Camila', 'Ibáñez'],
-  ['Federico', 'Álvarez'],
-  ['Agustina', 'Paz'],
-  ['Tomás', 'Herrera'],
-  ['Milagros', 'Ríos'],
-  ['Bruno', 'Acosta'],
-]
-
-function generarInscriptos(cantidad, semilla) {
-  return Array.from({ length: cantidad }, (_, index) => {
-    const [nombre, apellido] = sociosPool[(semilla + index) % sociosPool.length]
-    return {
-      id: `${semilla}-${index}`,
-      nombre,
-      apellido,
-      asistio: null,
-    }
-  })
-}
-
-let siguienteId = 1000
-
-function crearClase({ disciplina, profesor, dia, horaInicio, horaFin, cupoMaximo, inscriptos }) {
-  return {
-    id: siguienteId++,
-    disciplina,
-    profesor,
-    dia,
-    horaInicio,
-    horaFin,
-    cupoMaximo,
-    inscriptos,
-  }
-}
-
-const clasesIniciales = [
-  crearClase({
-    disciplina: 'Crossfit',
-    profesor: 'Franco Díaz',
-    dia: 'Lunes',
-    horaInicio: '08:00',
-    horaFin: '09:00',
-    cupoMaximo: 20,
-    inscriptos: generarInscriptos(18, 0),
-  }),
-  crearClase({
-    disciplina: 'Musculación',
-    profesor: 'Ana Belén Castro',
-    dia: 'Lunes',
-    horaInicio: '10:00',
-    horaFin: '11:00',
-    cupoMaximo: 15,
-    inscriptos: generarInscriptos(8, 2),
-  }),
-  crearClase({
-    disciplina: 'Yoga',
-    profesor: 'Martina Ruiz',
-    dia: 'Lunes',
-    horaInicio: '18:00',
-    horaFin: '19:00',
-    cupoMaximo: 20,
-    inscriptos: generarInscriptos(14, 4),
-  }),
-  crearClase({
-    disciplina: 'Funcional',
-    profesor: 'Rodrigo Pereyra',
-    dia: 'Martes',
-    horaInicio: '07:30',
-    horaFin: '08:30',
-    cupoMaximo: 18,
-    inscriptos: generarInscriptos(17, 1),
-  }),
-  crearClase({
-    disciplina: 'Crossfit',
-    profesor: 'Franco Díaz',
-    dia: 'Martes',
-    horaInicio: '19:00',
-    horaFin: '20:00',
-    cupoMaximo: 20,
-    inscriptos: generarInscriptos(12, 3),
-  }),
-  crearClase({
-    disciplina: 'Yoga',
-    profesor: 'Martina Ruiz',
-    dia: 'Miércoles',
-    horaInicio: '09:00',
-    horaFin: '10:00',
-    cupoMaximo: 20,
-    inscriptos: generarInscriptos(9, 5),
-  }),
-  crearClase({
-    disciplina: 'Musculación',
-    profesor: 'Ana Belén Castro',
-    dia: 'Miércoles',
-    horaInicio: '17:00',
-    horaFin: '18:00',
-    cupoMaximo: 15,
-    inscriptos: generarInscriptos(14, 6),
-  }),
-  crearClase({
-    disciplina: 'Funcional',
-    profesor: 'Rodrigo Pereyra',
-    dia: 'Jueves',
-    horaInicio: '08:00',
-    horaFin: '09:00',
-    cupoMaximo: 18,
-    inscriptos: generarInscriptos(10, 7),
-  }),
-  crearClase({
-    disciplina: 'Crossfit',
-    profesor: 'Franco Díaz',
-    dia: 'Jueves',
-    horaInicio: '19:00',
-    horaFin: '20:00',
-    cupoMaximo: 20,
-    inscriptos: generarInscriptos(20, 8),
-  }),
-  crearClase({
-    disciplina: 'Yoga',
-    profesor: 'Martina Ruiz',
-    dia: 'Viernes',
-    horaInicio: '18:30',
-    horaFin: '19:30',
-    cupoMaximo: 20,
-    inscriptos: generarInscriptos(11, 9),
-  }),
-  crearClase({
-    disciplina: 'Musculación',
-    profesor: 'Ana Belén Castro',
-    dia: 'Viernes',
-    horaInicio: '10:00',
-    horaFin: '11:00',
-    cupoMaximo: 15,
-    inscriptos: generarInscriptos(6, 10),
-  }),
-  crearClase({
-    disciplina: 'Funcional',
-    profesor: 'Rodrigo Pereyra',
-    dia: 'Sábado',
-    horaInicio: '10:00',
-    horaFin: '11:00',
-    cupoMaximo: 18,
-    inscriptos: generarInscriptos(15, 11),
-  }),
-]
-
-function diaActualPorDefecto() {
-  const indiceHoy = new Date().getDay()
-  const mapa = { 1: 'Lunes', 2: 'Martes', 3: 'Miércoles', 4: 'Jueves', 5: 'Viernes', 6: 'Sábado' }
-  return mapa[indiceHoy] ?? 'Lunes'
-}
-
 function Clases() {
-  const [clases, setClases] = useState(clasesIniciales)
+  const [clases, setClases] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [diaSeleccionado, setDiaSeleccionado] = useState(diaActualPorDefecto)
   const [claseInscriptos, setClaseInscriptos] = useState(null)
   const [modalNuevaClaseAbierto, setModalNuevaClaseAbierto] = useState(false)
   const [claseEnEdicion, setClaseEnEdicion] = useState(null)
 
+  const fetchClases = async () => {
+    setLoading(true)
+    setError(null)
+
+    const [clasesResult, asistenciasResult] = await Promise.all([
+      supabase.from('classes').select('*').order('start_time', { ascending: true }),
+      supabase.from('asistencias').select('id, clase_id, asistio, socios(nombre, apellido)'),
+    ])
+
+    if (clasesResult.error) {
+      console.error('Error al cargar clases desde Supabase:', clasesResult.error.message)
+      setError('No se pudieron cargar las clases. Verificá la conexión con Supabase.')
+      setClases([])
+      setLoading(false)
+      return
+    }
+
+    if (asistenciasResult.error) {
+      console.error('Error al cargar asistencias desde Supabase:', asistenciasResult.error.message)
+    }
+
+    setClases(mapearClases(clasesResult.data ?? [], asistenciasResult.data ?? []))
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchClases()
+  }, [])
+
   const clasesDelDia = useMemo(
-    () => clases.filter((clase) => clase.dia === diaSeleccionado),
+    () => clases.filter((clase) => clase.diasSemana.includes(diaSeleccionado)),
     [clases, diaSeleccionado],
   )
 
@@ -192,7 +65,22 @@ function Clases() {
 
   const handleVerInscriptos = (clase) => setClaseInscriptos(clase)
 
-  const handleMarcarAsistencia = (claseId, inscriptoId, asistio) => {
+  const handleMarcarAsistencia = async (claseId, inscriptoId, asistio) => {
+    const { data, error: updateError } = await supabase
+      .from('asistencias')
+      .update({ asistio })
+      .eq('id', inscriptoId)
+      .select()
+
+    if (updateError || !data || data.length === 0) {
+      console.error(
+        'Error al marcar asistencia en Supabase:',
+        updateError?.message ?? 'no se actualizó ninguna fila (revisá las políticas RLS)',
+      )
+      window.alert('No se pudo actualizar la asistencia. Intentá nuevamente.')
+      return
+    }
+
     setClases((prev) =>
       prev.map((clase) =>
         clase.id !== claseId
@@ -227,31 +115,34 @@ function Clases() {
     setModalNuevaClaseAbierto(true)
   }
 
-  const handleCancelarClase = (clase) => {
+  const handleCancelarClase = async (clase) => {
     const confirmado = window.confirm(
       `¿Seguro que querés cancelar la clase de ${clase.disciplina} de las ${clase.horaInicio}?`,
     )
-    if (confirmado) {
-      setClases((prev) => prev.filter((c) => c.id !== clase.id))
+    if (!confirmado) return
+
+    const { data, error: deleteError } = await supabase
+      .from('classes')
+      .delete()
+      .eq('id', clase.id)
+      .select()
+
+    if (deleteError || !data || data.length === 0) {
+      console.error(
+        'Error al cancelar la clase en Supabase:',
+        deleteError?.message ?? 'no se eliminó ninguna fila (revisá las políticas RLS)',
+      )
+      window.alert('No se pudo cancelar la clase. Intentá nuevamente.')
+      return
     }
+
+    setClases((prev) => prev.filter((c) => c.id !== clase.id))
   }
 
-  const handleGuardarClase = (form) => {
-    if (claseEnEdicion) {
-      setClases((prev) =>
-        prev.map((clase) =>
-          clase.id === claseEnEdicion.id ? { ...clase, ...form } : clase,
-        ),
-      )
-    } else {
-      setClases((prev) => [
-        ...prev,
-        crearClase({ ...form, inscriptos: [] }),
-      ])
-      setDiaSeleccionado(form.dia)
-    }
+  const handleClaseGuardada = () => {
     setModalNuevaClaseAbierto(false)
     setClaseEnEdicion(null)
+    fetchClases()
   }
 
   return (
@@ -272,18 +163,18 @@ function Clases() {
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap gap-2">
-          {dias.map((dia) => (
+          {DIAS_SEMANA.map(({ numero, nombre }) => (
             <button
-              key={dia}
+              key={numero}
               type="button"
-              onClick={() => setDiaSeleccionado(dia)}
+              onClick={() => setDiaSeleccionado(numero)}
               className={`rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
-                diaSeleccionado === dia
+                diaSeleccionado === numero
                   ? 'bg-greenfit-primary text-greenfit-dark'
                   : 'bg-greenfit-card text-gray-300 hover:text-white'
               }`}
             >
-              {dia}
+              {nombre}
             </button>
           ))}
         </div>
@@ -298,12 +189,30 @@ function Clases() {
         </button>
       </div>
 
-      <ClasesGrid
-        clases={clasesDelDia}
-        onVerInscriptos={handleVerInscriptos}
-        onEditar={handleEditar}
-        onCancelar={handleCancelarClase}
-      />
+      {loading ? (
+        <div className="flex items-center justify-center gap-2 rounded-xl bg-greenfit-card p-10 text-sm text-gray-400">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Cargando clases...
+        </div>
+      ) : error ? (
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-red-500/20 bg-red-500/5 p-10 text-center text-sm text-red-400">
+          <p>{error}</p>
+          <button
+            type="button"
+            onClick={fetchClases}
+            className="rounded-lg border border-red-400/40 px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-red-500/10"
+          >
+            Reintentar
+          </button>
+        </div>
+      ) : (
+        <ClasesGrid
+          clases={clasesDelDia}
+          onVerInscriptos={handleVerInscriptos}
+          onEditar={handleEditar}
+          onCancelar={handleCancelarClase}
+        />
+      )}
 
       <InscriptosModal
         open={Boolean(claseInscriptos)}
@@ -321,7 +230,7 @@ function Clases() {
             setModalNuevaClaseAbierto(false)
             setClaseEnEdicion(null)
           }}
-          onSave={handleGuardarClase}
+          onSaved={handleClaseGuardada}
         />
       )}
     </div>

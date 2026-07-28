@@ -1,20 +1,10 @@
 import { NavLink } from 'react-router-dom'
-import {
-  Home,
-  Users,
-  Dumbbell,
-  Wallet,
-  BarChart3,
-  Settings,
-  ExternalLink,
-  Leaf,
-} from 'lucide-react'
+import { Home, Users, Dumbbell, BarChart3, Settings, ExternalLink, Leaf } from 'lucide-react'
 
 const navItems = [
   { to: '/', label: 'Home', icon: Home, end: true },
   { to: '/socios', label: 'Socios', icon: Users },
   { to: '/clases', label: 'Clases', icon: Dumbbell },
-  { to: '/cajas', label: 'Cajas / Pagos', icon: Wallet },
   { to: '/reportes', label: 'Reportes', icon: BarChart3 },
   { to: '/configuracion', label: 'Configuración', icon: Settings },
 ]

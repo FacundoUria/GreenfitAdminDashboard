@@ -1,35 +1,43 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import Layout from './components/Layout'
 import Reportes from './pages/Reportes'
 import Socios from './pages/Socios'
 import Configuracion from './pages/Configuracion'
 import Clases from './pages/Clases'
 import Home from './pages/Home'
+import Login from './pages/Login'
+import { AuthProvider } from './context/AuthContext'
+import { useAuth } from './context/useAuth'
 
-function Placeholder({ title }) {
-  return (
-    <div className="flex h-full min-h-[60vh] flex-col items-center justify-center gap-2 text-center">
-      <h2 className="text-xl font-semibold text-white">{title}</h2>
-      <p className="text-sm text-gray-400">Esta sección está en construcción.</p>
-    </div>
-  )
+function RutaProtegida() {
+  const { usuario } = useAuth()
+
+  if (!usuario) {
+    return <Navigate to="/login" replace />
+  }
+
+  return <Outlet />
 }
 
 function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route element={<Layout />}>
-          <Route index element={<Home />} />
-          <Route path="socios" element={<Socios />} />
-          <Route path="clases" element={<Clases />} />
-          <Route path="cajas" element={<Placeholder title="Cajas / Pagos" />} />
-          <Route path="reportes" element={<Reportes />} />
-          <Route path="configuracion" element={<Configuracion />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route element={<RutaProtegida />}>
+            <Route element={<Layout />}>
+              <Route index element={<Home />} />
+              <Route path="socios" element={<Socios />} />
+              <Route path="clases" element={<Clases />} />
+              <Route path="reportes" element={<Reportes />} />
+              <Route path="configuracion" element={<Configuracion />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Route>
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   )
 }
 

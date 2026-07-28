@@ -1,7 +1,14 @@
 import { UserCheck, UserX, X } from 'lucide-react'
+import { DIAS_SEMANA } from '../utils/clases'
 
 function iniciales(nombre, apellido) {
   return `${nombre.charAt(0)}${apellido.charAt(0)}`.toUpperCase()
+}
+
+function nombresDias(diasSemana) {
+  return DIAS_SEMANA.filter((d) => diasSemana.includes(d.numero))
+    .map((d) => d.nombre)
+    .join(', ')
 }
 
 function InscriptosModal({ open, clase, onClose, onMarcarAsistencia }) {
@@ -14,7 +21,7 @@ function InscriptosModal({ open, clase, onClose, onMarcarAsistencia }) {
           <div>
             <h2 className="text-lg font-semibold text-white">{clase.disciplina}</h2>
             <p className="text-sm text-gray-400">
-              {clase.dia} · {clase.horaInicio} - {clase.horaFin} · Prof. {clase.profesor}
+              {nombresDias(clase.diasSemana)} · {clase.horaInicio} - {clase.horaFin} · Prof. {clase.profesor}
             </p>
           </div>
           <button

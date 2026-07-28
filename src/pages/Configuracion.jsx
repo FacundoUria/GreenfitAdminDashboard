@@ -1,78 +1,63 @@
 import { useState } from 'react'
-import { CheckCircle2, Pencil, Save } from 'lucide-react'
+import { CheckCircle2, Loader2, Save } from 'lucide-react'
+import { supabase } from '../lib/supabaseClient'
+import { useConfiguracion } from '../context/useConfiguracion'
 import Toggle from '../components/Toggle'
 
-const configInicial = {
-  reservas: {
-    reservaDesde: '9 hs antes',
-    cierreReserva: 'Sin límite',
-    cancelacion: 'Hasta 15 min antes',
-    agendaVisible: '2 días',
-    consentimientoLegal: true,
-    aptoFisico: true,
-  },
-  clases: {
-    cargaAutomatica: 'Activa (14 días)',
-    ausentesAutomaticos: true,
-    moduloProfesores: false,
-  },
-  pagos: {
-    altaDesdeApp: true,
-    mercadoPagoConectado: true,
-    emailComprobantes: 'facturacion@greenfit.fit',
-  },
-  vencimientos: {
-    autoRenovacion: false,
-    plazoPago: 'Activa (15 días de tolerancia)',
-  },
+function mapConfigToForm(config) {
+  return {
+    precioCrossfit: String(config.precio_crossfit ?? 0),
+    precioBoxeo: String(config.precio_boxeo ?? 0),
+    precioKickstrike: String(config.precio_kickstrike ?? 0),
+    precioAparatos: String(config.precio_aparatos ?? 0),
+    diasTolerancia: String(config.dias_tolerancia ?? 5),
+    limiteCancelacionHs: String(config.limite_cancelacion_hs ?? 2),
+    bannerActivo: Boolean(config.banner_activo),
+    bannerMensaje: config.banner_mensaje ?? '',
+    aliasCvu: config.alias_cvu ?? '',
+    titularCuenta: config.titular_cuenta ?? '',
+  }
 }
 
-function TextField({ label, value, editing, onChange }) {
-  return (
-    <div className="flex items-center justify-between gap-3 py-2">
-      <span className="text-sm text-gray-400">{label}</span>
-      {editing ? (
-        <input
-          type="text"
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          className="w-40 rounded-lg border border-white/10 bg-greenfit-dark px-2.5 py-1.5 text-right text-sm text-white outline-none focus:border-greenfit-primary"
-        />
-      ) : (
-        <span className="text-sm font-medium text-white">{value}</span>
-      )}
-    </div>
-  )
-}
-
-function ToggleField({ label, checked, onChange }) {
-  return (
-    <div className="flex items-center justify-between gap-3 py-2">
-      <span className="text-sm text-gray-400">{label}</span>
-      <Toggle checked={checked} onChange={onChange} />
-    </div>
-  )
-}
-
-function ConfigCard({ title, editing, onToggleEdit, children }) {
+function ConfigCard({ title, children }) {
   return (
     <div className="rounded-xl border border-white/5 bg-greenfit-card p-5">
-      <div className="mb-2 flex items-center justify-between border-b border-white/5 pb-3">
-        <h3 className="text-base font-semibold text-white">{title}</h3>
-        <button
-          type="button"
-          onClick={onToggleEdit}
-          className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-            editing
-              ? 'border-greenfit-primary text-greenfit-primary hover:bg-greenfit-primary/10'
-              : 'border-white/10 text-gray-300 hover:bg-white/5 hover:text-white'
-          }`}
-        >
-          <Pencil className="h-3.5 w-3.5" />
-          {editing ? 'Listo' : 'Editar'}
-        </button>
+      <h3 className="mb-4 border-b border-white/5 pb-3 text-base font-semibold text-white">{title}</h3>
+      <div className="flex flex-col gap-4">{children}</div>
+    </div>
+  )
+}
+
+function NumberField({ label, value, onChange, prefix, suffix }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className="text-xs font-medium text-gray-400">{label}</label>
+      <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 focus-within:border-greenfit-primary">
+        {prefix && <span className="text-sm text-gray-500">{prefix}</span>}
+        <input
+          type="number"
+          min="0"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className="w-full bg-transparent text-sm text-white outline-none"
+        />
+        {suffix && <span className="text-sm text-gray-500">{suffix}</span>}
       </div>
-      <div className="divide-y divide-white/5">{children}</div>
+    </div>
+  )
+}
+
+function TextField({ label, value, onChange, placeholder }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className="text-xs font-medium text-gray-400">{label}</label>
+      <input
+        type="text"
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none placeholder:text-gray-600 focus:border-greenfit-primary"
+      />
     </div>
   )
 }
@@ -86,24 +71,50 @@ function Toast({ message }) {
   )
 }
 
-function Configuracion() {
-  const [config, setConfig] = useState(configInicial)
-  const [editingCard, setEditingCard] = useState(null)
+function ConfiguracionForm({ configuracionInicial, onGuardado }) {
+  const [form, setForm] = useState(() => mapConfigToForm(configuracionInicial))
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState(null)
   const [toastVisible, setToastVisible] = useState(false)
 
-  const updateField = (card, field, value) => {
-    setConfig((prev) => ({
-      ...prev,
-      [card]: { ...prev[card], [field]: value },
-    }))
+  const updateField = (field, value) => {
+    setForm((prev) => ({ ...prev, [field]: value }))
   }
 
-  const toggleEdit = (card) => {
-    setEditingCard((prev) => (prev === card ? null : card))
-  }
+  const handleGuardar = async () => {
+    setGuardando(true)
+    setError(null)
 
-  const handleGuardarCambios = () => {
-    setEditingCard(null)
+    const { data, error: updateError } = await supabase
+      .from('configuracion')
+      .update({
+        precio_crossfit: Number(form.precioCrossfit) || 0,
+        precio_boxeo: Number(form.precioBoxeo) || 0,
+        precio_kickstrike: Number(form.precioKickstrike) || 0,
+        precio_aparatos: Number(form.precioAparatos) || 0,
+        dias_tolerancia: Number(form.diasTolerancia) || 0,
+        limite_cancelacion_hs: Number(form.limiteCancelacionHs) || 0,
+        banner_activo: form.bannerActivo,
+        banner_mensaje: form.bannerMensaje,
+        alias_cvu: form.aliasCvu,
+        titular_cuenta: form.titularCuenta,
+      })
+      .eq('id', 1)
+      .select()
+
+    setGuardando(false)
+
+    // Un UPDATE bloqueado por RLS puede volver sin `error` pero sin filas afectadas.
+    if (updateError || !data || data.length === 0) {
+      console.error(
+        'Error al guardar la configuración en Supabase:',
+        updateError?.message ?? 'no se guardó ninguna fila (revisá las políticas RLS)',
+      )
+      setError('No se pudo guardar la configuración. Intentá nuevamente.')
+      return
+    }
+
+    await onGuardado()
     setToastVisible(true)
     setTimeout(() => setToastVisible(false), 2500)
   }
@@ -113,128 +124,100 @@ function Configuracion() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold text-white">Configuración del Gimnasio</h2>
-          <p className="text-sm text-gray-400">Administrá las reglas de reservas, clases, pagos y vencimientos.</p>
+          <p className="text-sm text-gray-400">Precios, reglas de negocio y datos para cobros.</p>
         </div>
         <button
           type="button"
-          onClick={handleGuardarCambios}
-          className="flex items-center gap-2 rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90"
+          onClick={handleGuardar}
+          disabled={guardando}
+          className="flex items-center gap-2 rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90 disabled:opacity-60"
         >
           <Save className="h-4 w-4" />
-          Guardar Cambios
+          {guardando ? 'Guardando...' : 'Guardar Cambios'}
         </button>
       </div>
 
+      {error && (
+        <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-4 py-3 text-sm text-red-400">
+          {error}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <ConfigCard
-          title="Reservas"
-          editing={editingCard === 'reservas'}
-          onToggleEdit={() => toggleEdit('reservas')}
-        >
-          <TextField
-            label="Reserva desde"
-            value={config.reservas.reservaDesde}
-            editing={editingCard === 'reservas'}
-            onChange={(value) => updateField('reservas', 'reservaDesde', value)}
+        <ConfigCard title="💰 Planes y Precios">
+          <NumberField
+            label="CrossFit"
+            value={form.precioCrossfit}
+            onChange={(value) => updateField('precioCrossfit', value)}
+            prefix="$"
           />
-          <TextField
-            label="Cierre de reserva"
-            value={config.reservas.cierreReserva}
-            editing={editingCard === 'reservas'}
-            onChange={(value) => updateField('reservas', 'cierreReserva', value)}
+          <NumberField
+            label="Boxeo"
+            value={form.precioBoxeo}
+            onChange={(value) => updateField('precioBoxeo', value)}
+            prefix="$"
           />
-          <TextField
-            label="Cancelación"
-            value={config.reservas.cancelacion}
-            editing={editingCard === 'reservas'}
-            onChange={(value) => updateField('reservas', 'cancelacion', value)}
+          <NumberField
+            label="Kickstrike"
+            value={form.precioKickstrike}
+            onChange={(value) => updateField('precioKickstrike', value)}
+            prefix="$"
           />
-          <TextField
-            label="Agenda visible"
-            value={config.reservas.agendaVisible}
-            editing={editingCard === 'reservas'}
-            onChange={(value) => updateField('reservas', 'agendaVisible', value)}
-          />
-          <ToggleField
-            label="Consentimiento Legal"
-            checked={config.reservas.consentimientoLegal}
-            onChange={(value) => updateField('reservas', 'consentimientoLegal', value)}
-          />
-          <ToggleField
-            label="Apto Físico"
-            checked={config.reservas.aptoFisico}
-            onChange={(value) => updateField('reservas', 'aptoFisico', value)}
+          <NumberField
+            label="Aparatos / Musculación"
+            value={form.precioAparatos}
+            onChange={(value) => updateField('precioAparatos', value)}
+            prefix="$"
           />
         </ConfigCard>
 
-        <ConfigCard
-          title="Clases"
-          editing={editingCard === 'clases'}
-          onToggleEdit={() => toggleEdit('clases')}
-        >
-          <TextField
-            label="Carga automática de clases"
-            value={config.clases.cargaAutomatica}
-            editing={editingCard === 'clases'}
-            onChange={(value) => updateField('clases', 'cargaAutomatica', value)}
+        <ConfigCard title="⏳ Reglas de Negocio">
+          <NumberField
+            label="Días de tolerancia de pago"
+            value={form.diasTolerancia}
+            onChange={(value) => updateField('diasTolerancia', value)}
+            suffix="días"
           />
-          <ToggleField
-            label="Ausentes automáticos"
-            checked={config.clases.ausentesAutomaticos}
-            onChange={(value) => updateField('clases', 'ausentesAutomaticos', value)}
-          />
-          <ToggleField
-            label="Módulo de profesores"
-            checked={config.clases.moduloProfesores}
-            onChange={(value) => updateField('clases', 'moduloProfesores', value)}
+          <NumberField
+            label="Límite para cancelar una clase"
+            value={form.limiteCancelacionHs}
+            onChange={(value) => updateField('limiteCancelacionHs', value)}
+            suffix="hs antes"
           />
         </ConfigCard>
 
-        <ConfigCard
-          title="Pagos y Cobros"
-          editing={editingCard === 'pagos'}
-          onToggleEdit={() => toggleEdit('pagos')}
-        >
-          <ToggleField
-            label="Alta desde la app"
-            checked={config.pagos.altaDesdeApp}
-            onChange={(value) => updateField('pagos', 'altaDesdeApp', value)}
-          />
-          <div className="flex items-center justify-between gap-3 py-2">
-            <span className="text-sm text-gray-400">Mercado Pago</span>
-            <span
-              className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
-                config.pagos.mercadoPagoConectado
-                  ? 'bg-greenfit-primary/15 text-greenfit-primary'
-                  : 'bg-red-500/15 text-red-400'
-              }`}
-            >
-              {config.pagos.mercadoPagoConectado ? 'Credenciales conectadas' : 'Sin conectar'}
-            </span>
+        <ConfigCard title="📢 Banner / Anuncio para la App Mobile">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm text-gray-400">Mostrar banner en la app</span>
+            <Toggle
+              checked={form.bannerActivo}
+              onChange={(value) => updateField('bannerActivo', value)}
+            />
           </div>
-          <TextField
-            label="Email de comprobantes"
-            value={config.pagos.emailComprobantes}
-            editing={editingCard === 'pagos'}
-            onChange={(value) => updateField('pagos', 'emailComprobantes', value)}
-          />
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-gray-400">Mensaje del anuncio</label>
+            <textarea
+              rows={3}
+              value={form.bannerMensaje}
+              onChange={(event) => updateField('bannerMensaje', event.target.value)}
+              placeholder="Ej: Este viernes feriado abrimos de 9 a 13hs"
+              className="resize-none rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none placeholder:text-gray-600 focus:border-greenfit-primary"
+            />
+          </div>
         </ConfigCard>
 
-        <ConfigCard
-          title="Vencimientos y Deuda"
-          editing={editingCard === 'vencimientos'}
-          onToggleEdit={() => toggleEdit('vencimientos')}
-        >
-          <ToggleField
-            label="Auto-renovación"
-            checked={config.vencimientos.autoRenovacion}
-            onChange={(value) => updateField('vencimientos', 'autoRenovacion', value)}
+        <ConfigCard title="💳 Cuentas de Cobro (Mostrador)">
+          <TextField
+            label="Alias / CVU"
+            value={form.aliasCvu}
+            onChange={(value) => updateField('aliasCvu', value)}
+            placeholder="greenfit.gym"
           />
           <TextField
-            label="Plazo de pago / suspensión"
-            value={config.vencimientos.plazoPago}
-            editing={editingCard === 'vencimientos'}
-            onChange={(value) => updateField('vencimientos', 'plazoPago', value)}
+            label="Nombre del Titular"
+            value={form.titularCuenta}
+            onChange={(value) => updateField('titularCuenta', value)}
+            placeholder="Greenfit SRL"
           />
         </ConfigCard>
       </div>
@@ -242,6 +225,21 @@ function Configuracion() {
       {toastVisible && <Toast message="Cambios guardados correctamente" />}
     </div>
   )
+}
+
+function Configuracion() {
+  const { configuracion, loading, refetch } = useConfiguracion()
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center gap-2 rounded-xl bg-greenfit-card p-10 text-sm text-gray-400">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Cargando configuración...
+      </div>
+    )
+  }
+
+  return <ConfiguracionForm configuracionInicial={configuracion} onGuardado={refetch} />
 }
 
 export default Configuracion
