@@ -2,19 +2,19 @@ import { useState } from 'react'
 import { X } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { hoyISO, proximoVencimiento, toISODate } from '../utils/fecha'
-
-const planes = ['CrossFit', 'Boxeo', 'Kickstrike', 'Aparatos / Musculación']
+import { PLANES_DISPONIBLES, normalizarPlanes } from '../utils/planes'
 
 function formInicial(socio) {
   if (socio) {
+    const planesActuales = normalizarPlanes(socio.plan)
     return {
       nombre: socio.nombre ?? '',
       apellido: socio.apellido ?? '',
       dni: socio.dni ?? '',
       email: socio.email ?? '',
       telefono: socio.telefono ?? '',
-      plan: socio.plan ?? planes[0],
-      fechaInicio: '',
+      planes: planesActuales.length > 0 ? planesActuales : [PLANES_DISPONIBLES[0]],
+      fechaInicio: hoyISO(),
     }
   }
 
@@ -24,8 +24,8 @@ function formInicial(socio) {
     dni: '',
     email: '',
     telefono: '',
-    plan: planes[0],
-    fechaInicio: '',
+    planes: [PLANES_DISPONIBLES[0]],
+    fechaInicio: hoyISO(),
   }
 }
 
@@ -39,8 +39,23 @@ function NuevoSocioModal({ socio, onClose, onSaved }) {
     setForm((prev) => ({ ...prev, [field]: event.target.value }))
   }
 
+  const handleTogglePlan = (plan) => {
+    setForm((prev) => ({
+      ...prev,
+      planes: prev.planes.includes(plan)
+        ? prev.planes.filter((p) => p !== plan)
+        : [...prev.planes, plan],
+    }))
+  }
+
   const handleSubmit = async (event) => {
     event.preventDefault()
+
+    if (form.planes.length === 0) {
+      setError('Seleccioná al menos un plan/actividad.')
+      return
+    }
+
     setGuardando(true)
     setError(null)
 
@@ -55,7 +70,7 @@ function NuevoSocioModal({ socio, onClose, onSaved }) {
           dni: form.dni,
           email: form.email,
           telefono: form.telefono,
-          plan: form.plan,
+          plan: form.planes,
         })
         .eq('id', socio.id)
         .select()
@@ -73,7 +88,7 @@ function NuevoSocioModal({ socio, onClose, onSaved }) {
           dni: form.dni,
           email: form.email,
           telefono: form.telefono,
-          plan: form.plan,
+          plan: form.planes,
           estado: 'Activo',
           ultimo_pago: fechaInicio,
           dia_corte: diaCorte,
@@ -182,22 +197,28 @@ function NuevoSocioModal({ socio, onClose, onSaved }) {
             />
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="plan" className="text-xs font-medium text-gray-400">
-              Plan
-            </label>
-            <select
-              id="plan"
-              value={form.plan}
-              onChange={handleChange('plan')}
-              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
-            >
-              {planes.map((plan) => (
-                <option key={plan} value={plan}>
+          <div className="flex flex-col gap-1.5 sm:col-span-2">
+            <span className="text-xs font-medium text-gray-400">Planes / Actividades</span>
+            <div className="flex flex-wrap gap-2">
+              {PLANES_DISPONIBLES.map((plan) => (
+                <label
+                  key={plan}
+                  className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors ${
+                    form.planes.includes(plan)
+                      ? 'border-greenfit-primary bg-greenfit-primary/10 text-white'
+                      : 'border-white/10 text-gray-300 hover:bg-white/5'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={form.planes.includes(plan)}
+                    onChange={() => handleTogglePlan(plan)}
+                    className="accent-greenfit-primary"
+                  />
                   {plan}
-                </option>
+                </label>
               ))}
-            </select>
+            </div>
           </div>
 
           {!esEdicion && (

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { CreditCard, RefreshCw, X } from 'lucide-react'
-import { esPlanDeCreditos } from '../utils/planes'
+import { esPlanDeCreditos, formatearPlanes, tienePlanDeVencimiento } from '../utils/planes'
 import { formatFecha } from '../utils/fecha'
 
 const PACKS_RENOVACION = [4, 8, 12, 20]
@@ -10,13 +10,17 @@ function iniciales(nombre, apellido) {
 }
 
 function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
-  const esCredito = esPlanDeCreditos(socio.plan)
+  const tieneCredito = esPlanDeCreditos(socio.plan)
+  const tieneVencimiento = tienePlanDeVencimiento(socio.plan)
   const [cantidad, setCantidad] = useState(12)
   const [guardando, setGuardando] = useState(false)
 
   const handleConfirmar = async () => {
     setGuardando(true)
-    await onConfirmar(socio, esCredito ? { tipo: 'creditos', cantidad: Number(cantidad) || 0 } : { tipo: 'vencimiento' })
+    await onConfirmar(socio, {
+      ...(tieneCredito ? { creditos: { cantidad: Number(cantidad) || 0 } } : {}),
+      ...(tieneVencimiento ? { vencimiento: true } : {}),
+    })
     setGuardando(false)
   }
 
@@ -42,65 +46,66 @@ function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
             <p className="text-sm font-medium text-white">
               {socio.nombre} {socio.apellido}
             </p>
-            <p className="text-xs text-gray-400">{socio.plan}</p>
+            <p className="text-xs text-gray-400">{formatearPlanes(socio.plan)}</p>
           </div>
         </div>
 
-        {esCredito ? (
-          <div className="flex flex-col gap-4">
-            <p className="text-sm text-gray-400">
-              Renovación mensual: sumá los créditos correspondientes al plan{' '}
-              <span className="font-medium text-white">{socio.plan}</span>. Créditos actuales:{' '}
-              <span className="font-semibold text-white">{socio.creditos ?? 0}</span>
-            </p>
+        <div className="flex flex-col gap-5">
+          {tieneCredito && (
+            <div className="flex flex-col gap-4">
+              <p className="text-sm text-gray-400">
+                Renovación mensual: sumá los créditos correspondientes a sus actividades. Créditos
+                actuales: <span className="font-semibold text-white">{socio.creditos ?? 0}</span>
+              </p>
 
-            <div className="flex flex-wrap gap-2">
-              {PACKS_RENOVACION.map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  onClick={() => setCantidad(n)}
-                  className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                    Number(cantidad) === n
-                      ? 'bg-greenfit-primary text-greenfit-dark'
-                      : 'border border-white/10 text-gray-300 hover:bg-white/5 hover:text-white'
-                  }`}
-                >
-                  +{n}
-                </button>
-              ))}
+              <div className="flex flex-wrap gap-2">
+                {PACKS_RENOVACION.map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setCantidad(n)}
+                    className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                      Number(cantidad) === n
+                        ? 'bg-greenfit-primary text-greenfit-dark'
+                        : 'border border-white/10 text-gray-300 hover:bg-white/5 hover:text-white'
+                    }`}
+                  >
+                    +{n}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="cantidadCreditos" className="text-xs font-medium text-gray-400">
+                  O ajustá la cantidad manualmente
+                </label>
+                <input
+                  id="cantidadCreditos"
+                  type="number"
+                  min="1"
+                  value={cantidad}
+                  onChange={(event) => setCantidad(event.target.value)}
+                  className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
+                />
+              </div>
+
+              <p className="text-xs text-gray-500">
+                Créditos resultantes: {(socio.creditos ?? 0) + (Number(cantidad) || 0)}
+              </p>
             </div>
+          )}
 
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="cantidadCreditos" className="text-xs font-medium text-gray-400">
-                O ajustá la cantidad manualmente
-              </label>
-              <input
-                id="cantidadCreditos"
-                type="number"
-                min="1"
-                value={cantidad}
-                onChange={(event) => setCantidad(event.target.value)}
-                className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
-              />
-            </div>
-
-            <p className="text-xs text-gray-500">
-              Créditos resultantes: {(socio.creditos ?? 0) + (Number(cantidad) || 0)}
-            </p>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
+          {tieneVencimiento && (
             <div className="flex items-start gap-2 rounded-lg border border-white/10 px-4 py-3 text-sm text-gray-300">
               <RefreshCw className="mt-0.5 h-4 w-4 shrink-0 text-greenfit-primary" />
               <p>
-                Se va a renovar la cuota por <span className="font-medium text-white">1 mes</span> desde el
-                vencimiento actual ({formatFecha(socio.fechaVencimiento)}), respetando el día de corte fijo
-                (día {socio.diaCorte ?? '—'}).
+                Se va a renovar la cuota por <span className="font-medium text-white">1 mes</span> desde
+                el vencimiento actual ({formatFecha(socio.fechaVencimiento)}), respetando el día de corte
+                fijo (día {socio.diaCorte ?? '—'}).
               </p>
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         <div className="mt-6 flex justify-end gap-3">
           <button

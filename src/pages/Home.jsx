@@ -4,19 +4,21 @@ import {
   AlertCircle,
   ArrowRight,
   BarChart3,
-  CalendarDays,
+  CalendarClock,
   CalendarPlus,
   CheckCircle2,
   Clock,
+  DollarSign,
   Loader2,
-  Percent,
   UserPlus,
   Users,
 } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { colorOcupacion } from '../utils/ocupacion'
 import { diaActualPorDefecto, mapearClases } from '../utils/clases'
-import { calcularEstadoCuota } from '../utils/fecha'
+import { calcularEstadoCuota, esDelMesActual } from '../utils/fecha'
+import { formatMoneda } from '../utils/moneda'
+import { precioPlanes } from '../utils/planes'
 import { useConfiguracion } from '../context/useConfiguracion'
 
 const usuario = 'Seba'
@@ -101,14 +103,13 @@ function Home() {
     [clasesHoy],
   )
 
-  const ocupacionPromedio = useMemo(() => {
-    if (clasesHoy.length === 0) return 0
-    const suma = clasesHoy.reduce(
-      (total, clase) => total + (clase.inscriptos.length / clase.cupoMaximo) * 100,
-      0,
-    )
-    return Math.round(suma / clasesHoy.length)
-  }, [clasesHoy])
+  const recaudacionMes = useMemo(
+    () =>
+      socios
+        .filter((s) => esDelMesActual(s.ultimo_pago))
+        .reduce((total, s) => total + precioPlanes(s.plan, configuracion), 0),
+    [socios, configuracion],
+  )
 
   const proximasClases = useMemo(() => {
     const horaActual = horaActualStr()
@@ -118,15 +119,15 @@ function Home() {
     return (restantes.length > 0 ? restantes : clasesHoy).slice(0, 4)
   }, [clasesHoy])
 
-  const sociosPorVencer = useMemo(
+  const sociosPorVencerCompleto = useMemo(
     () =>
       socios
         .map((s) => ({ nombre: s.nombre, apellido: s.apellido, diasRestantes: diasHastaVencimiento(s) }))
-        .filter((s) => s.diasRestantes !== null && s.diasRestantes >= 0 && s.diasRestantes <= 3)
-        .sort((a, b) => a.diasRestantes - b.diasRestantes)
-        .slice(0, 5),
+        .filter((s) => s.diasRestantes !== null && s.diasRestantes >= 0 && s.diasRestantes <= 7)
+        .sort((a, b) => a.diasRestantes - b.diasRestantes),
     [socios],
   )
+  const sociosPorVencer = useMemo(() => sociosPorVencerCompleto.slice(0, 5), [sociosPorVencerCompleto])
 
   const ultimasAsistencias = useMemo(
     () =>
@@ -149,12 +150,18 @@ function Home() {
 
   const kpis = [
     { label: 'Socios Presentes Hoy', value: `${asistenciasHoy} asistencias`, icon: Users },
-    { label: 'Clases Programadas Hoy', value: `${clasesHoy.length} clases`, icon: CalendarDays },
     {
       label: 'Cuotas Vencidas',
       value: `${cuotasVencidas}`,
       icon: AlertCircle,
       alerta: cuotasVencidas > 0,
+    },
+    { label: 'Recaudación del Mes', value: formatMoneda(recaudacionMes), icon: DollarSign },
+    {
+      label: 'Próximos a Vencer (7 días)',
+      value: `${sociosPorVencerCompleto.length}`,
+      icon: CalendarClock,
+      alerta: sociosPorVencerCompleto.length > 0,
     },
   ]
 
@@ -235,24 +242,6 @@ function Home() {
                 </div>
               </div>
             ))}
-
-            <div className="rounded-xl border border-white/5 bg-greenfit-card p-5">
-              <div className="mb-3 flex items-center gap-4">
-                <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-greenfit-primary/15">
-                  <Percent className="h-5 w-5 text-greenfit-primary" />
-                </div>
-                <div>
-                  <p className="text-sm text-gray-400">Ocupación Promedio de Hoy</p>
-                  <p className="text-2xl font-semibold text-white">{ocupacionPromedio}%</p>
-                </div>
-              </div>
-              <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
-                <div
-                  className={`h-full rounded-full transition-all ${colorOcupacion(ocupacionPromedio).barra}`}
-                  style={{ width: `${ocupacionPromedio}%` }}
-                />
-              </div>
-            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -303,7 +292,7 @@ function Home() {
             <div className="flex flex-col gap-6">
               <div className="rounded-xl border border-white/5 bg-greenfit-card p-5">
                 <div className="mb-4 flex items-center justify-between">
-                  <h3 className="text-base font-semibold text-white">Cuotas por Vencer (3 días)</h3>
+                  <h3 className="text-base font-semibold text-white">Cuotas por Vencer (7 días)</h3>
                   <Link
                     to="/socios"
                     className="flex items-center gap-1 text-xs font-medium text-greenfit-primary hover:opacity-80"
@@ -315,7 +304,7 @@ function Home() {
 
                 {sociosPorVencer.length === 0 ? (
                   <p className="py-8 text-center text-sm text-gray-400">
-                    No hay cuotas por vencer en los próximos 3 días.
+                    No hay cuotas por vencer en los próximos 7 días.
                   </p>
                 ) : (
                   <ul className="divide-y divide-white/5">

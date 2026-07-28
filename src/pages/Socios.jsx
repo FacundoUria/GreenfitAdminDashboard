@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertCircle, CheckCircle2, Clock, Loader2, Plus, Search, UserPlus, Users } from 'lucide-react'
+import {
+  AlertCircle,
+  CheckCircle2,
+  Clock,
+  Loader2,
+  MessageCircle,
+  Plus,
+  Search,
+  UserPlus,
+  Users,
+} from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import {
   calcularEstadoCuota,
@@ -12,6 +22,7 @@ import {
 import SociosTabla from '../components/SociosTabla'
 import NuevoSocioModal from '../components/NuevoSocioModal'
 import RegistrarPagoModal from '../components/RegistrarPagoModal'
+import WhatsAppModal from '../components/WhatsAppModal'
 import { useConfiguracion } from '../context/useConfiguracion'
 
 function Toast({ message }) {
@@ -65,6 +76,9 @@ function Socios() {
   const [socioEnEdicion, setSocioEnEdicion] = useState(null)
   const [socioParaPago, setSocioParaPago] = useState(null)
   const [toastVisible, setToastVisible] = useState(false)
+  const [seleccionados, setSeleccionados] = useState(new Set())
+  const [whatsappDestinatarios, setWhatsappDestinatarios] = useState(null)
+  const [whatsappPreset, setWhatsappPreset] = useState(null)
 
   const fetchSocios = async () => {
     setLoading(true)
@@ -180,19 +194,22 @@ function Socios() {
 
   const handleConfirmarPago = async (socio, payload) => {
     const hoy = hoyISO()
+    const cambios = { ultimo_pago: hoy }
 
-    const cambios =
-      payload.tipo === 'creditos'
-        ? { creditos: (socio.creditos ?? 0) + payload.cantidad, ultimo_pago: hoy }
-        : (() => {
-            // Ciclo fijo: el próximo vencimiento sale de sumar 1 mes a la fecha_vencimiento
-            // anterior (nunca de sumar días a HOY), así una cuota pagada tarde no corre el
-            // ciclo de cobro hacia adelante. `dia_corte` es el ancla fija de ese cálculo.
-            const diaCorte = socio.diaCorte ?? new Date(`${socio.fechaVencimiento ?? hoy}T00:00:00`).getDate()
-            const fechaBaseCiclo = socio.fechaVencimiento ?? hoy
-            const nuevoVencimiento = toISODate(proximoVencimiento(fechaBaseCiclo, diaCorte))
-            return { estado: 'Activo', ultimo_pago: hoy, fecha_vencimiento: nuevoVencimiento, dia_corte: diaCorte }
-          })()
+    if (payload.creditos) {
+      cambios.creditos = (socio.creditos ?? 0) + payload.creditos.cantidad
+    }
+
+    if (payload.vencimiento) {
+      // Ciclo fijo: el próximo vencimiento sale de sumar 1 mes a la fecha_vencimiento
+      // anterior (nunca de sumar días a HOY), así una cuota pagada tarde no corre el
+      // ciclo de cobro hacia adelante. `dia_corte` es el ancla fija de ese cálculo.
+      const diaCorte = socio.diaCorte ?? new Date(`${socio.fechaVencimiento ?? hoy}T00:00:00`).getDate()
+      const fechaBaseCiclo = socio.fechaVencimiento ?? hoy
+      cambios.fecha_vencimiento = toISODate(proximoVencimiento(fechaBaseCiclo, diaCorte))
+      cambios.dia_corte = diaCorte
+      cambios.estado = 'Activo'
+    }
 
     const { data, error: updateError } = await supabase
       .from('socios')
@@ -216,6 +233,39 @@ function Socios() {
     setToastVisible(true)
     setTimeout(() => setToastVisible(false), 2500)
     fetchSocios()
+  }
+
+  const handleToggleSeleccionado = (id) => {
+    setSeleccionados((prev) => {
+      const siguiente = new Set(prev)
+      if (siguiente.has(id)) siguiente.delete(id)
+      else siguiente.add(id)
+      return siguiente
+    })
+  }
+
+  const handleToggleSeleccionarTodos = () => {
+    setSeleccionados((prev) => {
+      const todosSeleccionados = sociosFiltrados.length > 0 && sociosFiltrados.every((s) => prev.has(s.id))
+      if (todosSeleccionados) return new Set()
+      return new Set(sociosFiltrados.map((s) => s.id))
+    })
+  }
+
+  const handleAbrirWhatsappIndividual = (socio) => {
+    setWhatsappPreset(null)
+    setWhatsappDestinatarios([socio])
+  }
+
+  const handleAbrirWhatsappSeleccionados = () => {
+    setWhatsappPreset(null)
+    setWhatsappDestinatarios(sociosFiltrados.filter((s) => seleccionados.has(s.id)))
+  }
+
+  const handleNotificarDeudores = () => {
+    const deudores = sociosConEstado.filter((s) => (s.estado ?? '').toLowerCase() === 'vencido')
+    setWhatsappPreset('vencida')
+    setWhatsappDestinatarios(deudores)
   }
 
   return (
@@ -267,14 +317,34 @@ function Socios() {
           </select>
         </div>
 
-        <button
-          type="button"
-          onClick={handleAbrirNuevoSocio}
-          className="flex items-center justify-center gap-2 rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90"
-        >
-          <Plus className="h-4 w-4" />
-          Nuevo Socio
-        </button>
+        <div className="flex flex-wrap gap-2">
+          {seleccionados.size > 0 && (
+            <button
+              type="button"
+              onClick={handleAbrirWhatsappSeleccionados}
+              className="flex items-center justify-center gap-2 rounded-lg bg-[#25D366]/15 px-4 py-2 text-sm font-semibold text-[#25D366] transition-colors hover:bg-[#25D366]/25"
+            >
+              <MessageCircle className="h-4 w-4" />
+              WhatsApp a Seleccionados ({seleccionados.size})
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleNotificarDeudores}
+            className="flex items-center justify-center gap-2 rounded-lg border border-white/10 px-4 py-2 text-sm font-medium text-gray-200 transition-colors hover:bg-white/5 hover:text-white"
+          >
+            <MessageCircle className="h-4 w-4" />
+            Notificar a Deudores
+          </button>
+          <button
+            type="button"
+            onClick={handleAbrirNuevoSocio}
+            className="flex items-center justify-center gap-2 rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90"
+          >
+            <Plus className="h-4 w-4" />
+            Nuevo Socio
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -299,6 +369,10 @@ function Socios() {
           onRegistrarPago={handleAbrirRegistrarPago}
           onEditar={handleEditar}
           onAjustarCredito={handleAjustarCredito}
+          onAbrirWhatsapp={handleAbrirWhatsappIndividual}
+          seleccionados={seleccionados}
+          onToggleSeleccionado={handleToggleSeleccionado}
+          onToggleSeleccionarTodos={handleToggleSeleccionarTodos}
         />
       )}
 
@@ -320,6 +394,14 @@ function Socios() {
           socio={socioParaPago}
           onClose={() => setSocioParaPago(null)}
           onConfirmar={handleConfirmarPago}
+        />
+      )}
+
+      {whatsappDestinatarios && (
+        <WhatsAppModal
+          socios={whatsappDestinatarios}
+          presetInicial={whatsappPreset}
+          onClose={() => setWhatsappDestinatarios(null)}
         />
       )}
 

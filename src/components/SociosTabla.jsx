@@ -1,5 +1,5 @@
-import { CreditCard, Minus, Pencil, Plus } from 'lucide-react'
-import { esPlanDeCreditos } from '../utils/planes'
+import { CreditCard, MessageCircle, Minus, Pencil, Plus } from 'lucide-react'
+import { esPlanDeCreditos, formatearPlanes } from '../utils/planes'
 
 const PACKS_RAPIDOS = [4, 8, 12]
 
@@ -90,12 +90,32 @@ function iniciales(nombre, apellido) {
   return `${(nombre ?? '?').charAt(0)}${(apellido ?? '').charAt(0)}`.toUpperCase()
 }
 
-function SociosTabla({ socios, onRegistrarPago, onEditar, onAjustarCredito }) {
+function SociosTabla({
+  socios,
+  onRegistrarPago,
+  onEditar,
+  onAjustarCredito,
+  onAbrirWhatsapp,
+  seleccionados,
+  onToggleSeleccionado,
+  onToggleSeleccionarTodos,
+}) {
+  const todosSeleccionados = socios.length > 0 && socios.every((s) => seleccionados.has(s.id))
+
   return (
     <div className="overflow-x-auto rounded-xl bg-greenfit-card">
-      <table className="w-full min-w-[860px] text-left text-sm">
+      <table className="w-full min-w-[920px] text-left text-sm">
         <thead>
           <tr className="border-b border-white/5 text-xs uppercase tracking-wide text-gray-400">
+            <th className="w-10 px-5 py-3">
+              <input
+                type="checkbox"
+                checked={todosSeleccionados}
+                onChange={onToggleSeleccionarTodos}
+                className="accent-greenfit-primary"
+                aria-label="Seleccionar todos"
+              />
+            </th>
             <th className="px-5 py-3 font-medium">Socio</th>
             <th className="px-5 py-3 font-medium">DNI</th>
             <th className="px-5 py-3 font-medium">Estado</th>
@@ -108,6 +128,15 @@ function SociosTabla({ socios, onRegistrarPago, onEditar, onAjustarCredito }) {
         <tbody>
           {socios.map((socio) => (
             <tr key={socio.id} className="border-b border-white/5 last:border-0 hover:bg-white/5">
+              <td className="px-5 py-3">
+                <input
+                  type="checkbox"
+                  checked={seleccionados.has(socio.id)}
+                  onChange={() => onToggleSeleccionado(socio.id)}
+                  className="accent-greenfit-primary"
+                  aria-label={`Seleccionar ${socio.nombre}`}
+                />
+              </td>
               <td className="px-5 py-3">
                 <div className="flex items-center gap-3">
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-greenfit-primary/15 text-xs font-semibold text-greenfit-primary">
@@ -125,7 +154,7 @@ function SociosTabla({ socios, onRegistrarPago, onEditar, onAjustarCredito }) {
               <td className="px-5 py-3">
                 <EstadoBadge socio={socio} />
               </td>
-              <td className="px-5 py-3 text-gray-300">{socio.plan}</td>
+              <td className="px-5 py-3 text-gray-300">{formatearPlanes(socio.plan)}</td>
               <td className="px-5 py-3">
                 <CreditosCell socio={socio} onAjustarCredito={onAjustarCredito} />
               </td>
@@ -143,6 +172,14 @@ function SociosTabla({ socios, onRegistrarPago, onEditar, onAjustarCredito }) {
                   </button>
                   <button
                     type="button"
+                    title="Enviar WhatsApp"
+                    onClick={() => onAbrirWhatsapp(socio)}
+                    className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-[#25D366]/15 hover:text-[#25D366]"
+                  >
+                    <MessageCircle className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
                     title="Editar"
                     onClick={() => onEditar(socio)}
                     className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-white/10 hover:text-white"
@@ -156,7 +193,7 @@ function SociosTabla({ socios, onRegistrarPago, onEditar, onAjustarCredito }) {
 
           {socios.length === 0 && (
             <tr>
-              <td colSpan={7} className="px-5 py-10 text-center text-gray-400">
+              <td colSpan={8} className="px-5 py-10 text-center text-gray-400">
                 No se encontraron socios con los filtros aplicados.
               </td>
             </tr>
