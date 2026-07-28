@@ -70,11 +70,11 @@ function WhatsAppModal({ socios, presetInicial, onClose }) {
 
         {preset === 'personalizado' ? (
           <textarea
-            rows={4}
+            rows={7}
             value={mensajePersonalizado}
             onChange={(event) => setMensajePersonalizado(event.target.value)}
             placeholder="Escribí tu mensaje. Podés usar {nombre} para personalizarlo."
-            className="mb-4 resize-none rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none placeholder:text-gray-600 focus:border-greenfit-primary"
+            className="mb-4 w-full min-h-[160px] resize-y rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm leading-relaxed text-white outline-none placeholder:text-gray-600 focus:border-greenfit-primary"
           />
         ) : (
           <div className="mb-4 rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-gray-300">

@@ -5,6 +5,7 @@ import Socios from './pages/Socios'
 import Configuracion from './pages/Configuracion'
 import Clases from './pages/Clases'
 import Home from './pages/Home'
+import Notas from './pages/Notas'
 import Login from './pages/Login'
 import { AuthProvider } from './context/AuthContext'
 import { useAuth } from './context/useAuth'
@@ -31,6 +32,7 @@ function App() {
               <Route path="socios" element={<Socios />} />
               <Route path="clases" element={<Clases />} />
               <Route path="reportes" element={<Reportes />} />
+              <Route path="notas" element={<Notas />} />
               <Route path="configuracion" element={<Configuracion />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>

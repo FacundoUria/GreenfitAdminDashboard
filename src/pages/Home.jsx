@@ -8,7 +8,6 @@ import {
   CalendarPlus,
   CheckCircle2,
   Clock,
-  DollarSign,
   Loader2,
   UserPlus,
   Users,
@@ -16,9 +15,7 @@ import {
 import { supabase } from '../lib/supabaseClient'
 import { colorOcupacion } from '../utils/ocupacion'
 import { diaActualPorDefecto, mapearClases } from '../utils/clases'
-import { calcularEstadoCuota, esDelMesActual } from '../utils/fecha'
-import { formatMoneda } from '../utils/moneda'
-import { precioPlanes } from '../utils/planes'
+import { calcularEstadoCuota } from '../utils/fecha'
 import { useConfiguracion } from '../context/useConfiguracion'
 
 const usuario = 'Seba'
@@ -89,27 +86,15 @@ function Home() {
     fetchDatos()
   }, [])
 
-  const totalSocios = socios.length
+  const sociosActivos = socios.filter(
+    (s) => calcularEstadoCuota(s.fecha_vencimiento, diasTolerancia) === 'activo',
+  ).length
   const cuotasVencidas = socios.filter(
     (s) => calcularEstadoCuota(s.fecha_vencimiento, diasTolerancia) === 'vencido',
   ).length
-
-  const asistenciasHoy = useMemo(
-    () =>
-      clasesHoy.reduce(
-        (total, clase) => total + clase.inscriptos.filter((i) => i.asistio === true).length,
-        0,
-      ),
-    [clasesHoy],
-  )
-
-  const recaudacionMes = useMemo(
-    () =>
-      socios
-        .filter((s) => esDelMesActual(s.ultimo_pago))
-        .reduce((total, s) => total + precioPlanes(s.plan, configuracion), 0),
-    [socios, configuracion],
-  )
+  const sociosTolerancia = socios.filter(
+    (s) => calcularEstadoCuota(s.fecha_vencimiento, diasTolerancia) === 'tolerancia',
+  ).length
 
   const proximasClases = useMemo(() => {
     const horaActual = horaActualStr()
@@ -149,14 +134,14 @@ function Home() {
   )
 
   const kpis = [
-    { label: 'Socios Presentes Hoy', value: `${asistenciasHoy} asistencias`, icon: Users },
+    { label: 'Socios Activos', value: `${sociosActivos}`, icon: Users },
     {
       label: 'Cuotas Vencidas',
       value: `${cuotasVencidas}`,
       icon: AlertCircle,
       alerta: cuotasVencidas > 0,
     },
-    { label: 'Recaudación del Mes', value: formatMoneda(recaudacionMes), icon: DollarSign },
+    { label: 'En Tolerancia', value: `${sociosTolerancia}`, icon: Clock },
     {
       label: 'Próximos a Vencer (7 días)',
       value: `${sociosPorVencerCompleto.length}`,
@@ -170,9 +155,7 @@ function Home() {
       <div className="flex flex-col gap-4 rounded-xl border border-white/5 bg-greenfit-card p-6 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-xl font-semibold text-white">¡Hola, {usuario}! 👋</h2>
-          <p className="text-sm text-gray-400">
-            Cierre de turno y resumen de hoy · {totalSocios} socios registrados.
-          </p>
+          <p className="text-sm text-gray-400">Resumen general del estado de GreenFit al día de hoy.</p>
         </div>
 
         <div className="flex flex-wrap gap-2">

@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { Home, Users, Dumbbell, BarChart3, Settings, ExternalLink } from 'lucide-react'
+import { Home, Users, Dumbbell, BarChart3, NotebookPen, Settings, ExternalLink } from 'lucide-react'
 import logo from '../assets/logo.jpg'
 
 const navItems = [
@@ -7,6 +7,7 @@ const navItems = [
   { to: '/socios', label: 'Socios', icon: Users },
   { to: '/clases', label: 'Clases', icon: Dumbbell },
   { to: '/reportes', label: 'Reportes', icon: BarChart3 },
+  { to: '/notas', label: 'Notas', icon: NotebookPen },
   { to: '/configuracion', label: 'Configuración', icon: Settings },
 ]
 
