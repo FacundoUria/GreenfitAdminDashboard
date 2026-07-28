@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom'
-import { Home, Users, Dumbbell, BarChart3, Settings, ExternalLink, Leaf } from 'lucide-react'
+import { Home, Users, Dumbbell, BarChart3, Settings, ExternalLink } from 'lucide-react'
+import logo from '../assets/logo.jpg'
 
 const navItems = [
   { to: '/', label: 'Home', icon: Home, end: true },
@@ -11,31 +12,43 @@ const navItems = [
 
 function Sidebar() {
   return (
-    <aside className="flex h-screen w-64 shrink-0 flex-col justify-between border-r border-white/5 bg-greenfit-card px-4 py-6">
+    <aside className="flex h-screen w-64 shrink-0 flex-col justify-between border-r border-white/5 bg-greenfit-card px-4 py-7">
       <div>
-        <div className="mb-8 flex items-center gap-2 px-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-greenfit-primary">
-            <Leaf className="h-5 w-5 text-greenfit-dark" />
-          </div>
-          <span className="text-lg font-semibold text-white">Greenfit</span>
+        <div className="mb-8 flex items-center justify-center px-2">
+          <img src={logo} alt="Greenfit" className="h-24 w-auto object-contain mix-blend-screen" />
         </div>
 
-        <nav className="flex flex-col gap-1">
+        <p className="mb-3 px-4 text-xs font-semibold uppercase tracking-wider text-gray-500">Menú</p>
+
+        <nav className="flex flex-col gap-2">
           {navItems.map(({ to, label, icon: Icon, end }) => (
             <NavLink
               key={to}
               to={to}
               end={end}
               className={({ isActive }) =>
-                `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                `group relative flex items-center gap-3.5 rounded-xl px-4 py-3.5 text-[15px] font-medium transition-all ${
                   isActive
-                    ? 'bg-greenfit-primary text-greenfit-dark'
-                    : 'text-gray-300 hover:bg-white/5 hover:text-white'
+                    ? 'bg-white/5 text-white'
+                    : 'text-gray-400 hover:bg-white/5 hover:text-white'
                 }`
               }
             >
-              <Icon className="h-5 w-5" />
-              {label}
+              {({ isActive }) => (
+                <>
+                  <span
+                    className={`absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full bg-[#22c55e] transition-opacity ${
+                      isActive ? 'opacity-100' : 'opacity-0'
+                    }`}
+                  />
+                  <Icon
+                    className={`h-5 w-5 transition-colors ${
+                      isActive ? 'text-[#22c55e]' : 'text-gray-500 group-hover:text-[#22c55e]'
+                    }`}
+                  />
+                  {label}
+                </>
+              )}
             </NavLink>
           ))}
         </nav>
@@ -45,9 +58,9 @@ function Sidebar() {
         href="https://greenfit.fit"
         target="_blank"
         rel="noopener noreferrer"
-        className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-300 transition-colors hover:bg-white/5 hover:text-white"
+        className="flex items-center gap-3.5 rounded-xl px-4 py-3.5 text-[15px] font-medium text-gray-400 transition-colors hover:bg-white/5 hover:text-white"
       >
-        <ExternalLink className="h-5 w-5" />
+        <ExternalLink className="h-5 w-5 text-gray-500" />
         greenfit.fit
       </a>
     </aside>

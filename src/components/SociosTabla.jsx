@@ -1,11 +1,7 @@
 import { CreditCard, Minus, Pencil, Plus } from 'lucide-react'
+import { esPlanDeCreditos } from '../utils/planes'
 
-const PLANES_DE_CREDITOS = ['crossfit', 'boxeo', 'kickstrike']
 const PACKS_RAPIDOS = [4, 8, 12]
-
-function esPlanDeCreditos(plan) {
-  return PLANES_DE_CREDITOS.includes((plan ?? '').toLowerCase())
-}
 
 const estadoStyles = {
   activo: 'bg-greenfit-primary/15 text-greenfit-primary',
@@ -135,17 +131,16 @@ function SociosTabla({ socios, onRegistrarPago, onEditar, onAjustarCredito }) {
               </td>
               <td className="px-5 py-3 text-gray-300">{socio.ultimoPago}</td>
               <td className="px-5 py-3">
-                <div className="flex items-center justify-end gap-1">
-                  {!esPlanDeCreditos(socio.plan) && (
-                    <button
-                      type="button"
-                      title="Registrar Pago"
-                      onClick={() => onRegistrarPago(socio)}
-                      className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-white/10 hover:text-greenfit-primary"
-                    >
-                      <CreditCard className="h-4 w-4" />
-                    </button>
-                  )}
+                <div className="flex items-center justify-end gap-1.5">
+                  <button
+                    type="button"
+                    title="Registrar Pago / Renovar Cuota"
+                    onClick={() => onRegistrarPago(socio)}
+                    className="flex items-center gap-1.5 rounded-lg bg-greenfit-primary/10 px-2.5 py-1.5 text-xs font-semibold text-greenfit-primary transition-colors hover:bg-greenfit-primary/20"
+                  >
+                    <CreditCard className="h-3.5 w-3.5" />
+                    Cobrar
+                  </button>
                   <button
                     type="button"
                     title="Editar"

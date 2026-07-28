@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertCircle, Clock, Loader2, Plus, Search, UserPlus, Users } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Clock, Loader2, Plus, Search, UserPlus, Users } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import {
   calcularEstadoCuota,
@@ -11,7 +11,17 @@ import {
 } from '../utils/fecha'
 import SociosTabla from '../components/SociosTabla'
 import NuevoSocioModal from '../components/NuevoSocioModal'
+import RegistrarPagoModal from '../components/RegistrarPagoModal'
 import { useConfiguracion } from '../context/useConfiguracion'
+
+function Toast({ message }) {
+  return (
+    <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-lg bg-greenfit-card px-4 py-3 shadow-xl ring-1 ring-white/10">
+      <CheckCircle2 className="h-5 w-5 text-greenfit-primary" />
+      <span className="text-sm font-medium text-white">{message}</span>
+    </div>
+  )
+}
 
 const filtroOptions = [
   { value: 'todos', label: 'Todos' },
@@ -53,6 +63,8 @@ function Socios() {
   const [filtroEstado, setFiltroEstado] = useState('todos')
   const [modalAbierto, setModalAbierto] = useState(false)
   const [socioEnEdicion, setSocioEnEdicion] = useState(null)
+  const [socioParaPago, setSocioParaPago] = useState(null)
+  const [toastVisible, setToastVisible] = useState(false)
 
   const fetchSocios = async () => {
     setLoading(true)
@@ -162,23 +174,29 @@ function Socios() {
     fetchSocios()
   }
 
-  const handleRegistrarPago = async (socio) => {
+  const handleAbrirRegistrarPago = (socio) => {
+    setSocioParaPago(socio)
+  }
+
+  const handleConfirmarPago = async (socio, payload) => {
     const hoy = hoyISO()
-    // Ciclo fijo: el próximo vencimiento sale de sumar 1 mes a la fecha_vencimiento
-    // anterior (nunca de sumar días a HOY), así una cuota pagada tarde no corre el
-    // ciclo de cobro hacia adelante. `dia_corte` es el ancla fija de ese cálculo.
-    const diaCorte = socio.diaCorte ?? new Date(`${socio.fechaVencimiento ?? hoy}T00:00:00`).getDate()
-    const fechaBaseCiclo = socio.fechaVencimiento ?? hoy
-    const nuevoVencimiento = toISODate(proximoVencimiento(fechaBaseCiclo, diaCorte))
+
+    const cambios =
+      payload.tipo === 'creditos'
+        ? { creditos: (socio.creditos ?? 0) + payload.cantidad, ultimo_pago: hoy }
+        : (() => {
+            // Ciclo fijo: el próximo vencimiento sale de sumar 1 mes a la fecha_vencimiento
+            // anterior (nunca de sumar días a HOY), así una cuota pagada tarde no corre el
+            // ciclo de cobro hacia adelante. `dia_corte` es el ancla fija de ese cálculo.
+            const diaCorte = socio.diaCorte ?? new Date(`${socio.fechaVencimiento ?? hoy}T00:00:00`).getDate()
+            const fechaBaseCiclo = socio.fechaVencimiento ?? hoy
+            const nuevoVencimiento = toISODate(proximoVencimiento(fechaBaseCiclo, diaCorte))
+            return { estado: 'Activo', ultimo_pago: hoy, fecha_vencimiento: nuevoVencimiento, dia_corte: diaCorte }
+          })()
 
     const { data, error: updateError } = await supabase
       .from('socios')
-      .update({
-        estado: 'Activo',
-        ultimo_pago: hoy,
-        fecha_vencimiento: nuevoVencimiento,
-        dia_corte: diaCorte,
-      })
+      .update(cambios)
       .eq('id', socio.id)
       .select()
 
@@ -194,6 +212,9 @@ function Socios() {
       return
     }
 
+    setSocioParaPago(null)
+    setToastVisible(true)
+    setTimeout(() => setToastVisible(false), 2500)
     fetchSocios()
   }
 
@@ -275,7 +296,7 @@ function Socios() {
       ) : (
         <SociosTabla
           socios={sociosFiltrados}
-          onRegistrarPago={handleRegistrarPago}
+          onRegistrarPago={handleAbrirRegistrarPago}
           onEditar={handleEditar}
           onAjustarCredito={handleAjustarCredito}
         />
@@ -292,6 +313,17 @@ function Socios() {
           onSaved={fetchSocios}
         />
       )}
+
+      {socioParaPago && (
+        <RegistrarPagoModal
+          key={socioParaPago.id}
+          socio={socioParaPago}
+          onClose={() => setSocioParaPago(null)}
+          onConfirmar={handleConfirmarPago}
+        />
+      )}
+
+      {toastVisible && <Toast message="Pago registrado correctamente" />}
     </div>
   )
 }
