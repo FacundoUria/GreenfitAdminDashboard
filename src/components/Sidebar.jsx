@@ -1,11 +1,23 @@
 import { NavLink } from 'react-router-dom'
-import { Home, Users, Dumbbell, BarChart3, NotebookPen, Megaphone, Settings, ExternalLink, X } from 'lucide-react'
+import {
+  Home,
+  Users,
+  Dumbbell,
+  BarChart3,
+  NotebookPen,
+  Megaphone,
+  Settings,
+  ExternalLink,
+  X,
+  ClipboardList,
+} from 'lucide-react'
 import logo from '../assets/logo.jpg'
 
 const navItems = [
   { to: '/', label: 'Home', icon: Home, end: true },
   { to: '/socios', label: 'Socios', icon: Users },
   { to: '/clases', label: 'Clases', icon: Dumbbell },
+  { to: '/rutinas', label: 'Rutinas', icon: ClipboardList },
   { to: '/reportes', label: 'Reportes', icon: BarChart3 },
   { to: '/notas', label: 'Notas', icon: NotebookPen },
   { to: '/anunciar', label: 'Anunciar', icon: Megaphone },
