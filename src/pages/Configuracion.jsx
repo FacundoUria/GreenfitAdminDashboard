@@ -10,7 +10,7 @@ function mapConfigToForm(config) {
   return {
     precioCrossfit: String(config.precio_crossfit ?? 0),
     precioBoxeo: String(config.precio_boxeo ?? 0),
-    precioKickstrike: String(config.precio_kickstrike ?? 0),
+    precioKickboxing: String(config.precio_kickboxing ?? 0),
     precioAparatos: String(config.precio_aparatos ?? 0),
     diasTolerancia: String(config.dias_tolerancia ?? 5),
     limiteCancelacionHs: String(config.limite_cancelacion_hs ?? 2),
@@ -95,7 +95,7 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
     const precios = {
       precio_crossfit: Number(form.precioCrossfit) || 0,
       precio_boxeo: Number(form.precioBoxeo) || 0,
-      precio_kickstrike: Number(form.precioKickstrike) || 0,
+      precio_kickboxing: Number(form.precioKickboxing) || 0,
       precio_aparatos: Number(form.precioAparatos) || 0,
     }
 
@@ -186,9 +186,9 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
             prefix="$"
           />
           <NumberField
-            label="Kickstrike"
-            value={form.precioKickstrike}
-            onChange={(value) => updateField('precioKickstrike', value)}
+            label="Kickboxing"
+            value={form.precioKickboxing}
+            onChange={(value) => updateField('precioKickboxing', value)}
             prefix="$"
           />
           <NumberField

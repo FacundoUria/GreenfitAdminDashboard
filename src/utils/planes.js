@@ -1,10 +1,10 @@
-export const PLANES_DISPONIBLES = ['Pase Libre', 'CrossFit', 'Boxeo', 'Kickstrike', 'Aparatos / Musculación']
-export const PLANES_DE_CREDITOS = ['crossfit', 'boxeo', 'kickstrike']
+export const PLANES_DISPONIBLES = ['Pase Libre', 'CrossFit', 'Boxeo', 'Kickboxing', 'Aparatos / Musculación']
+export const PLANES_DE_CREDITOS = ['crossfit', 'boxeo', 'kickboxing']
 
 const PRECIO_POR_PLAN = {
   crossfit: 'precio_crossfit',
   boxeo: 'precio_boxeo',
-  kickstrike: 'precio_kickstrike',
+  kickboxing: 'precio_kickboxing',
   'aparatos / musculación': 'precio_aparatos',
 }
 
@@ -20,7 +20,7 @@ export function esPlanDeCreditos(plan) {
 }
 
 // Subconjunto de `plan` que son actividades de créditos (no de vencimiento).
-// Un socio puede tener más de una (ej: CrossFit + Kickstrike) -- eso es lo
+// Un socio puede tener más de una (ej: CrossFit + Kickboxing) -- eso es lo
 // que obliga a preguntar a qué disciplina van los créditos de un pago,
 // porque `creditos` es un solo pozo y no se puede repartir solo.
 export function planesDeCreditos(plan) {
