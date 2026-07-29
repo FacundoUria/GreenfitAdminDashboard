@@ -47,11 +47,12 @@ async function esperarCuentaPwa(dni, intentos = 6, esperaMs = 800) {
   return false
 }
 
-function NuevoSocioModal({ socio, onClose, onSaved }) {
+function NuevoSocioModal({ socio, onClose, onSaved, onBuscarSocioPorDni, onEditarSocioExistente }) {
   const esEdicion = Boolean(socio)
   const [form, setForm] = useState(() => formInicial(socio))
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState(null)
+  const [socioDuplicado, setSocioDuplicado] = useState(null)
 
   const handleChange = (field) => (event) => {
     setForm((prev) => ({ ...prev, [field]: event.target.value }))
@@ -84,6 +85,7 @@ function NuevoSocioModal({ socio, onClose, onSaved }) {
 
     setGuardando(true)
     setError(null)
+    setSocioDuplicado(null)
 
     let resultado
     let fechaVencimientoNueva = null
@@ -130,17 +132,15 @@ function NuevoSocioModal({ socio, onClose, onSaved }) {
         `Error al ${esEdicion ? 'actualizar' : 'crear'} el socio en Supabase:`,
         resultado.error?.message ?? 'no se guardó ninguna fila (revisá las políticas RLS)',
       )
-      // `dni` y `email` son UNIQUE en la tabla -- el error genérico no decía
-      // cuál de los dos estaba repetido, así que lo distinguimos acá.
-      if (resultado.error?.code === '23505') {
-        const detalle = resultado.error.message ?? ''
-        if (detalle.includes('socios_dni_key')) {
-          setError(`Ya existe un socio registrado con el DNI ${form.dni}.`)
-        } else if (detalle.includes('socios_email_key')) {
-          setError(`Ya existe un socio registrado con el email ${form.email}.`)
-        } else {
-          setError(`No se pudo ${esEdicion ? 'actualizar' : 'guardar'} el socio: ya existe un registro con esos datos.`)
-        }
+      // `dni` es UNIQUE en la tabla -- en vez de un error genérico, buscamos
+      // al socio que ya tiene ese DNI para que se pueda ir directo a su
+      // ficha en lugar de tener que buscarlo a mano en la tabla.
+      const detalle = resultado.error?.message ?? ''
+      const existente = detalle.includes('socios_dni_key') ? onBuscarSocioPorDni?.(form.dni) : null
+      if (existente) {
+        setSocioDuplicado(existente)
+      } else if (resultado.error?.code === '23505') {
+        setError(`Ya existe un socio registrado con el DNI ${form.dni}.`)
       } else {
         setError(`No se pudo ${esEdicion ? 'actualizar' : 'guardar'} el socio. Intentá nuevamente.`)
       }
@@ -343,6 +343,25 @@ function NuevoSocioModal({ socio, onClose, onSaved }) {
           )}
 
           {error && <p className="text-sm text-red-400 sm:col-span-2">{error}</p>}
+
+          {socioDuplicado && (
+            <div className="flex flex-col gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300 sm:col-span-2">
+              <p>
+                El DNI {form.dni} ya pertenece a{' '}
+                <strong>
+                  {socioDuplicado.nombre} {socioDuplicado.apellido}
+                </strong>
+                .
+              </p>
+              <button
+                type="button"
+                onClick={() => onEditarSocioExistente?.(socioDuplicado)}
+                className="self-start rounded-lg border border-amber-400/40 px-3 py-1.5 text-xs font-semibold text-amber-200 transition-colors hover:bg-amber-500/15"
+              >
+                Editar este socio
+              </button>
+            </div>
+          )}
 
           <div className="mt-2 flex flex-col-reverse gap-3 sm:col-span-2 sm:flex-row sm:justify-end">
             <button

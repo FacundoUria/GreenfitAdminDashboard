@@ -502,6 +502,8 @@ function Socios() {
             setSocioEnEdicion(null)
           }}
           onSaved={fetchSocios}
+          onBuscarSocioPorDni={(dni) => sociosConEstado.find((s) => s.dni === dni) ?? null}
+          onEditarSocioExistente={handleEditar}
         />
       )}
 
