@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { CheckCircle2, Loader2, Save } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { useConfiguracion } from '../context/useConfiguracion'
+import { sincronizarPreciosPacks } from '../utils/preciosPwa'
 import Toggle from '../components/Toggle'
+import DiasCerradosCard from '../components/DiasCerradosCard'
 
 function mapConfigToForm(config) {
   return {
@@ -12,10 +14,12 @@ function mapConfigToForm(config) {
     precioAparatos: String(config.precio_aparatos ?? 0),
     diasTolerancia: String(config.dias_tolerancia ?? 5),
     limiteCancelacionHs: String(config.limite_cancelacion_hs ?? 2),
-    bannerActivo: Boolean(config.banner_activo),
-    bannerMensaje: config.banner_mensaje ?? '',
     aliasCvu: config.alias_cvu ?? '',
     titularCuenta: config.titular_cuenta ?? '',
+    notifVencimientoActivo: Boolean(config.notif_vencimiento_activo ?? true),
+    notifVencimientoDiasAntes: String(config.notif_vencimiento_dias_antes ?? 3),
+    notifClaseActivo: Boolean(config.notif_clase_activo ?? true),
+    notifClaseHorasAntes: String(config.notif_clase_horas_antes ?? 2),
   }
 }
 
@@ -28,18 +32,21 @@ function ConfigCard({ title, children }) {
   )
 }
 
-function NumberField({ label, value, onChange, prefix, suffix }) {
+function NumberField({ label, value, onChange, prefix, suffix, disabled }) {
   return (
     <div className="flex flex-col gap-1.5">
       <label className="text-xs font-medium text-gray-400">{label}</label>
-      <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 focus-within:border-greenfit-primary">
+      <div
+        className={`flex items-center gap-2 rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 focus-within:border-greenfit-primary ${disabled ? 'opacity-50' : ''}`}
+      >
         {prefix && <span className="text-sm text-gray-500">{prefix}</span>}
         <input
           type="number"
           min="0"
           value={value}
+          disabled={disabled}
           onChange={(event) => onChange(event.target.value)}
-          className="w-full bg-transparent text-sm text-white outline-none"
+          className="w-full bg-transparent text-sm text-white outline-none disabled:cursor-not-allowed"
         />
         {suffix && <span className="text-sm text-gray-500">{suffix}</span>}
       </div>
@@ -85,24 +92,28 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
     setGuardando(true)
     setError(null)
 
+    const precios = {
+      precio_crossfit: Number(form.precioCrossfit) || 0,
+      precio_boxeo: Number(form.precioBoxeo) || 0,
+      precio_kickstrike: Number(form.precioKickstrike) || 0,
+      precio_aparatos: Number(form.precioAparatos) || 0,
+    }
+
     const { data, error: updateError } = await supabase
       .from('configuracion')
       .update({
-        precio_crossfit: Number(form.precioCrossfit) || 0,
-        precio_boxeo: Number(form.precioBoxeo) || 0,
-        precio_kickstrike: Number(form.precioKickstrike) || 0,
-        precio_aparatos: Number(form.precioAparatos) || 0,
+        ...precios,
         dias_tolerancia: Number(form.diasTolerancia) || 0,
         limite_cancelacion_hs: Number(form.limiteCancelacionHs) || 0,
-        banner_activo: form.bannerActivo,
-        banner_mensaje: form.bannerMensaje,
         alias_cvu: form.aliasCvu,
         titular_cuenta: form.titularCuenta,
+        notif_vencimiento_activo: form.notifVencimientoActivo,
+        notif_vencimiento_dias_antes: Number(form.notifVencimientoDiasAntes) || 0,
+        notif_clase_activo: form.notifClaseActivo,
+        notif_clase_horas_antes: Number(form.notifClaseHorasAntes) || 0,
       })
       .eq('id', 1)
       .select()
-
-    setGuardando(false)
 
     // Un UPDATE bloqueado por RLS puede volver sin `error` pero sin filas afectadas.
     if (updateError || !data || data.length === 0) {
@@ -111,12 +122,25 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
         updateError?.message ?? 'no se guardó ninguna fila (revisá las políticas RLS)',
       )
       setError('No se pudo guardar la configuración. Intentá nuevamente.')
+      setGuardando(false)
       return
     }
 
+    // Los precios que ve el socio en "Elegí tu pack" salen de `packs.price`,
+    // no de esta tabla -- sin este paso, Configuración y la PWA vuelven a
+    // desincronizarse apenas se edita un precio.
+    const resultadoSync = await sincronizarPreciosPacks(precios)
+
+    setGuardando(false)
     await onGuardado()
     setToastVisible(true)
     setTimeout(() => setToastVisible(false), 2500)
+
+    if (!resultadoSync.synced) {
+      window.alert(
+        `Se guardó la configuración, pero no se pudo sincronizar el precio de: ${resultadoSync.errores.join(', ')}. Revisá la consola.`,
+      )
+    }
   }
 
   return (
@@ -145,6 +169,10 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <ConfigCard title="💰 Planes y Precios">
+          <p className="-mt-2 text-xs text-gray-500">
+            Estos valores son la única fuente de verdad: se reflejan automáticamente en "Elegí tu pack" de la
+            app de socios.
+          </p>
           <NumberField
             label="CrossFit"
             value={form.precioCrossfit}
@@ -186,27 +214,10 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
           />
         </ConfigCard>
 
-        <ConfigCard title="📢 Banner / Anuncio para la App Mobile">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-sm text-gray-400">Mostrar banner en la app</span>
-            <Toggle
-              checked={form.bannerActivo}
-              onChange={(value) => updateField('bannerActivo', value)}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-gray-400">Mensaje del anuncio</label>
-            <textarea
-              rows={3}
-              value={form.bannerMensaje}
-              onChange={(event) => updateField('bannerMensaje', event.target.value)}
-              placeholder="Ej: Este viernes feriado abrimos de 9 a 13hs"
-              className="resize-none rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none placeholder:text-gray-600 focus:border-greenfit-primary"
-            />
-          </div>
-        </ConfigCard>
-
         <ConfigCard title="💳 Cuentas de Cobro (Mostrador)">
+          <p className="-mt-2 text-xs text-gray-500">
+            Se muestran en la app de socios al momento de pagar o renovar por transferencia.
+          </p>
           <TextField
             label="Alias / CVU"
             value={form.aliasCvu}
@@ -220,6 +231,40 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
             placeholder="Greenfit SRL"
           />
         </ConfigCard>
+
+        <ConfigCard title="🔔 Notificaciones y Recordatorios">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm text-gray-400">Recordatorio de vencimiento de cuota</span>
+            <Toggle
+              checked={form.notifVencimientoActivo}
+              onChange={(value) => updateField('notifVencimientoActivo', value)}
+            />
+          </div>
+          <NumberField
+            label="Avisar"
+            value={form.notifVencimientoDiasAntes}
+            onChange={(value) => updateField('notifVencimientoDiasAntes', value)}
+            suffix="días antes"
+            disabled={!form.notifVencimientoActivo}
+          />
+
+          <div className="mt-2 flex items-center justify-between gap-3 border-t border-white/5 pt-4">
+            <span className="text-sm text-gray-400">Recordatorio de clase reservada</span>
+            <Toggle
+              checked={form.notifClaseActivo}
+              onChange={(value) => updateField('notifClaseActivo', value)}
+            />
+          </div>
+          <NumberField
+            label="Recordar clase"
+            value={form.notifClaseHorasAntes}
+            onChange={(value) => updateField('notifClaseHorasAntes', value)}
+            suffix="hs antes"
+            disabled={!form.notifClaseActivo}
+          />
+        </ConfigCard>
+
+        <DiasCerradosCard />
       </div>
 
       {toastVisible && <Toast message="Cambios guardados correctamente" />}

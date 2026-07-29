@@ -9,8 +9,10 @@ export const configuracionPorDefecto = {
   precio_aparatos: 0,
   dias_tolerancia: 5,
   limite_cancelacion_hs: 2,
-  banner_activo: false,
-  banner_mensaje: '',
   alias_cvu: '',
   titular_cuenta: '',
+  notif_vencimiento_activo: true,
+  notif_vencimiento_dias_antes: 3,
+  notif_clase_activo: true,
+  notif_clase_horas_antes: 2,
 }
