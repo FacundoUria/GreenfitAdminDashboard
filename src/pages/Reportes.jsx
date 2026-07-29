@@ -107,7 +107,7 @@ function ChartCard({ title, data, exportFilename, tipo = 'line', dataKeyX = 'mes
         <button
           type="button"
           onClick={handleExport}
-          className="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:bg-white/5 hover:text-white disabled:opacity-60"
+          className="flex min-h-[44px] items-center gap-2 rounded-lg border border-white/10 px-3 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:bg-white/5 hover:text-white disabled:opacity-60"
           disabled={exporting}
         >
           <Download className="h-4 w-4" />
@@ -342,12 +342,12 @@ function Reportes() {
         ))}
       </div>
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-base font-semibold text-white">Evolución histórica</h2>
         <select
           value={rango}
           onChange={(event) => setRango(event.target.value)}
-          className="rounded-lg border border-white/10 bg-greenfit-card px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
+          className="min-h-[44px] rounded-lg border border-white/10 bg-greenfit-card px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
         >
           {RANGOS.map((r) => (
             <option key={r.value} value={r.value}>

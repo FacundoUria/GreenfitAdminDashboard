@@ -158,11 +158,11 @@ function Home() {
           <p className="text-sm text-gray-400">Resumen general del estado de GreenFit al día de hoy.</p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
           <button
             type="button"
             onClick={() => navigate('/socios')}
-            className="flex items-center gap-2 rounded-lg bg-greenfit-primary px-3.5 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90"
+            className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-greenfit-primary px-3.5 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90"
           >
             <UserPlus className="h-4 w-4" />
             Registrar Socio
@@ -170,7 +170,7 @@ function Home() {
           <button
             type="button"
             onClick={() => navigate('/clases')}
-            className="flex items-center gap-2 rounded-lg border border-white/10 px-3.5 py-2 text-sm font-medium text-gray-200 transition-colors hover:bg-white/5 hover:text-white"
+            className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-white/10 px-3.5 py-2 text-sm font-medium text-gray-200 transition-colors hover:bg-white/5 hover:text-white"
           >
             <CalendarPlus className="h-4 w-4" />
             Crear Clase
@@ -178,7 +178,7 @@ function Home() {
           <button
             type="button"
             onClick={() => navigate('/reportes')}
-            className="flex items-center gap-2 rounded-lg border border-white/10 px-3.5 py-2 text-sm font-medium text-gray-200 transition-colors hover:bg-white/5 hover:text-white"
+            className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-white/10 px-3.5 py-2 text-sm font-medium text-gray-200 transition-colors hover:bg-white/5 hover:text-white"
           >
             <BarChart3 className="h-4 w-4" />
             Ver Reportes

@@ -114,14 +114,15 @@ function NuevoSocioModal({ socio, onClose, onSaved }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-lg rounded-xl bg-greenfit-card p-6 shadow-xl">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 p-4">
+      <div className="mx-auto my-6 w-full max-w-lg rounded-xl bg-greenfit-card p-5 shadow-xl sm:p-6">
         <div className="mb-5 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">{esEdicion ? 'Editar Socio' : 'Nuevo Socio'}</h2>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-white/5 hover:text-white"
+            aria-label="Cerrar"
+            className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-white/5 hover:text-white"
           >
             <X className="h-5 w-5" />
           </button>
@@ -138,7 +139,7 @@ function NuevoSocioModal({ socio, onClose, onSaved }) {
               required
               value={form.nombre}
               onChange={handleChange('nombre')}
-              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
+              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
             />
           </div>
 
@@ -152,7 +153,7 @@ function NuevoSocioModal({ socio, onClose, onSaved }) {
               required
               value={form.apellido}
               onChange={handleChange('apellido')}
-              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
+              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
             />
           </div>
 
@@ -166,7 +167,7 @@ function NuevoSocioModal({ socio, onClose, onSaved }) {
               required
               value={form.dni}
               onChange={handleChange('dni')}
-              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
+              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
             />
           </div>
 
@@ -179,7 +180,7 @@ function NuevoSocioModal({ socio, onClose, onSaved }) {
               type="tel"
               value={form.telefono}
               onChange={handleChange('telefono')}
-              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
+              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
             />
           </div>
 
@@ -193,7 +194,7 @@ function NuevoSocioModal({ socio, onClose, onSaved }) {
               required
               value={form.email}
               onChange={handleChange('email')}
-              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
+              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
             />
           </div>
 
@@ -203,7 +204,7 @@ function NuevoSocioModal({ socio, onClose, onSaved }) {
               {PLANES_DISPONIBLES.map((plan) => (
                 <label
                   key={plan}
-                  className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors ${
+                  className={`flex min-h-[44px] cursor-pointer items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
                     form.planes.includes(plan)
                       ? 'border-greenfit-primary bg-greenfit-primary/10 text-white'
                       : 'border-white/10 text-gray-300 hover:bg-white/5'
@@ -232,25 +233,25 @@ function NuevoSocioModal({ socio, onClose, onSaved }) {
                 required
                 value={form.fechaInicio}
                 onChange={handleChange('fechaInicio')}
-                className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
+                className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
               />
             </div>
           )}
 
           {error && <p className="text-sm text-red-400 sm:col-span-2">{error}</p>}
 
-          <div className="mt-2 flex justify-end gap-3 sm:col-span-2">
+          <div className="mt-2 flex flex-col-reverse gap-3 sm:col-span-2 sm:flex-row sm:justify-end">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg border border-white/10 px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:bg-white/5 hover:text-white"
+              className="flex min-h-[44px] items-center justify-center rounded-lg border border-white/10 px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:bg-white/5 hover:text-white"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={guardando}
-              className="rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90 disabled:opacity-60"
+              className="flex min-h-[44px] items-center justify-center rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90 disabled:opacity-60"
             >
               {guardando ? 'Guardando...' : 'Guardar'}
             </button>

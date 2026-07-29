@@ -86,8 +86,8 @@ function NuevaClaseModal({ clase, diaPorDefecto, onClose, onSaved }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-lg rounded-xl bg-greenfit-card p-6 shadow-xl">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 p-4">
+      <div className="mx-auto my-6 w-full max-w-lg rounded-xl bg-greenfit-card p-5 shadow-xl sm:p-6">
         <div className="mb-5 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">
             {clase ? 'Editar Clase' : 'Nueva Clase'}
@@ -95,7 +95,8 @@ function NuevaClaseModal({ clase, diaPorDefecto, onClose, onSaved }) {
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-white/5 hover:text-white"
+            aria-label="Cerrar"
+            className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-white/5 hover:text-white"
           >
             <X className="h-5 w-5" />
           </button>
@@ -110,7 +111,7 @@ function NuevaClaseModal({ clase, diaPorDefecto, onClose, onSaved }) {
               id="disciplina"
               value={form.disciplina}
               onChange={handleChange('disciplina')}
-              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
+              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
             >
               {disciplinas.map((disciplina) => (
                 <option key={disciplina} value={disciplina}>
@@ -130,7 +131,7 @@ function NuevaClaseModal({ clase, diaPorDefecto, onClose, onSaved }) {
               required
               value={form.profesor}
               onChange={handleChange('profesor')}
-              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
+              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
             />
           </div>
 
@@ -142,7 +143,7 @@ function NuevaClaseModal({ clase, diaPorDefecto, onClose, onSaved }) {
                   key={numero}
                   type="button"
                   onClick={() => handleToggleDia(numero)}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                  className={`min-h-[44px] rounded-lg px-3.5 py-2 text-xs font-medium transition-colors ${
                     form.diasSemana.includes(numero)
                       ? 'bg-greenfit-primary text-greenfit-dark'
                       : 'border border-white/10 text-gray-300 hover:bg-white/5 hover:text-white'
@@ -165,7 +166,7 @@ function NuevaClaseModal({ clase, diaPorDefecto, onClose, onSaved }) {
               required
               value={form.cupoMaximo}
               onChange={handleChange('cupoMaximo')}
-              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
+              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
             />
           </div>
 
@@ -179,7 +180,7 @@ function NuevaClaseModal({ clase, diaPorDefecto, onClose, onSaved }) {
               required
               value={form.horaInicio}
               onChange={handleChange('horaInicio')}
-              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
+              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
             />
           </div>
 
@@ -193,24 +194,24 @@ function NuevaClaseModal({ clase, diaPorDefecto, onClose, onSaved }) {
               required
               value={form.horaFin}
               onChange={handleChange('horaFin')}
-              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
+              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
             />
           </div>
 
           {error && <p className="text-sm text-red-400 sm:col-span-2">{error}</p>}
 
-          <div className="mt-2 flex justify-end gap-3 sm:col-span-2">
+          <div className="mt-2 flex flex-col-reverse gap-3 sm:col-span-2 sm:flex-row sm:justify-end">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg border border-white/10 px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:bg-white/5 hover:text-white"
+              className="flex min-h-[44px] items-center justify-center rounded-lg border border-white/10 px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:bg-white/5 hover:text-white"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={guardando}
-              className="rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90 disabled:opacity-60"
+              className="flex min-h-[44px] items-center justify-center rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90 disabled:opacity-60"
             >
               {guardando ? 'Guardando...' : 'Guardar'}
             </button>

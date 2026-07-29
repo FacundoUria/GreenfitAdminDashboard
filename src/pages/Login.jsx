@@ -32,7 +32,7 @@ function Login() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-greenfit-dark px-4">
-      <div className="w-full max-w-sm rounded-xl border border-white/5 bg-greenfit-card p-8">
+      <div className="w-full max-w-sm rounded-xl border border-white/5 bg-greenfit-card p-6 sm:p-8">
         <div className="mb-6 flex flex-col items-center gap-2">
           <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-greenfit-primary">
             <Leaf className="h-7 w-7 text-greenfit-dark" />
@@ -53,7 +53,7 @@ function Login() {
               autoFocus
               value={form.usuario}
               onChange={handleChange('usuario')}
-              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
+              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
             />
           </div>
 
@@ -67,7 +67,7 @@ function Login() {
               required
               value={form.clave}
               onChange={handleChange('clave')}
-              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
+              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
             />
           </div>
 
@@ -75,7 +75,7 @@ function Login() {
 
           <button
             type="submit"
-            className="mt-2 rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90"
+            className="mt-2 flex min-h-[44px] items-center justify-center rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90"
           >
             Ingresar
           </button>

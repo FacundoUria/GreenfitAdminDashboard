@@ -1,8 +1,8 @@
-import { LogOut } from 'lucide-react'
+import { LogOut, Menu } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
 
-function Header({ title = 'Panel de administración' }) {
+function Header({ title = 'Panel de administración', onAbrirSidebar = () => {} }) {
   const { usuario, logout } = useAuth()
   const navigate = useNavigate()
 
@@ -14,11 +14,21 @@ function Header({ title = 'Panel de administración' }) {
   const iniciales = (usuario?.nombre ?? '?').charAt(0).toUpperCase()
 
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 bg-greenfit-dark px-6">
-      <h1 className="text-lg font-semibold text-white">{title}</h1>
+    <header className="flex h-16 shrink-0 items-center justify-between gap-2 border-b border-white/5 bg-greenfit-dark px-3 sm:px-6">
+      <div className="flex min-w-0 items-center gap-1 sm:gap-3">
+        <button
+          type="button"
+          onClick={onAbrirSidebar}
+          aria-label="Abrir menú"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-gray-300 transition-colors hover:bg-white/5 hover:text-white lg:hidden"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <h1 className="truncate text-base font-semibold text-white sm:text-lg">{title}</h1>
+      </div>
 
-      <div className="flex items-center gap-3">
-        <div className="text-right">
+      <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+        <div className="hidden text-right sm:block">
           <p className="text-sm font-medium text-white">{usuario?.nombre}</p>
           <p className="text-xs text-gray-400">{usuario?.rol}</p>
         </div>
@@ -29,7 +39,7 @@ function Header({ title = 'Panel de administración' }) {
           type="button"
           onClick={handleLogout}
           title="Cerrar sesión"
-          className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-white/5 hover:text-white"
+          className="flex h-11 w-11 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-white/5 hover:text-white"
         >
           <LogOut className="h-4 w-4" />
         </button>

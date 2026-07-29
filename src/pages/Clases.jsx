@@ -168,7 +168,7 @@ function Clases() {
               key={numero}
               type="button"
               onClick={() => setDiaSeleccionado(numero)}
-              className={`rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
+              className={`min-h-[44px] rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
                 diaSeleccionado === numero
                   ? 'bg-greenfit-primary text-greenfit-dark'
                   : 'bg-greenfit-card text-gray-300 hover:text-white'
@@ -182,7 +182,7 @@ function Clases() {
         <button
           type="button"
           onClick={handleAbrirNuevaClase}
-          className="flex items-center justify-center gap-2 rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90"
+          className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90"
         >
           <Plus className="h-4 w-4" />
           Nueva Clase

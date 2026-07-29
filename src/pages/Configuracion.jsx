@@ -121,7 +121,7 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-xl font-semibold text-white">Configuración del Gimnasio</h2>
           <p className="text-sm text-gray-400">Precios, reglas de negocio y datos para cobros.</p>
@@ -130,7 +130,7 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
           type="button"
           onClick={handleGuardar}
           disabled={guardando}
-          className="flex items-center gap-2 rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90 disabled:opacity-60"
+          className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90 disabled:opacity-60"
         >
           <Save className="h-4 w-4" />
           {guardando ? 'Guardando...' : 'Guardar Cambios'}

@@ -5,7 +5,7 @@ function Toggle({ checked, onChange, label }) {
       role="switch"
       aria-checked={checked}
       onClick={() => onChange(!checked)}
-      className="flex items-center justify-between gap-3"
+      className="flex min-h-[44px] items-center justify-between gap-3"
     >
       {label && <span className="text-sm text-gray-300">{label}</span>}
       <span

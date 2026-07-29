@@ -36,7 +36,7 @@ function WhatsAppModal({ socios, presetInicial, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-xl bg-greenfit-card p-6 shadow-xl">
+      <div className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-xl bg-greenfit-card p-5 shadow-xl sm:p-6">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="flex items-center gap-2 text-lg font-semibold text-white">
             <MessageCircle className="h-5 w-5 text-[#25D366]" />
@@ -45,7 +45,8 @@ function WhatsAppModal({ socios, presetInicial, onClose }) {
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-white/5 hover:text-white"
+            aria-label="Cerrar"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-white/5 hover:text-white"
           >
             <X className="h-5 w-5" />
           </button>
@@ -57,7 +58,7 @@ function WhatsAppModal({ socios, presetInicial, onClose }) {
               key={p.value}
               type="button"
               onClick={() => setPreset(p.value)}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+              className={`min-h-[44px] rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                 preset === p.value
                   ? 'bg-greenfit-primary text-greenfit-dark'
                   : 'border border-white/10 text-gray-300 hover:bg-white/5 hover:text-white'
@@ -92,13 +93,13 @@ function WhatsAppModal({ socios, presetInicial, onClose }) {
               const yaEnviado = enviados.has(socio.id)
               const sinTelefono = !socio.telefono
               return (
-                <li key={socio.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
-                  <div className="flex items-center gap-3">
+                <li key={socio.id} className="flex items-center justify-between gap-2 px-3 py-2 sm:gap-3 sm:px-4 sm:py-2.5">
+                  <div className="flex min-w-0 items-center gap-3">
                     <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-greenfit-primary/15 text-xs font-semibold text-greenfit-primary">
                       {iniciales(socio.nombre, socio.apellido)}
                     </div>
-                    <div>
-                      <p className="text-sm text-white">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm text-white">
                         {socio.nombre} {socio.apellido}
                       </p>
                       {sinTelefono && <p className="text-xs text-red-400">Sin teléfono cargado</p>}
@@ -109,7 +110,7 @@ function WhatsAppModal({ socios, presetInicial, onClose }) {
                     type="button"
                     onClick={() => handleEnviar(socio)}
                     disabled={sinTelefono}
-                    className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                    className={`flex h-10 shrink-0 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                       yaEnviado
                         ? 'bg-white/5 text-gray-400'
                         : 'bg-[#25D366]/15 text-[#25D366] hover:bg-[#25D366]/25'
@@ -137,7 +138,7 @@ function WhatsAppModal({ socios, presetInicial, onClose }) {
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-white/10 px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:bg-white/5 hover:text-white"
+            className="flex min-h-[44px] w-full items-center justify-center rounded-lg border border-white/10 px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:bg-white/5 hover:text-white sm:w-auto"
           >
             Cerrar
           </button>

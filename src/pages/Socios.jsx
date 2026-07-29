@@ -300,14 +300,14 @@ function Socios() {
               value={busqueda}
               onChange={(event) => setBusqueda(event.target.value)}
               placeholder="Buscar por nombre, apellido o DNI..."
-              className="w-full rounded-lg border border-white/10 bg-greenfit-card py-2 pl-9 pr-3 text-sm text-white placeholder:text-gray-500 outline-none focus:border-greenfit-primary"
+              className="w-full rounded-lg border border-white/10 bg-greenfit-card py-2.5 pl-9 pr-3 text-sm text-white placeholder:text-gray-500 outline-none focus:border-greenfit-primary"
             />
           </div>
 
           <select
             value={filtroEstado}
             onChange={(event) => setFiltroEstado(event.target.value)}
-            className="rounded-lg border border-white/10 bg-greenfit-card px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
+            className="min-h-[44px] rounded-lg border border-white/10 bg-greenfit-card px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
           >
             {filtroOptions.map((option) => (
               <option key={option.value} value={option.value}>
@@ -317,12 +317,12 @@ function Socios() {
           </select>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           {seleccionados.size > 0 && (
             <button
               type="button"
               onClick={handleAbrirWhatsappSeleccionados}
-              className="flex items-center justify-center gap-2 rounded-lg bg-[#25D366]/15 px-4 py-2 text-sm font-semibold text-[#25D366] transition-colors hover:bg-[#25D366]/25"
+              className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-[#25D366]/15 px-4 py-2 text-sm font-semibold text-[#25D366] transition-colors hover:bg-[#25D366]/25"
             >
               <MessageCircle className="h-4 w-4" />
               WhatsApp a Seleccionados ({seleccionados.size})
@@ -331,7 +331,7 @@ function Socios() {
           <button
             type="button"
             onClick={handleNotificarDeudores}
-            className="flex items-center justify-center gap-2 rounded-lg border border-white/10 px-4 py-2 text-sm font-medium text-gray-200 transition-colors hover:bg-white/5 hover:text-white"
+            className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-white/10 px-4 py-2 text-sm font-medium text-gray-200 transition-colors hover:bg-white/5 hover:text-white"
           >
             <MessageCircle className="h-4 w-4" />
             Notificar a Deudores
@@ -339,7 +339,7 @@ function Socios() {
           <button
             type="button"
             onClick={handleAbrirNuevoSocio}
-            className="flex items-center justify-center gap-2 rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90"
+            className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90"
           >
             <Plus className="h-4 w-4" />
             Nuevo Socio

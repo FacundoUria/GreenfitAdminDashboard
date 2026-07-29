@@ -106,7 +106,7 @@ function Notas() {
         <div>
           <button
             type="submit"
-            className="flex items-center gap-2 rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90"
+            className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90 sm:w-auto"
           >
             <Plus className="h-4 w-4" />
             Agregar Nota
@@ -114,13 +114,13 @@ function Notas() {
         </div>
       </form>
 
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         {FILTROS.map((f) => (
           <button
             key={f.value}
             type="button"
             onClick={() => setFiltro(f.value)}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+            className={`min-h-[44px] rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
               filtro === f.value
                 ? 'bg-greenfit-primary text-greenfit-dark'
                 : 'bg-greenfit-card text-gray-300 hover:text-white'
@@ -152,7 +152,7 @@ function Notas() {
                   type="button"
                   onClick={() => handleToggleEstado(nota)}
                   title={completada ? 'Marcar como pendiente' : 'Marcar como completada'}
-                  className="mt-0.5 shrink-0 text-gray-400 transition-colors hover:text-greenfit-primary"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-white/5 hover:text-greenfit-primary"
                 >
                   {completada ? (
                     <CheckCircle2 className="h-5 w-5 text-greenfit-primary" />
@@ -161,7 +161,7 @@ function Notas() {
                   )}
                 </button>
 
-                <div className="flex-1">
+                <div className="min-w-0 flex-1">
                   <p
                     className={`text-sm font-medium ${
                       completada ? 'text-gray-400 line-through' : 'text-white'
@@ -179,7 +179,7 @@ function Notas() {
                   type="button"
                   onClick={() => eliminarNota(nota.id)}
                   title="Eliminar"
-                  className="shrink-0 text-gray-500 transition-colors hover:text-red-400"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-white/5 hover:text-red-400"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>

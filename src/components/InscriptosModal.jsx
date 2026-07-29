@@ -15,10 +15,10 @@ function InscriptosModal({ open, clase, onClose, onMarcarAsistencia }) {
   if (!open || !clase) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-lg rounded-xl bg-greenfit-card p-6 shadow-xl">
-        <div className="mb-5 flex items-start justify-between">
-          <div>
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 p-4">
+      <div className="mx-auto my-6 w-full max-w-lg rounded-xl bg-greenfit-card p-5 shadow-xl sm:p-6">
+        <div className="mb-5 flex items-start justify-between gap-3">
+          <div className="min-w-0">
             <h2 className="text-lg font-semibold text-white">{clase.disciplina}</h2>
             <p className="text-sm text-gray-400">
               {nombresDias(clase.diasSemana)} · {clase.horaInicio} - {clase.horaFin} · Prof. {clase.profesor}
@@ -27,13 +27,14 @@ function InscriptosModal({ open, clase, onClose, onMarcarAsistencia }) {
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-white/5 hover:text-white"
+            aria-label="Cerrar"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-white/5 hover:text-white"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="max-h-96 overflow-y-auto">
+        <div className="max-h-[60vh] overflow-y-auto">
           {clase.inscriptos.length === 0 ? (
             <p className="py-8 text-center text-sm text-gray-400">
               Todavía no hay socios inscriptos en esta clase.
@@ -41,13 +42,13 @@ function InscriptosModal({ open, clase, onClose, onMarcarAsistencia }) {
           ) : (
             <ul className="divide-y divide-white/5">
               {clase.inscriptos.map((inscripto) => (
-                <li key={inscripto.id} className="flex items-center justify-between gap-3 py-3">
-                  <div className="flex items-center gap-3">
+                <li key={inscripto.id} className="flex items-center justify-between gap-2 py-3">
+                  <div className="flex min-w-0 items-center gap-3">
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-greenfit-primary/15 text-xs font-semibold text-greenfit-primary">
                       {iniciales(inscripto.nombre, inscripto.apellido)}
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-white">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-white">
                         {inscripto.nombre} {inscripto.apellido}
                       </p>
                       <p className="text-xs text-gray-400">
@@ -60,12 +61,13 @@ function InscriptosModal({ open, clase, onClose, onMarcarAsistencia }) {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex shrink-0 items-center gap-1.5">
                     <button
                       type="button"
                       title="Marcar Asistió"
+                      aria-label="Marcar Asistió"
                       onClick={() => onMarcarAsistencia(clase.id, inscripto.id, true)}
-                      className={`rounded-lg p-2 transition-colors ${
+                      className={`flex h-11 w-11 items-center justify-center rounded-lg transition-colors ${
                         inscripto.asistio === true
                           ? 'bg-greenfit-primary/15 text-greenfit-primary'
                           : 'text-gray-400 hover:bg-white/10 hover:text-greenfit-primary'
@@ -76,8 +78,9 @@ function InscriptosModal({ open, clase, onClose, onMarcarAsistencia }) {
                     <button
                       type="button"
                       title="Marcar Ausente"
+                      aria-label="Marcar Ausente"
                       onClick={() => onMarcarAsistencia(clase.id, inscripto.id, false)}
-                      className={`rounded-lg p-2 transition-colors ${
+                      className={`flex h-11 w-11 items-center justify-center rounded-lg transition-colors ${
                         inscripto.asistio === false
                           ? 'bg-red-500/15 text-red-400'
                           : 'text-gray-400 hover:bg-white/10 hover:text-red-400'

@@ -66,7 +66,7 @@ function ClaseCard({ clase, onVerInscriptos, onEditar, onCancelar }) {
           <button
             type="button"
             onClick={() => onVerInscriptos(clase)}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-white/10 px-2 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:bg-white/5 hover:text-white"
+            className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-lg border border-white/10 px-2 text-xs font-medium text-gray-300 transition-colors hover:bg-white/5 hover:text-white"
           >
             <Eye className="h-3.5 w-3.5" />
             Ver Inscriptos
@@ -74,14 +74,16 @@ function ClaseCard({ clase, onVerInscriptos, onEditar, onCancelar }) {
           <button
             type="button"
             onClick={() => onEditar(clase)}
-            className="flex items-center justify-center gap-1.5 rounded-lg border border-white/10 px-2 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:bg-white/5 hover:text-white"
+            aria-label="Editar"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/10 text-gray-300 transition-colors hover:bg-white/5 hover:text-white"
           >
             <Pencil className="h-3.5 w-3.5" />
           </button>
           <button
             type="button"
             onClick={() => onCancelar(clase)}
-            className="flex items-center justify-center gap-1.5 rounded-lg border border-white/10 px-2 py-1.5 text-xs font-medium text-red-400 transition-colors hover:bg-red-500/10"
+            aria-label="Cancelar clase"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/10 text-red-400 transition-colors hover:bg-red-500/10"
           >
             <Ban className="h-3.5 w-3.5" />
           </button>
