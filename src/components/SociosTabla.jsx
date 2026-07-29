@@ -1,5 +1,6 @@
-import { CreditCard, MessageCircle, Minus, Pencil, Plus } from 'lucide-react'
-import { esPlanDeCreditos, formatearPlanes } from '../utils/planes'
+import { useState } from 'react'
+import { CreditCard, MessageCircle, Minus, Pencil, Plus, UserX, UserCheck } from 'lucide-react'
+import { esPlanDeCreditos, formatearPlanes, planesDeCreditos } from '../utils/planes'
 import { formatFecha } from '../utils/fecha'
 
 const PACKS_RAPIDOS = [4, 8, 12]
@@ -19,6 +20,16 @@ const estadoLabels = {
 }
 
 function EstadoBadge({ socio }) {
+  // La baja de cuenta es más fundamental que el estado de pago -- un socio
+  // dado de baja se marca así sin importar si tiene créditos o la cuota al día.
+  if (socio.activo === false) {
+    return (
+      <span className="inline-flex shrink-0 items-center rounded-full bg-white/10 px-2.5 py-1 text-xs font-medium text-gray-400">
+        Inactivo
+      </span>
+    )
+  }
+
   if (esPlanDeCreditos(socio.plan)) {
     const sinCreditos = (socio.creditos ?? 0) <= 0
     return (
@@ -45,17 +56,39 @@ function EstadoBadge({ socio }) {
 }
 
 function CreditosCell({ socio, onAjustarCredito }) {
+  const disciplinas = planesDeCreditos(socio.plan)
+  const [disciplinaElegida, setDisciplinaElegida] = useState(disciplinas[0] ?? null)
+
   if (!esPlanDeCreditos(socio.plan)) {
     return <span className="text-gray-600">—</span>
   }
 
+  // El contador de arriba es el total del panel (suma de todas las
+  // actividades) -- con más de una disciplina de créditos, hay que elegir
+  // primero a cuál de todas van a impactar los botones de ajuste rápido.
+  const disciplinaActiva = disciplinas.includes(disciplinaElegida) ? disciplinaElegida : disciplinas[0]
+
   return (
     <div className="flex flex-col gap-2">
+      {disciplinas.length > 1 && (
+        <select
+          value={disciplinaActiva ?? ''}
+          onChange={(e) => setDisciplinaElegida(e.target.value)}
+          aria-label="Disciplina a ajustar"
+          className="rounded-md border border-white/10 bg-greenfit-dark px-1.5 py-1 text-[11px] text-gray-300 outline-none focus:border-greenfit-primary"
+        >
+          {disciplinas.map((d) => (
+            <option key={d} value={d}>
+              {d}
+            </option>
+          ))}
+        </select>
+      )}
       <div className="flex items-center gap-2">
         <button
           type="button"
-          title="Restar 1 crédito"
-          onClick={() => onAjustarCredito(socio, -1)}
+          title={`Restar 1 crédito${disciplinas.length > 1 ? ` de ${disciplinaActiva}` : ''}`}
+          onClick={() => onAjustarCredito(socio, -1, disciplinaActiva)}
           className="flex h-10 w-10 items-center justify-center rounded-md border border-white/10 text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
         >
           <Minus className="h-3.5 w-3.5" />
@@ -63,8 +96,8 @@ function CreditosCell({ socio, onAjustarCredito }) {
         <span className="w-6 text-center text-sm font-semibold text-white">{socio.creditos ?? 0}</span>
         <button
           type="button"
-          title="Sumar 1 crédito"
-          onClick={() => onAjustarCredito(socio, 1)}
+          title={`Sumar 1 crédito${disciplinas.length > 1 ? ` a ${disciplinaActiva}` : ''}`}
+          onClick={() => onAjustarCredito(socio, 1, disciplinaActiva)}
           className="flex h-10 w-10 items-center justify-center rounded-md border border-white/10 text-gray-300 transition-colors hover:bg-white/10 hover:text-greenfit-primary"
         >
           <Plus className="h-3.5 w-3.5" />
@@ -75,8 +108,8 @@ function CreditosCell({ socio, onAjustarCredito }) {
           <button
             key={cantidad}
             type="button"
-            title={`Asignar pack de ${cantidad} créditos`}
-            onClick={() => onAjustarCredito(socio, cantidad)}
+            title={`Asignar pack de ${cantidad} créditos${disciplinas.length > 1 ? ` a ${disciplinaActiva}` : ''}`}
+            onClick={() => onAjustarCredito(socio, cantidad, disciplinaActiva)}
             className="rounded-md border border-white/10 px-2 py-2 text-[11px] font-medium text-gray-400 transition-colors hover:bg-white/10 hover:text-greenfit-primary"
           >
             +{cantidad}
@@ -102,7 +135,7 @@ function iniciales(nombre, apellido) {
   return `${(nombre ?? '?').charAt(0)}${(apellido ?? '').charAt(0)}`.toUpperCase()
 }
 
-function SocioAcciones({ socio, onRegistrarPago, onEditar, onAbrirWhatsapp }) {
+function SocioAcciones({ socio, onRegistrarPago, onEditar, onAbrirWhatsapp, onCambiarBaja }) {
   return (
     <div className="flex items-center gap-2">
       <button
@@ -132,6 +165,17 @@ function SocioAcciones({ socio, onRegistrarPago, onEditar, onAbrirWhatsapp }) {
       >
         <Pencil className="h-4 w-4" />
       </button>
+      <button
+        type="button"
+        title={socio.activo === false ? 'Reactivar socio' : 'Dar de baja'}
+        aria-label={socio.activo === false ? 'Reactivar socio' : 'Dar de baja'}
+        onClick={() => onCambiarBaja(socio)}
+        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors ${
+          socio.activo === false ? 'hover:bg-greenfit-primary/15 hover:text-greenfit-primary' : 'hover:bg-red-500/15 hover:text-red-400'
+        }`}
+      >
+        {socio.activo === false ? <UserCheck className="h-4 w-4" /> : <UserX className="h-4 w-4" />}
+      </button>
     </div>
   )
 }
@@ -142,6 +186,7 @@ function SocioCard({
   onEditar,
   onAjustarCredito,
   onAbrirWhatsapp,
+  onCambiarBaja,
   seleccionado,
   onToggleSeleccionado,
 }) {
@@ -196,6 +241,7 @@ function SocioCard({
           onRegistrarPago={onRegistrarPago}
           onEditar={onEditar}
           onAbrirWhatsapp={onAbrirWhatsapp}
+          onCambiarBaja={onCambiarBaja}
         />
       </div>
     </div>
@@ -208,6 +254,7 @@ function SociosTabla({
   onEditar,
   onAjustarCredito,
   onAbrirWhatsapp,
+  onCambiarBaja,
   seleccionados,
   onToggleSeleccionado,
   onToggleSeleccionarTodos,
@@ -245,6 +292,7 @@ function SociosTabla({
             onEditar={onEditar}
             onAjustarCredito={onAjustarCredito}
             onAbrirWhatsapp={onAbrirWhatsapp}
+            onCambiarBaja={onCambiarBaja}
             seleccionado={seleccionados.has(socio.id)}
             onToggleSeleccionado={() => onToggleSeleccionado(socio.id)}
           />
@@ -336,6 +384,18 @@ function SociosTabla({
                       className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-white/10 hover:text-white"
                     >
                       <Pencil className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      title={socio.activo === false ? 'Reactivar socio' : 'Dar de baja'}
+                      onClick={() => onCambiarBaja(socio)}
+                      className={`rounded-lg p-2 text-gray-400 transition-colors ${
+                        socio.activo === false
+                          ? 'hover:bg-greenfit-primary/15 hover:text-greenfit-primary'
+                          : 'hover:bg-red-500/15 hover:text-red-400'
+                      }`}
+                    >
+                      {socio.activo === false ? <UserCheck className="h-4 w-4" /> : <UserX className="h-4 w-4" />}
                     </button>
                   </div>
                 </td>

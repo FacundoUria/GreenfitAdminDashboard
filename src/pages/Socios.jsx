@@ -20,8 +20,8 @@ import {
   proximoVencimiento,
   toISODate,
 } from '../utils/fecha'
-import { planesDeCreditos } from '../utils/planes'
-import { sincronizarCreditosPwa, sincronizarVencimientoPwa } from '../utils/creditosPwa'
+import { planesDeCreditos, PLANES_DISPONIBLES } from '../utils/planes'
+import { sincronizarCreditosPwa, sincronizarVencimientoPwa, sincronizarEstadoCuentaPwa } from '../utils/creditosPwa'
 import SociosTabla from '../components/SociosTabla'
 import NuevoSocioModal from '../components/NuevoSocioModal'
 import RegistrarPagoModal from '../components/RegistrarPagoModal'
@@ -45,8 +45,11 @@ const filtroOptions = [
   { value: 'por_vencer', label: `Por Vencer (${DIAS_POR_VENCER} días)` },
   { value: 'tolerancia', label: 'En Tolerancia' },
   { value: 'nuevo', label: 'Nuevos del Mes' },
+  { value: 'inactivo_cuenta', label: 'Inactivos (dados de baja)' },
   { value: 'todos', label: 'Todos' },
 ]
+
+const filtroPlanOptions = [{ value: 'todos', label: 'Todos los planes' }, ...PLANES_DISPONIBLES.map((p) => ({ value: p, label: p }))]
 
 // Activo (no vencido, no en tolerancia) y con fecha_vencimiento dentro de los
 // próximos DIAS_POR_VENCER días -- mismo criterio que usa el widget del
@@ -77,6 +80,7 @@ function mapearSocio(row) {
     fechaInicio: row.created_at,
     ultimoPago: formatFecha(row.ultimo_pago),
     creditos: row.creditos ?? 0,
+    activo: row.activo ?? true,
   }
 }
 
@@ -94,6 +98,7 @@ function Socios() {
   const [filtroEstado, setFiltroEstado] = useState(
     () => filtroOptions.find((o) => o.value === searchParams.get('filtro'))?.value ?? 'activo',
   )
+  const [filtroPlan, setFiltroPlan] = useState('todos')
   const [modalAbierto, setModalAbierto] = useState(false)
   const [socioEnEdicion, setSocioEnEdicion] = useState(null)
   const [socioParaPago, setSocioParaPago] = useState(null)
@@ -164,18 +169,27 @@ function Socios() {
         `${socio.nombre} ${socio.apellido}`.toLowerCase().includes(termino) ||
         (socio.dni ?? '').toLowerCase().includes(termino)
 
+      // La baja de cuenta es un estado aparte del estado de pago -- un socio
+      // dado de baja no debe mezclarse en Activo/Vencido/etc, solo aparece
+      // en "Inactivos" o en "Todos".
       const coincideEstado =
         filtroEstado === 'todos'
           ? true
-          : filtroEstado === 'nuevo'
-            ? esDelMesActual(socio.fechaInicio)
-            : filtroEstado === 'por_vencer'
-              ? estaPorVencer(socio)
-              : (socio.estado ?? '').toLowerCase() === filtroEstado
+          : filtroEstado === 'inactivo_cuenta'
+            ? socio.activo === false
+            : socio.activo === false
+              ? false
+              : filtroEstado === 'nuevo'
+                ? esDelMesActual(socio.fechaInicio)
+                : filtroEstado === 'por_vencer'
+                  ? estaPorVencer(socio)
+                  : (socio.estado ?? '').toLowerCase() === filtroEstado
 
-      return coincideBusqueda && coincideEstado
+      const coincidePlan = filtroPlan === 'todos' || (socio.plan ?? []).includes(filtroPlan)
+
+      return coincideBusqueda && coincideEstado && coincidePlan
     })
-  }, [sociosConEstado, busqueda, filtroEstado])
+  }, [sociosConEstado, busqueda, filtroEstado, filtroPlan])
 
   const handleKpiClick = (key) => {
     setFiltroEstado((prev) => (prev === key ? 'todos' : key))
@@ -191,7 +205,7 @@ function Socios() {
     setModalAbierto(true)
   }
 
-  const handleAjustarCredito = async (socio, delta) => {
+  const handleAjustarCredito = async (socio, delta, disciplina) => {
     const nuevoValor = Math.max(0, (socio.creditos ?? 0) + delta)
 
     const { data, error: updateError } = await supabase
@@ -209,18 +223,47 @@ function Socios() {
       return
     }
 
-    // El ajuste rápido +/-1 solo se sincroniza con la app cuando la
-    // actividad de créditos es inequívoca. Con varias (ej: CrossFit +
-    // Kickboxing) no hay forma de saber a cuál de las dos va este click sin
-    // preguntar, así que para esos casos hay que usar "Registrar pago".
-    const [unicaDisciplina, ...resto] = planesDeCreditos(socio.plan)
-    if (unicaDisciplina && resto.length === 0) {
-      await sincronizarCreditosPwa({ dni: socio.dni, disciplina: unicaDisciplina, delta })
-    } else if (resto.length > 0) {
-      setToastMessage('Créditos del panel actualizados. Para sincronizar con la app usá "Registrar pago" (tiene varias actividades).')
-      setTimeout(() => setToastMessage(null), 4000)
+    // `disciplina` viene del selector de CreditosCell cuando el socio tiene
+    // más de una actividad de créditos -- con una sola no hace falta elegir.
+    const disciplinaDestino = disciplina ?? planesDeCreditos(socio.plan)[0]
+    if (disciplinaDestino) {
+      const resultado = await sincronizarCreditosPwa({ dni: socio.dni, disciplina: disciplinaDestino, delta })
+      if (!resultado.synced && resultado.reason !== 'sin_cuenta_pwa') {
+        setToastMessage(`Créditos del panel actualizados, pero no se pudo sincronizar ${disciplinaDestino} con la app.`)
+        setTimeout(() => setToastMessage(null), 4000)
+      }
     }
 
+    fetchSocios()
+  }
+
+  const handleCambiarBaja = async (socio) => {
+    const nuevoActivo = socio.activo === false
+    const accion = nuevoActivo ? 'reactivar' : 'dar de baja a'
+    if (!window.confirm(`¿Confirmás ${accion} ${socio.nombre} ${socio.apellido}?`)) return
+
+    const { data, error: updateError } = await supabase
+      .from('socios')
+      .update({ activo: nuevoActivo })
+      .eq('id', socio.id)
+      .select()
+
+    if (updateError || !data || data.length === 0) {
+      console.error(
+        'Error al cambiar el estado de baja del socio:',
+        updateError?.message ?? 'no se actualizó ninguna fila (revisá las políticas RLS)',
+      )
+      window.alert('No se pudo actualizar el estado del socio. Intentá nuevamente.')
+      return
+    }
+
+    const resultado = await sincronizarEstadoCuentaPwa({ dni: socio.dni, activo: nuevoActivo })
+    let mensaje = nuevoActivo ? 'Socio reactivado' : 'Socio dado de baja'
+    if (!resultado.synced && resultado.reason !== 'sin_cuenta_pwa') {
+      mensaje += ' (no se pudo sincronizar el acceso en la app -- revisá la consola)'
+    }
+    setToastMessage(mensaje)
+    setTimeout(() => setToastMessage(null), 3000)
     fetchSocios()
   }
 
@@ -375,6 +418,19 @@ function Socios() {
               </option>
             ))}
           </select>
+
+          <select
+            value={filtroPlan}
+            onChange={(event) => setFiltroPlan(event.target.value)}
+            aria-label="Filtrar por plan/disciplina"
+            className="min-h-[44px] rounded-lg border border-white/10 bg-greenfit-card px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
+          >
+            {filtroPlanOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
@@ -430,6 +486,7 @@ function Socios() {
           onEditar={handleEditar}
           onAjustarCredito={handleAjustarCredito}
           onAbrirWhatsapp={handleAbrirWhatsappIndividual}
+          onCambiarBaja={handleCambiarBaja}
           seleccionados={seleccionados}
           onToggleSeleccionado={handleToggleSeleccionado}
           onToggleSeleccionarTodos={handleToggleSeleccionarTodos}

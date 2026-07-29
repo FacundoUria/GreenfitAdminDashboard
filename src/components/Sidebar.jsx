@@ -10,6 +10,7 @@ import {
   ExternalLink,
   X,
   ClipboardList,
+  Tags,
 } from 'lucide-react'
 import logo from '../assets/logo.jpg'
 
@@ -17,6 +18,7 @@ const navItems = [
   { to: '/', label: 'Home', icon: Home, end: true },
   { to: '/socios', label: 'Socios', icon: Users },
   { to: '/clases', label: 'Clases', icon: Dumbbell },
+  { to: '/disciplinas', label: 'Disciplinas', icon: Tags },
   { to: '/rutinas', label: 'Rutinas', icon: ClipboardList },
   { to: '/reportes', label: 'Reportes', icon: BarChart3 },
   { to: '/notas', label: 'Notas', icon: NotebookPen },

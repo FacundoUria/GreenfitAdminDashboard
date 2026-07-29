@@ -96,3 +96,19 @@ export async function sincronizarVencimientoPwa({ dni, fechaVencimiento }) {
   }
   return { synced: true }
 }
+
+// Baja lógica: `profiles.active` es lo que de verdad bloquea el login y las
+// reservas (AuthContext y el RPC book_class lo chequean del lado servidor);
+// `socios.activo` es solo el reflejo de esto en el panel admin. Sin este
+// puente, dar de baja a alguien acá no le impediría seguir usando la PWA.
+export async function sincronizarEstadoCuentaPwa({ dni, activo }) {
+  const userId = await resolverUserId(dni)
+  if (!userId) return { synced: false, reason: 'sin_cuenta_pwa' }
+
+  const { error } = await supabase.from('profiles').update({ active: activo }).eq('id', userId)
+  if (error) {
+    console.error('No se pudo sincronizar el estado de la cuenta con la PWA:', error.message)
+    return { synced: false, reason: 'error_supabase' }
+  }
+  return { synced: true }
+}

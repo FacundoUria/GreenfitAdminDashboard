@@ -42,17 +42,29 @@ function NuevaClaseModal({ clase, diaPorDefecto, onClose, onSaved }) {
     let activo = true
     supabase
       .from('disciplines')
-      .select('id, name')
+      .select('id, name, is_active')
+      .eq('is_active', true)
       .order('name')
-      .then(({ data, error: fetchError }) => {
+      .then(async ({ data, error: fetchError }) => {
         if (!activo) return
         if (fetchError) {
           console.error('Error al cargar disciplinas:', fetchError.message)
           setCargandoDisciplinas(false)
           return
         }
-        setDisciplinas(data ?? [])
-        setForm((prev) => (prev.disciplinaId ? prev : { ...prev, disciplinaId: data?.[0]?.id ?? '' }))
+        let lista = data ?? []
+        // Si se está editando una clase cuya disciplina ya fue desactivada,
+        // la agregamos igual a la lista (marcada) para no perder/cambiar sin
+        // querer la disciplina real de la clase -- solo se excluyen las
+        // inactivas como opción para clases NUEVAS.
+        const idActual = clase?.disciplinaId
+        if (idActual && !lista.some((d) => d.id === idActual)) {
+          const { data: actual } = await supabase.from('disciplines').select('id, name').eq('id', idActual).maybeSingle()
+          if (actual) lista = [...lista, { ...actual, is_active: false }]
+        }
+        if (!activo) return
+        setDisciplinas(lista)
+        setForm((prev) => (prev.disciplinaId ? prev : { ...prev, disciplinaId: lista?.[0]?.id ?? '' }))
         setCargandoDisciplinas(false)
       })
     return () => {
@@ -168,6 +180,7 @@ function NuevaClaseModal({ clase, diaPorDefecto, onClose, onSaved }) {
               {disciplinas.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.name}
+                  {d.is_active === false ? ' (inactiva)' : ''}
                 </option>
               ))}
             </select>
