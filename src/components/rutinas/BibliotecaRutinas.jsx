@@ -103,7 +103,6 @@ function BibliotecaRutinas() {
             <div key={p.id} className="flex flex-col gap-3 rounded-xl border border-white/5 bg-greenfit-card p-5">
               <div>
                 <p className="text-sm font-semibold text-white">{p.title}</p>
-                {p.coachName && <p className="mt-0.5 text-xs text-gray-400">Coach: {p.coachName}</p>}
               </div>
               <div className="mt-auto flex items-center gap-2 border-t border-white/5 pt-3">
                 <button

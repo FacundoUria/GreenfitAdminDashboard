@@ -29,7 +29,6 @@ function RutinaEditorModal({ routineId, socioPreset, onClose, onSaved }) {
   const [ejerciciosDisponibles, setEjerciciosDisponibles] = useState([])
 
   const [titulo, setTitulo] = useState('')
-  const [coach, setCoach] = useState('')
   const [notas, setNotas] = useState('')
   const [esPlantilla, setEsPlantilla] = useState(!socioPreset)
   const [dias, setDias] = useState([diaVacio(1)])
@@ -46,7 +45,6 @@ function RutinaEditorModal({ routineId, socioPreset, onClose, onSaved }) {
           const rutina = await fetchRoutineFull(routineId)
           if (!activo) return
           setTitulo(rutina.title)
-          setCoach(rutina.coachName)
           setNotas(rutina.notes)
           setEsPlantilla(rutina.isTemplate)
           setDias(
@@ -148,7 +146,7 @@ function RutinaEditorModal({ routineId, socioPreset, onClose, onSaved }) {
       await saveRoutineFull({
         id: routineId ?? null,
         title: titulo,
-        coachName: coach,
+        coachName: null,
         notes: notas,
         isTemplate: esPlantilla,
         userId: socioPreset?.id ?? null,
@@ -197,17 +195,7 @@ function RutinaEditorModal({ routineId, socioPreset, onClose, onSaved }) {
                   className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none placeholder:text-gray-600 focus:border-greenfit-primary"
                 />
               </div>
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-medium text-gray-400">Entrenador</label>
-                <input
-                  type="text"
-                  value={coach}
-                  onChange={(e) => setCoach(e.target.value)}
-                  placeholder="Ej: Seba"
-                  className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none placeholder:text-gray-600 focus:border-greenfit-primary"
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
+              <div className="flex flex-col gap-1.5 sm:col-span-2">
                 <label className="text-xs font-medium text-gray-400">Notas generales</label>
                 <input
                   type="text"

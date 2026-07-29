@@ -167,7 +167,6 @@ function AsignacionSocios() {
                   <p className="text-xs text-gray-400">
                     {rutinaSocio.days.length} día{rutinaSocio.days.length !== 1 ? 's' : ''} ·{' '}
                     {totalEjercicios(rutinaSocio)} ejercicios
-                    {rutinaSocio.coachName ? ` · Coach: ${rutinaSocio.coachName}` : ''}
                   </p>
                 </div>
                 <button
