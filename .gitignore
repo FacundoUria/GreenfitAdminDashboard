@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 
+# Credenciales guardadas a mano localmente -- nunca deben terminar en el repo
+credenciales*.txt
+
+# Estado local del CLI de Supabase (supabase link) -- cache/config de esta
+# máquina, no del proyecto
+supabase/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

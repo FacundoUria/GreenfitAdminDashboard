@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Loader2, Megaphone, Send } from 'lucide-react'
+import { AlertTriangle, Loader2, Megaphone, Send } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 
 const AUDIENCIAS = [
@@ -102,7 +102,7 @@ function Anunciar() {
         return
       }
 
-      setResultado(data)
+      setResultado({ ...data, audienciaEnviada: audiencia })
       setTitulo('')
       setMensaje('')
       fetchHistorial()
@@ -198,12 +198,19 @@ function Anunciar() {
 
           {error && <p className="text-sm text-red-400">{error}</p>}
 
-          {resultado && (
-            <p className="text-sm text-greenfit-primary">
-              Anuncio enviado a {resultado.destinatarios} socio(s) · {resultado.enviados} push entregados
-              {resultado.expirados > 0 ? ` · ${resultado.expirados} suscripciones vencidas se limpiaron` : ''}
-              {resultado.errores?.length > 0 ? ` · ${resultado.errores.length} error(es)` : ''}
-            </p>
+          {resultado && resultado.audienciaEnviada === 'user' && resultado.enviados === 0 ? (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-400">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>El socio existe pero aún no ha activado las notificaciones push en su dispositivo.</span>
+            </div>
+          ) : (
+            resultado && (
+              <p className="text-sm text-greenfit-primary">
+                Anuncio enviado a {resultado.destinatarios} socio(s) · {resultado.enviados} push entregados
+                {resultado.expirados > 0 ? ` · ${resultado.expirados} suscripciones vencidas se limpiaron` : ''}
+                {resultado.errores?.length > 0 ? ` · ${resultado.errores.length} error(es)` : ''}
+              </p>
+            )
           )}
 
           <button
