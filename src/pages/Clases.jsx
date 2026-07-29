@@ -1,53 +1,85 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CalendarDays, Loader2, Percent, Plus, Users } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
-import { DIAS_SEMANA, diaActualPorDefecto, mapearClases } from '../utils/clases'
+import { DIAS_SEMANA, diaActualPorDefecto, fechaDeEstaSemana, mapearClasesDesdeBookings } from '../utils/clases'
 import ClasesGrid from '../components/ClasesGrid'
 import InscriptosModal from '../components/InscriptosModal'
 import NuevaClaseModal from '../components/NuevaClaseModal'
 
 function Clases() {
-  const [clases, setClases] = useState([])
+  const [clasesBase, setClasesBase] = useState([])
+  const [bookings, setBookings] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [diaSeleccionado, setDiaSeleccionado] = useState(diaActualPorDefecto)
-  const [claseInscriptos, setClaseInscriptos] = useState(null)
+  const [claseInscriptosId, setClaseInscriptosId] = useState(null)
   const [modalNuevaClaseAbierto, setModalNuevaClaseAbierto] = useState(false)
   const [claseEnEdicion, setClaseEnEdicion] = useState(null)
 
-  const fetchClases = async () => {
-    setLoading(true)
-    setError(null)
+  const fechaSeleccionada = useMemo(() => fechaDeEstaSemana(diaSeleccionado), [diaSeleccionado])
 
-    const [clasesResult, asistenciasResult] = await Promise.all([
-      supabase.from('classes').select('*').order('start_time', { ascending: true }),
-      supabase.from('asistencias').select('id, clase_id, asistio, socios(nombre, apellido)'),
-    ])
-
-    if (clasesResult.error) {
-      console.error('Error al cargar clases desde Supabase:', clasesResult.error.message)
+  const fetchClasesBase = useCallback(async () => {
+    const { data, error: fetchError } = await supabase.from('classes').select('*').order('start_time', { ascending: true })
+    if (fetchError) {
+      console.error('Error al cargar clases desde Supabase:', fetchError.message)
       setError('No se pudieron cargar las clases. Verificá la conexión con Supabase.')
-      setClases([])
-      setLoading(false)
+      setClasesBase([])
       return
     }
+    setError(null)
+    setClasesBase(data ?? [])
+  }, [])
 
-    if (asistenciasResult.error) {
-      console.error('Error al cargar asistencias desde Supabase:', asistenciasResult.error.message)
+  // Los inscriptos son por ocurrencia puntual (class_id + booking_date), así
+  // que se re-piden cada vez que cambia el día elegido, no una sola vez.
+  const fetchBookings = useCallback(async (fecha) => {
+    const { data, error: fetchError } = await supabase
+      .from('bookings')
+      .select('id, user_id, class_id, attended, profiles(full_name, dni)')
+      .eq('booking_date', fecha)
+
+    if (fetchError) {
+      console.error('Error al cargar inscriptos desde Supabase:', fetchError.message)
+      return
     }
+    setBookings(data ?? [])
+  }, [])
 
-    setClases(mapearClases(clasesResult.data ?? [], asistenciasResult.data ?? []))
+  const cargarTodo = useCallback(async () => {
+    setLoading(true)
+    await Promise.all([fetchClasesBase(), fetchBookings(fechaSeleccionada)])
     setLoading(false)
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchClases()
-  }, [])
+    cargarTodo()
+  }, [cargarTodo])
+
+  // Re-pide los inscriptos (no las clases) cuando cambia el día elegido.
+  // `cargarTodo` ya cubre la primera carga (classes + bookings juntos), así
+  // que acá solo importan los cambios posteriores de fechaSeleccionada.
+  const [fechaCargadaInicial] = useState(fechaSeleccionada)
+  useEffect(() => {
+    if (fechaSeleccionada === fechaCargadaInicial) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchBookings(fechaSeleccionada)
+  }, [fechaSeleccionada, fechaCargadaInicial, fetchBookings])
+
+  const clases = useMemo(
+    () => mapearClasesDesdeBookings(clasesBase, bookings),
+    [clasesBase, bookings],
+  )
 
   const clasesDelDia = useMemo(
     () => clases.filter((clase) => clase.diasSemana.includes(diaSeleccionado)),
     [clases, diaSeleccionado],
+  )
+
+  const claseInscriptos = useMemo(
+    () => clasesDelDia.find((c) => c.id === claseInscriptosId) ?? null,
+    [clasesDelDia, claseInscriptosId],
   )
 
   const kpis = useMemo(() => {
@@ -63,12 +95,12 @@ function Clases() {
     ]
   }, [clasesDelDia])
 
-  const handleVerInscriptos = (clase) => setClaseInscriptos(clase)
+  const handleVerInscriptos = (clase) => setClaseInscriptosId(clase.id)
 
   const handleMarcarAsistencia = async (claseId, inscriptoId, asistio) => {
     const { data, error: updateError } = await supabase
-      .from('asistencias')
-      .update({ asistio })
+      .from('bookings')
+      .update({ attended: asistio })
       .eq('id', inscriptoId)
       .select()
 
@@ -81,28 +113,56 @@ function Clases() {
       return
     }
 
-    setClases((prev) =>
-      prev.map((clase) =>
-        clase.id !== claseId
-          ? clase
-          : {
-              ...clase,
-              inscriptos: clase.inscriptos.map((inscripto) =>
-                inscripto.id === inscriptoId ? { ...inscripto, asistio } : inscripto,
-              ),
-            },
-      ),
-    )
-    setClaseInscriptos((prev) =>
-      prev && prev.id === claseId
-        ? {
-            ...prev,
-            inscriptos: prev.inscriptos.map((inscripto) =>
-              inscripto.id === inscriptoId ? { ...inscripto, asistio } : inscripto,
-            ),
-          }
-        : prev,
-    )
+    setBookings((prev) => prev.map((b) => (b.id === inscriptoId ? { ...b, attended: asistio } : b)))
+  }
+
+  // Busca socios (profiles con role='socio') por DNI para anotarlos a la
+  // clase abierta. admin_book_class ya valida cupo y créditos atómicamente
+  // (misma lógica que usa la PWA cuando el socio se anota solo).
+  const handleAgregarSocio = async (clase, dniBuscado) => {
+    const { data: candidatos, error: buscarError } = await supabase
+      .from('profiles')
+      .select('id, full_name, dni')
+      .eq('role', 'socio')
+      .eq('dni', dniBuscado.trim())
+      .limit(1)
+
+    if (buscarError || !candidatos || candidatos.length === 0) {
+      window.alert('No se encontró ningún socio con ese DNI (o todavía no tiene cuenta creada en la app).')
+      return
+    }
+
+    const { error: rpcError } = await supabase.rpc('admin_book_class', {
+      p_user_id: candidatos[0].id,
+      p_class_id: clase.id,
+      p_booking_date: fechaSeleccionada,
+    })
+
+    if (rpcError) {
+      window.alert(`No se pudo anotar al socio: ${rpcError.message}`)
+      return
+    }
+
+    await fetchBookings(fechaSeleccionada)
+  }
+
+  const handleQuitarInscripto = async (clase, inscripto) => {
+    const confirmado = window.confirm(`¿Quitar a ${inscripto.nombre} de esta clase?`)
+    if (!confirmado) return
+
+    const { error: rpcError } = await supabase.rpc('admin_cancel_booking', {
+      p_user_id: inscripto.userId,
+      p_class_id: clase.id,
+      p_booking_date: fechaSeleccionada,
+      p_reason: 'Quitado por el admin desde el panel',
+    })
+
+    if (rpcError) {
+      window.alert(`No se pudo quitar al socio: ${rpcError.message}`)
+      return
+    }
+
+    await fetchBookings(fechaSeleccionada)
   }
 
   const handleAbrirNuevaClase = () => {
@@ -136,13 +196,13 @@ function Clases() {
       return
     }
 
-    setClases((prev) => prev.filter((c) => c.id !== clase.id))
+    setClasesBase((prev) => prev.filter((c) => c.id !== clase.id))
   }
 
   const handleClaseGuardada = () => {
     setModalNuevaClaseAbierto(false)
     setClaseEnEdicion(null)
-    fetchClases()
+    fetchClasesBase()
   }
 
   return (
@@ -199,7 +259,7 @@ function Clases() {
           <p>{error}</p>
           <button
             type="button"
-            onClick={fetchClases}
+            onClick={cargarTodo}
             className="rounded-lg border border-red-400/40 px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-red-500/10"
           >
             Reintentar
@@ -217,8 +277,10 @@ function Clases() {
       <InscriptosModal
         open={Boolean(claseInscriptos)}
         clase={claseInscriptos}
-        onClose={() => setClaseInscriptos(null)}
+        onClose={() => setClaseInscriptosId(null)}
         onMarcarAsistencia={handleMarcarAsistencia}
+        onAgregarSocio={handleAgregarSocio}
+        onQuitarInscripto={handleQuitarInscripto}
       />
 
       {modalNuevaClaseAbierto && (

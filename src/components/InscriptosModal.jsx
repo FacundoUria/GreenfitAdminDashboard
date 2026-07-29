@@ -1,8 +1,12 @@
-import { UserCheck, UserX, X } from 'lucide-react'
+import { useState } from 'react'
+import { Loader2, UserCheck, UserMinus, UserPlus, UserX, X } from 'lucide-react'
 import { DIAS_SEMANA } from '../utils/clases'
 
-function iniciales(nombre, apellido) {
-  return `${nombre.charAt(0)}${apellido.charAt(0)}`.toUpperCase()
+function iniciales(nombre) {
+  const partes = (nombre ?? '').trim().split(/\s+/)
+  const primera = partes[0]?.charAt(0) ?? '?'
+  const segunda = partes.length > 1 ? partes[partes.length - 1].charAt(0) : ''
+  return `${primera}${segunda}`.toUpperCase()
 }
 
 function nombresDias(diasSemana) {
@@ -11,8 +15,20 @@ function nombresDias(diasSemana) {
     .join(', ')
 }
 
-function InscriptosModal({ open, clase, onClose, onMarcarAsistencia }) {
+function InscriptosModal({ open, clase, onClose, onMarcarAsistencia, onAgregarSocio, onQuitarInscripto }) {
+  const [dniBusqueda, setDniBusqueda] = useState('')
+  const [agregando, setAgregando] = useState(false)
+
   if (!open || !clase) return null
+
+  const handleAgregar = async (event) => {
+    event.preventDefault()
+    if (!dniBusqueda.trim()) return
+    setAgregando(true)
+    await onAgregarSocio(clase, dniBusqueda.trim())
+    setAgregando(false)
+    setDniBusqueda('')
+  }
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 p-4">
@@ -34,6 +50,24 @@ function InscriptosModal({ open, clase, onClose, onMarcarAsistencia }) {
           </button>
         </div>
 
+        <form onSubmit={handleAgregar} className="mb-4 flex gap-2">
+          <input
+            type="text"
+            value={dniBusqueda}
+            onChange={(event) => setDniBusqueda(event.target.value)}
+            placeholder="Anotar socio por DNI..."
+            className="min-h-[44px] flex-1 rounded-lg border border-white/10 bg-greenfit-dark px-3 text-sm text-white outline-none focus:border-greenfit-primary"
+          />
+          <button
+            type="submit"
+            disabled={agregando || !dniBusqueda.trim()}
+            className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-greenfit-primary px-3.5 text-sm font-semibold text-greenfit-dark disabled:opacity-60"
+          >
+            {agregando ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+            Anotar
+          </button>
+        </form>
+
         <div className="max-h-[60vh] overflow-y-auto">
           {clase.inscriptos.length === 0 ? (
             <p className="py-8 text-center text-sm text-gray-400">
@@ -45,12 +79,10 @@ function InscriptosModal({ open, clase, onClose, onMarcarAsistencia }) {
                 <li key={inscripto.id} className="flex items-center justify-between gap-2 py-3">
                   <div className="flex min-w-0 items-center gap-3">
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-greenfit-primary/15 text-xs font-semibold text-greenfit-primary">
-                      {iniciales(inscripto.nombre, inscripto.apellido)}
+                      {iniciales(inscripto.nombre)}
                     </div>
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-white">
-                        {inscripto.nombre} {inscripto.apellido}
-                      </p>
+                      <p className="truncate text-sm font-medium text-white">{inscripto.nombre}</p>
                       <p className="text-xs text-gray-400">
                         {inscripto.asistio === true
                           ? 'Asistió'
@@ -87,6 +119,15 @@ function InscriptosModal({ open, clase, onClose, onMarcarAsistencia }) {
                       }`}
                     >
                       <UserX className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      title="Quitar de la clase"
+                      aria-label="Quitar de la clase"
+                      onClick={() => onQuitarInscripto(clase, inscripto)}
+                      className="flex h-11 w-11 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-white/10 hover:text-white"
+                    >
+                      <UserMinus className="h-4 w-4" />
                     </button>
                   </div>
                 </li>

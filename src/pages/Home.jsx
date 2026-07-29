@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { colorOcupacion } from '../utils/ocupacion'
-import { diaActualPorDefecto, mapearClases } from '../utils/clases'
+import { diaActualPorDefecto, fechaDeEstaSemana, mapearClasesDesdeBookings } from '../utils/clases'
 import { calcularEstadoCuota } from '../utils/fecha'
 import { useConfiguracion } from '../context/useConfiguracion'
 
@@ -51,15 +51,16 @@ function Home() {
     setError(null)
 
     const diaHoy = diaActualPorDefecto()
+    const fechaHoy = fechaDeEstaSemana(diaHoy)
 
-    const [sociosResult, clasesResult, asistenciasResult] = await Promise.all([
+    const [sociosResult, clasesResult, bookingsResult] = await Promise.all([
       supabase.from('socios').select('*'),
       supabase
         .from('classes')
         .select('*')
         .contains('days_of_week', [diaHoy])
         .order('start_time', { ascending: true }),
-      supabase.from('asistencias').select('id, clase_id, asistio, socios(nombre, apellido)'),
+      supabase.from('bookings').select('id, user_id, class_id, attended, profiles(full_name, dni)').eq('booking_date', fechaHoy),
     ])
 
     if (sociosResult.error || clasesResult.error) {
@@ -72,12 +73,12 @@ function Home() {
       return
     }
 
-    if (asistenciasResult.error) {
-      console.error('Error al cargar asistencias en Home:', asistenciasResult.error.message)
+    if (bookingsResult.error) {
+      console.error('Error al cargar inscriptos en Home:', bookingsResult.error.message)
     }
 
     setSocios(sociosResult.data ?? [])
-    setClasesHoy(mapearClases(clasesResult.data ?? [], asistenciasResult.data ?? []))
+    setClasesHoy(mapearClasesDesdeBookings(clasesResult.data ?? [], bookingsResult.data ?? []))
     setLoading(false)
   }
 
@@ -124,7 +125,6 @@ function Home() {
             .filter((i) => i.asistio === true)
             .map((i) => ({
               nombre: i.nombre,
-              apellido: i.apellido,
               disciplina: clase.disciplina,
               horaInicio: clase.horaInicio,
             })),
@@ -322,14 +322,12 @@ function Home() {
                   <ul className="divide-y divide-white/5">
                     {ultimasAsistencias.map((asistencia, index) => (
                       <li
-                        key={`${asistencia.nombre}-${asistencia.apellido}-${index}`}
+                        key={`${asistencia.nombre}-${index}`}
                         className="flex items-center justify-between gap-3 py-2.5"
                       >
                         <div className="flex items-center gap-2">
                           <CheckCircle2 className="h-4 w-4 text-greenfit-primary" />
-                          <span className="text-sm text-white">
-                            {asistencia.nombre} {asistencia.apellido}
-                          </span>
+                          <span className="text-sm text-white">{asistencia.nombre}</span>
                         </div>
                         <span className="text-xs text-gray-400">
                           {asistencia.disciplina} · {asistencia.horaInicio}

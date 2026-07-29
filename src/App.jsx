@@ -6,6 +6,7 @@ import Configuracion from './pages/Configuracion'
 import Clases from './pages/Clases'
 import Home from './pages/Home'
 import Notas from './pages/Notas'
+import Anunciar from './pages/Anunciar'
 import Login from './pages/Login'
 import { AuthProvider } from './context/AuthContext'
 import { useAuth } from './context/useAuth'
@@ -40,6 +41,7 @@ function App() {
               <Route path="clases" element={<Clases />} />
               <Route path="reportes" element={<Reportes />} />
               <Route path="notas" element={<Notas />} />
+              <Route path="anunciar" element={<Anunciar />} />
               <Route path="configuracion" element={<Configuracion />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
