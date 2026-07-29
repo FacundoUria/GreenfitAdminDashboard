@@ -4,6 +4,7 @@ import Reportes from './pages/Reportes'
 import Socios from './pages/Socios'
 import Configuracion from './pages/Configuracion'
 import Clases from './pages/Clases'
+import Rutinas from './pages/Rutinas'
 import Home from './pages/Home'
 import Notas from './pages/Notas'
 import Anunciar from './pages/Anunciar'
@@ -39,6 +40,7 @@ function App() {
               <Route index element={<Home />} />
               <Route path="socios" element={<Socios />} />
               <Route path="clases" element={<Clases />} />
+              <Route path="rutinas" element={<Rutinas />} />
               <Route path="reportes" element={<Reportes />} />
               <Route path="notas" element={<Notas />} />
               <Route path="anunciar" element={<Anunciar />} />
