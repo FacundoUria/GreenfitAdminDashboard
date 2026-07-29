@@ -11,7 +11,14 @@ import { AuthProvider } from './context/AuthContext'
 import { useAuth } from './context/useAuth'
 
 function RutaProtegida() {
-  const { usuario } = useAuth()
+  const { usuario, cargando } = useAuth()
+
+  // Mientras se restaura (o no) la sesión guardada de Supabase, no
+  // redirigir todavía a /login -- si no, un refresh de página con sesión
+  // válida te tira afuera un instante antes de volver a entrar.
+  if (cargando) {
+    return null
+  }
 
   if (!usuario) {
     return <Navigate to="/login" replace />

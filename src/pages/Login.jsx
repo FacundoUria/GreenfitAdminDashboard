@@ -7,8 +7,9 @@ function Login() {
   const { usuario, login } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const [form, setForm] = useState({ usuario: '', clave: '' })
+  const [form, setForm] = useState({ email: '', clave: '' })
   const [error, setError] = useState(null)
+  const [enviando, setEnviando] = useState(false)
 
   if (usuario) {
     return <Navigate to={location.state?.from ?? '/'} replace />
@@ -18,12 +19,16 @@ function Login() {
     setForm((prev) => ({ ...prev, [field]: event.target.value }))
   }
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault()
+    setError(null)
+    setEnviando(true)
 
-    const exito = login(form.usuario, form.clave)
+    const exito = await login(form.email, form.clave)
+    setEnviando(false)
+
     if (!exito) {
-      setError('Usuario o contraseña incorrectos.')
+      setError('Email o contraseña incorrectos.')
       return
     }
 
@@ -43,16 +48,16 @@ function Login() {
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
-            <label htmlFor="usuario" className="text-xs font-medium text-gray-400">
-              Usuario
+            <label htmlFor="email" className="text-xs font-medium text-gray-400">
+              Email
             </label>
             <input
-              id="usuario"
-              type="text"
+              id="email"
+              type="email"
               required
               autoFocus
-              value={form.usuario}
-              onChange={handleChange('usuario')}
+              value={form.email}
+              onChange={handleChange('email')}
               className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
             />
           </div>
@@ -75,9 +80,10 @@ function Login() {
 
           <button
             type="submit"
-            className="mt-2 flex min-h-[44px] items-center justify-center rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90"
+            disabled={enviando}
+            className="mt-2 flex min-h-[44px] items-center justify-center rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90 disabled:opacity-60"
           >
-            Ingresar
+            {enviando ? 'Ingresando...' : 'Ingresar'}
           </button>
         </form>
       </div>

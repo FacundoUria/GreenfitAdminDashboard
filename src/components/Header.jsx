@@ -6,8 +6,8 @@ function Header({ title = 'Panel de administración', onAbrirSidebar = () => {} 
   const { usuario, logout } = useAuth()
   const navigate = useNavigate()
 
-  const handleLogout = () => {
-    logout()
+  const handleLogout = async () => {
+    await logout()
     navigate('/login', { replace: true })
   }
 
