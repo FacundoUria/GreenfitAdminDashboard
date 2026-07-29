@@ -23,8 +23,14 @@ export function tienePlanDeVencimiento(plan) {
   return normalizarPlanes(plan).some((p) => !PLANES_DE_CREDITOS.includes((p ?? '').toLowerCase()))
 }
 
+// "Pase Libre" no es un plan real elegible (no está en PLANES_DISPONIBLES) --
+// es el valor que quedó por default en los ~969 socios importados del CSV
+// de Crossfy, que nunca traía qué actividad hacía cada uno. Se filtra acá
+// para no mostrarlo como si fuera la membresía real del socio.
+const PLACEHOLDER_LEGACY = 'pase libre'
+
 export function formatearPlanes(plan) {
-  const lista = normalizarPlanes(plan)
+  const lista = normalizarPlanes(plan).filter((p) => (p ?? '').trim().toLowerCase() !== PLACEHOLDER_LEGACY)
   return lista.length > 0 ? lista.join(', ') : 'Sin plan'
 }
 

@@ -1,6 +1,12 @@
 import { useState } from 'react'
 import { CreditCard, RefreshCw, X } from 'lucide-react'
-import { esPlanDeCreditos, formatearPlanes, tienePlanDeVencimiento } from '../utils/planes'
+import {
+  esPlanDeCreditos,
+  formatearPlanes,
+  normalizarPlanes,
+  PLANES_DISPONIBLES,
+  tienePlanDeVencimiento,
+} from '../utils/planes'
 import { formatFecha } from '../utils/fecha'
 
 const PACKS_RENOVACION = [4, 8, 12, 20]
@@ -9,15 +15,35 @@ function iniciales(nombre, apellido) {
   return `${(nombre ?? '?').charAt(0)}${(apellido ?? '').charAt(0)}`.toUpperCase()
 }
 
+// "Pase Libre" (legacy, sin actividad real cargada) no cuenta como
+// preselección -- si es lo único que tiene el socio, arranca sin nada
+// tildado para que quien cobra elija la actividad real de una vez.
+function planesActualesValidos(plan) {
+  return normalizarPlanes(plan).filter((p) => p.toLowerCase() !== 'pase libre')
+}
+
 function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
-  const tieneCredito = esPlanDeCreditos(socio.plan)
-  const tieneVencimiento = tienePlanDeVencimiento(socio.plan)
+  const [planes, setPlanes] = useState(() => planesActualesValidos(socio.plan))
+  const [error, setError] = useState(null)
+  const tieneCredito = esPlanDeCreditos(planes)
+  const tieneVencimiento = tienePlanDeVencimiento(planes)
   const [cantidad, setCantidad] = useState(12)
   const [guardando, setGuardando] = useState(false)
 
+  const handleTogglePlan = (plan) => {
+    setError(null)
+    setPlanes((prev) => (prev.includes(plan) ? prev.filter((p) => p !== plan) : [...prev, plan]))
+  }
+
   const handleConfirmar = async () => {
+    if (planes.length === 0) {
+      setError('Elegí al menos una actividad/plan.')
+      return
+    }
+    setError(null)
     setGuardando(true)
     await onConfirmar(socio, {
+      plan: planes,
       ...(tieneCredito ? { creditos: { cantidad: Number(cantidad) || 0 } } : {}),
       ...(tieneVencimiento ? { vencimiento: true } : {}),
     })
@@ -47,8 +73,33 @@ function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
             <p className="text-sm font-medium text-white">
               {socio.nombre} {socio.apellido}
             </p>
-            <p className="text-xs text-gray-400">{formatearPlanes(socio.plan)}</p>
+            <p className="text-xs text-gray-400">Actualmente: {formatearPlanes(socio.plan)}</p>
           </div>
+        </div>
+
+        <div className="mb-5 flex flex-col gap-2">
+          <span className="text-xs font-medium text-gray-400">Actividad / Plan de este pago</span>
+          <div className="flex flex-wrap gap-2">
+            {PLANES_DISPONIBLES.map((plan) => (
+              <label
+                key={plan}
+                className={`flex min-h-[44px] cursor-pointer items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                  planes.includes(plan)
+                    ? 'border-greenfit-primary bg-greenfit-primary/10 text-white'
+                    : 'border-white/10 text-gray-300 hover:bg-white/5'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={planes.includes(plan)}
+                  onChange={() => handleTogglePlan(plan)}
+                  className="accent-greenfit-primary"
+                />
+                {plan}
+              </label>
+            ))}
+          </div>
+          {error && <p className="text-sm text-red-400">{error}</p>}
         </div>
 
         <div className="flex flex-col gap-5">

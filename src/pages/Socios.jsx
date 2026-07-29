@@ -196,6 +196,10 @@ function Socios() {
     const hoy = hoyISO()
     const cambios = { ultimo_pago: hoy }
 
+    if (payload.plan) {
+      cambios.plan = payload.plan
+    }
+
     if (payload.creditos) {
       cambios.creditos = (socio.creditos ?? 0) + payload.creditos.cantidad
     }
