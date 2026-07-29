@@ -29,6 +29,8 @@ function horaActualStr() {
   return `${String(ahora.getHours()).padStart(2, '0')}:${String(ahora.getMinutes()).padStart(2, '0')}`
 }
 
+const DIAS_POR_VENCER = 5
+
 function diasHastaVencimiento(socio) {
   if (!socio.fecha_vencimiento) return null
 
@@ -105,13 +107,18 @@ function Home() {
     return (restantes.length > 0 ? restantes : clasesHoy).slice(0, 4)
   }, [clasesHoy])
 
+  // "Por vencer" = ACTIVO (no vencido, no en tolerancia) y con fecha_vencimiento
+  // dentro de los próximos DIAS_POR_VENCER días. El chequeo de estado es
+  // explícito (no alcanza con diasRestantes >= 0) para que quede claro que
+  // esto excluye a propósito a los que ya están vencidos o en tolerancia.
   const sociosPorVencerCompleto = useMemo(
     () =>
       socios
-        .map((s) => ({ nombre: s.nombre, apellido: s.apellido, diasRestantes: diasHastaVencimiento(s) }))
-        .filter((s) => s.diasRestantes !== null && s.diasRestantes >= 0 && s.diasRestantes <= 7)
+        .filter((s) => calcularEstadoCuota(s.fecha_vencimiento, diasTolerancia) === 'activo')
+        .map((s) => ({ id: s.id, nombre: s.nombre, apellido: s.apellido, diasRestantes: diasHastaVencimiento(s) }))
+        .filter((s) => s.diasRestantes !== null && s.diasRestantes >= 0 && s.diasRestantes <= DIAS_POR_VENCER)
         .sort((a, b) => a.diasRestantes - b.diasRestantes),
-    [socios],
+    [socios, diasTolerancia],
   )
   const sociosPorVencer = useMemo(() => sociosPorVencerCompleto.slice(0, 5), [sociosPorVencerCompleto])
 
@@ -143,10 +150,11 @@ function Home() {
     },
     { label: 'En Tolerancia', value: `${sociosTolerancia}`, icon: Clock },
     {
-      label: 'Próximos a Vencer (7 días)',
+      label: `Cuotas por Vencer (${DIAS_POR_VENCER} días)`,
       value: `${sociosPorVencerCompleto.length}`,
       icon: CalendarClock,
       alerta: sociosPorVencerCompleto.length > 0,
+      to: '/socios?filtro=por_vencer',
     },
   ]
 
@@ -205,26 +213,32 @@ function Home() {
       ) : (
         <>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {kpis.map(({ label, value, icon: Icon, alerta }) => (
-              <div
-                key={label}
-                className="flex items-center gap-4 rounded-xl border border-white/5 bg-greenfit-card p-5"
-              >
-                <div
-                  className={`flex h-11 w-11 items-center justify-center rounded-lg ${
-                    alerta ? 'bg-red-500/15' : 'bg-greenfit-primary/15'
+            {kpis.map(({ label, value, icon: Icon, alerta, to }) => {
+              const Wrapper = to ? Link : 'div'
+              return (
+                <Wrapper
+                  key={label}
+                  {...(to ? { to } : {})}
+                  className={`flex items-center gap-4 rounded-xl border border-white/5 bg-greenfit-card p-5 ${
+                    to ? 'transition-colors hover:border-greenfit-primary/40 hover:bg-white/5' : ''
                   }`}
                 >
-                  <Icon className={`h-5 w-5 ${alerta ? 'text-red-400' : 'text-greenfit-primary'}`} />
-                </div>
-                <div>
-                  <p className="text-sm text-gray-400">{label}</p>
-                  <p className={`text-2xl font-semibold ${alerta ? 'text-red-400' : 'text-white'}`}>
-                    {value}
-                  </p>
-                </div>
-              </div>
-            ))}
+                  <div
+                    className={`flex h-11 w-11 items-center justify-center rounded-lg ${
+                      alerta ? 'bg-red-500/15' : 'bg-greenfit-primary/15'
+                    }`}
+                  >
+                    <Icon className={`h-5 w-5 ${alerta ? 'text-red-400' : 'text-greenfit-primary'}`} />
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-400">{label}</p>
+                    <p className={`text-2xl font-semibold ${alerta ? 'text-red-400' : 'text-white'}`}>
+                      {value}
+                    </p>
+                  </div>
+                </Wrapper>
+              )
+            })}
           </div>
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -275,9 +289,9 @@ function Home() {
             <div className="flex flex-col gap-6">
               <div className="rounded-xl border border-white/5 bg-greenfit-card p-5">
                 <div className="mb-4 flex items-center justify-between">
-                  <h3 className="text-base font-semibold text-white">Cuotas por Vencer (7 días)</h3>
+                  <h3 className="text-base font-semibold text-white">Cuotas por Vencer ({DIAS_POR_VENCER} días)</h3>
                   <Link
-                    to="/socios"
+                    to="/socios?filtro=por_vencer"
                     className="flex items-center gap-1 text-xs font-medium text-greenfit-primary hover:opacity-80"
                   >
                     Ir a Socios
@@ -287,13 +301,13 @@ function Home() {
 
                 {sociosPorVencer.length === 0 ? (
                   <p className="py-8 text-center text-sm text-gray-400">
-                    No hay cuotas por vencer en los próximos 7 días.
+                    No hay cuotas por vencer en los próximos {DIAS_POR_VENCER} días.
                   </p>
                 ) : (
                   <ul className="divide-y divide-white/5">
                     {sociosPorVencer.map((socio) => (
                       <li
-                        key={`${socio.nombre}-${socio.apellido}`}
+                        key={socio.id}
                         className="flex items-center justify-between gap-3 py-2.5"
                       >
                         <span className="text-sm text-white">

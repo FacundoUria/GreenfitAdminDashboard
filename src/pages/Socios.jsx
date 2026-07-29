@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   AlertCircle,
   CheckCircle2,
@@ -34,13 +35,27 @@ function Toast({ message }) {
   )
 }
 
+const DIAS_POR_VENCER = 5
+
 const filtroOptions = [
   { value: 'todos', label: 'Todos' },
   { value: 'activo', label: 'Activo' },
   { value: 'vencido', label: 'Cuota Vencida' },
   { value: 'tolerancia', label: 'En Tolerancia' },
+  { value: 'por_vencer', label: `Por Vencer (${DIAS_POR_VENCER} días)` },
   { value: 'nuevo', label: 'Nuevos del Mes' },
 ]
+
+// Activo (no vencido, no en tolerancia) y con fecha_vencimiento dentro de los
+// próximos DIAS_POR_VENCER días -- mismo criterio que usa el widget del
+// Dashboard, para que el número que ves ahí y lo que filtra acá coincidan.
+function estaPorVencer(socio) {
+  if (socio.estado !== 'activo' || !socio.fechaVencimiento) return false
+  const vencimiento = new Date(`${socio.fechaVencimiento}T00:00:00`)
+  const msPorDia = 1000 * 60 * 60 * 24
+  const diasRestantes = Math.ceil((vencimiento.getTime() - Date.now()) / msPorDia)
+  return diasRestantes >= 0 && diasRestantes <= DIAS_POR_VENCER
+}
 
 function mapearSocio(row) {
   return {
@@ -66,12 +81,17 @@ function mapearSocio(row) {
 function Socios() {
   const { configuracion } = useConfiguracion()
   const diasTolerancia = configuracion?.dias_tolerancia ?? 5
+  const [searchParams] = useSearchParams()
 
   const [socios, setSocios] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [busqueda, setBusqueda] = useState('')
-  const [filtroEstado, setFiltroEstado] = useState('todos')
+  // El Dashboard linkea acá con ?filtro=por_vencer (u otro value de
+  // filtroOptions) para llegar con la lista ya filtrada.
+  const [filtroEstado, setFiltroEstado] = useState(
+    () => filtroOptions.find((o) => o.value === searchParams.get('filtro'))?.value ?? 'todos',
+  )
   const [modalAbierto, setModalAbierto] = useState(false)
   const [socioEnEdicion, setSocioEnEdicion] = useState(null)
   const [socioParaPago, setSocioParaPago] = useState(null)
@@ -147,7 +167,9 @@ function Socios() {
           ? true
           : filtroEstado === 'nuevo'
             ? esDelMesActual(socio.fechaInicio)
-            : (socio.estado ?? '').toLowerCase() === filtroEstado
+            : filtroEstado === 'por_vencer'
+              ? estaPorVencer(socio)
+              : (socio.estado ?? '').toLowerCase() === filtroEstado
 
       return coincideBusqueda && coincideEstado
     })
