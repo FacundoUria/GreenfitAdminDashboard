@@ -130,7 +130,20 @@ function NuevoSocioModal({ socio, onClose, onSaved }) {
         `Error al ${esEdicion ? 'actualizar' : 'crear'} el socio en Supabase:`,
         resultado.error?.message ?? 'no se guardó ninguna fila (revisá las políticas RLS)',
       )
-      setError(`No se pudo ${esEdicion ? 'actualizar' : 'guardar'} el socio. Intentá nuevamente.`)
+      // `dni` y `email` son UNIQUE en la tabla -- el error genérico no decía
+      // cuál de los dos estaba repetido, así que lo distinguimos acá.
+      if (resultado.error?.code === '23505') {
+        const detalle = resultado.error.message ?? ''
+        if (detalle.includes('socios_dni_key')) {
+          setError(`Ya existe un socio registrado con el DNI ${form.dni}.`)
+        } else if (detalle.includes('socios_email_key')) {
+          setError(`Ya existe un socio registrado con el email ${form.email}.`)
+        } else {
+          setError(`No se pudo ${esEdicion ? 'actualizar' : 'guardar'} el socio: ya existe un registro con esos datos.`)
+        }
+      } else {
+        setError(`No se pudo ${esEdicion ? 'actualizar' : 'guardar'} el socio. Intentá nuevamente.`)
+      }
       setGuardando(false)
       return
     }
