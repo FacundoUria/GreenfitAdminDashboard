@@ -1,14 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { DIAS_SEMANA } from '../utils/clases'
 
-const disciplinas = ['Crossfit', 'Musculación', 'Yoga', 'Funcional']
-
 function formInicial(clase, diaPorDefecto) {
   if (clase) {
     return {
-      disciplina: clase.disciplina,
+      titulo: clase.disciplina,
+      disciplinaId: clase.disciplinaId ?? '',
       profesor: clase.profesor,
       diasSemana: clase.diasSemana,
       horaInicio: clase.horaInicio,
@@ -18,7 +17,8 @@ function formInicial(clase, diaPorDefecto) {
   }
 
   return {
-    disciplina: disciplinas[0],
+    titulo: '',
+    disciplinaId: '',
     profesor: '',
     diasSemana: [diaPorDefecto],
     horaInicio: '09:00',
@@ -29,8 +29,36 @@ function formInicial(clase, diaPorDefecto) {
 
 function NuevaClaseModal({ clase, diaPorDefecto, onClose, onSaved }) {
   const [form, setForm] = useState(() => formInicial(clase, diaPorDefecto))
+  const [disciplinas, setDisciplinas] = useState([])
+  const [cargandoDisciplinas, setCargandoDisciplinas] = useState(true)
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState(null)
+
+  // Las disciplinas salen de la tabla real (la misma que usan los créditos
+  // y las reservas), no de una lista de texto suelta -- una clase sin
+  // discipline_id válido queda invisible para el chequeo de créditos de la
+  // PWA y nadie puede reservarla nunca, sin ningún error visible.
+  useEffect(() => {
+    let activo = true
+    supabase
+      .from('disciplines')
+      .select('id, name')
+      .order('name')
+      .then(({ data, error: fetchError }) => {
+        if (!activo) return
+        if (fetchError) {
+          console.error('Error al cargar disciplinas:', fetchError.message)
+          setCargandoDisciplinas(false)
+          return
+        }
+        setDisciplinas(data ?? [])
+        setForm((prev) => (prev.disciplinaId ? prev : { ...prev, disciplinaId: data?.[0]?.id ?? '' }))
+        setCargandoDisciplinas(false)
+      })
+    return () => {
+      activo = false
+    }
+  }, [])
 
   const handleChange = (field) => (event) => {
     const value = field === 'cupoMaximo' ? Number(event.target.value) : event.target.value
@@ -53,12 +81,17 @@ function NuevaClaseModal({ clase, diaPorDefecto, onClose, onSaved }) {
       setError('Seleccioná al menos un día de la semana.')
       return
     }
+    if (!form.disciplinaId) {
+      setError('Elegí una disciplina.')
+      return
+    }
 
     setGuardando(true)
     setError(null)
 
     const payload = {
-      title: form.disciplina,
+      title: form.titulo.trim(),
+      discipline_id: form.disciplinaId,
       instructor: form.profesor,
       days_of_week: form.diasSemana,
       start_time: form.horaInicio,
@@ -103,19 +136,38 @@ function NuevaClaseModal({ clase, diaPorDefecto, onClose, onSaved }) {
         </div>
 
         <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5 sm:col-span-2">
+            <label htmlFor="titulo" className="text-xs font-medium text-gray-400">
+              Título de la clase
+            </label>
+            <input
+              id="titulo"
+              type="text"
+              required
+              placeholder="Ej: CrossFit - Turno Mañana"
+              value={form.titulo}
+              onChange={handleChange('titulo')}
+              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
+            />
+          </div>
+
           <div className="flex flex-col gap-1.5">
             <label htmlFor="disciplina" className="text-xs font-medium text-gray-400">
               Disciplina
             </label>
             <select
               id="disciplina"
-              value={form.disciplina}
-              onChange={handleChange('disciplina')}
-              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
+              required
+              disabled={cargandoDisciplinas}
+              value={form.disciplinaId}
+              onChange={handleChange('disciplinaId')}
+              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary disabled:opacity-60"
             >
-              {disciplinas.map((disciplina) => (
-                <option key={disciplina} value={disciplina}>
-                  {disciplina}
+              {cargandoDisciplinas && <option value="">Cargando...</option>}
+              {!cargandoDisciplinas && disciplinas.length === 0 && <option value="">Sin disciplinas cargadas</option>}
+              {disciplinas.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
                 </option>
               ))}
             </select>

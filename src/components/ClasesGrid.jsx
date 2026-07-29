@@ -18,14 +18,23 @@ function colorDisciplina(disciplina) {
   return COLORES_DISCIPLINA[clave ?? 'default']
 }
 
-function ClaseCard({ clase, onVerInscriptos, onEditar, onCancelar }) {
+function ClaseCard({ clase, estado, hayDestacada, onVerInscriptos, onEditar, onCancelar }) {
   const inscriptos = clase.inscriptos.length
   const porcentaje = Math.min(100, Math.round((inscriptos / clase.cupoMaximo) * 100))
   const { barra, texto } = colorOcupacion(porcentaje)
   const { header, dot } = colorDisciplina(clase.disciplina)
+  const destacada = estado != null
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-white/5 bg-greenfit-card shadow-lg shadow-black/40 transition-transform hover:-translate-y-1 hover:shadow-xl hover:shadow-black/50">
+    <div
+      className={`overflow-hidden rounded-2xl border bg-greenfit-card shadow-lg shadow-black/40 transition-all hover:-translate-y-1 hover:shadow-xl hover:shadow-black/50 ${
+        destacada
+          ? 'z-10 scale-[1.02] border-greenfit-primary shadow-greenfit-primary/30 ring-2 ring-greenfit-primary/60'
+          : hayDestacada
+            ? 'z-0 scale-[0.98] border-white/5 opacity-75'
+            : 'z-0 border-white/5'
+      }`}
+    >
       <div className={`bg-gradient-to-r ${header} px-5 py-3.5`}>
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-2">
@@ -40,6 +49,17 @@ function ClaseCard({ clase, onVerInscriptos, onEditar, onCancelar }) {
           </span>
         </div>
       </div>
+
+      {estado && (
+        <div
+          className={`flex items-center gap-1.5 px-5 py-1.5 text-[11px] font-bold uppercase tracking-wide ${
+            estado === 'en_curso' ? 'bg-greenfit-primary text-greenfit-dark' : 'bg-greenfit-primary/15 text-greenfit-primary'
+          }`}
+        >
+          {estado === 'en_curso' && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-greenfit-dark" />}
+          {estado === 'en_curso' ? 'En curso' : 'Próxima'}
+        </div>
+      )}
 
       <div className="flex flex-col gap-4 p-5">
         <p className="text-sm text-gray-400">
@@ -93,7 +113,7 @@ function ClaseCard({ clase, onVerInscriptos, onEditar, onCancelar }) {
   )
 }
 
-function ClasesGrid({ clases, onVerInscriptos, onEditar, onCancelar }) {
+function ClasesGrid({ clases, enCursoIds = new Set(), proximaClaseId = null, onVerInscriptos, onEditar, onCancelar }) {
   if (clases.length === 0) {
     return (
       <div className="rounded-xl border border-white/5 bg-greenfit-card p-10 text-center text-sm text-gray-400">
@@ -102,17 +122,24 @@ function ClasesGrid({ clases, onVerInscriptos, onEditar, onCancelar }) {
     )
   }
 
+  const hayDestacada = enCursoIds.size > 0 || proximaClaseId != null
+
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-      {clases.map((clase) => (
-        <ClaseCard
-          key={clase.id}
-          clase={clase}
-          onVerInscriptos={onVerInscriptos}
-          onEditar={onEditar}
-          onCancelar={onCancelar}
-        />
-      ))}
+      {clases.map((clase) => {
+        const estado = enCursoIds.has(clase.id) ? 'en_curso' : clase.id === proximaClaseId ? 'proxima' : null
+        return (
+          <ClaseCard
+            key={clase.id}
+            clase={clase}
+            estado={estado}
+            hayDestacada={hayDestacada}
+            onVerInscriptos={onVerInscriptos}
+            onEditar={onEditar}
+            onCancelar={onCancelar}
+          />
+        )
+      })}
     </div>
   )
 }

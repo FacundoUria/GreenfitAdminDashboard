@@ -1,22 +1,31 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { CalendarDays, Loader2, Percent, Plus, Users } from 'lucide-react'
+import { Loader2, Plus } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
-import { DIAS_SEMANA, diaActualPorDefecto, fechaDeEstaSemana, mapearClasesDesdeBookings } from '../utils/clases'
+import {
+  combinarFechaYHora,
+  etiquetaDia,
+  formatDateOnly,
+  mapearClasesDesdeBookings,
+  proximosDias,
+} from '../utils/clases'
 import ClasesGrid from '../components/ClasesGrid'
 import InscriptosModal from '../components/InscriptosModal'
 import NuevaClaseModal from '../components/NuevaClaseModal'
+
+const DIAS_VISIBLES = proximosDias(7)
 
 function Clases() {
   const [clasesBase, setClasesBase] = useState([])
   const [bookings, setBookings] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [diaSeleccionado, setDiaSeleccionado] = useState(diaActualPorDefecto)
+  const [fechaSeleccionada, setFechaSeleccionada] = useState(DIAS_VISIBLES[0])
   const [claseInscriptosId, setClaseInscriptosId] = useState(null)
   const [modalNuevaClaseAbierto, setModalNuevaClaseAbierto] = useState(false)
   const [claseEnEdicion, setClaseEnEdicion] = useState(null)
 
-  const fechaSeleccionada = useMemo(() => fechaDeEstaSemana(diaSeleccionado), [diaSeleccionado])
+  const fechaSeleccionadaStr = useMemo(() => formatDateOnly(fechaSeleccionada), [fechaSeleccionada])
+  const esHoy = fechaSeleccionadaStr === formatDateOnly(new Date())
 
   const fetchClasesBase = useCallback(async () => {
     const { data, error: fetchError } = await supabase.from('classes').select('*').order('start_time', { ascending: true })
@@ -47,7 +56,7 @@ function Clases() {
 
   const cargarTodo = useCallback(async () => {
     setLoading(true)
-    await Promise.all([fetchClasesBase(), fetchBookings(fechaSeleccionada)])
+    await Promise.all([fetchClasesBase(), fetchBookings(fechaSeleccionadaStr)])
     setLoading(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -60,40 +69,60 @@ function Clases() {
   // Re-pide los inscriptos (no las clases) cuando cambia el día elegido.
   // `cargarTodo` ya cubre la primera carga (classes + bookings juntos), así
   // que acá solo importan los cambios posteriores de fechaSeleccionada.
-  const [fechaCargadaInicial] = useState(fechaSeleccionada)
+  const [fechaCargadaInicial] = useState(fechaSeleccionadaStr)
   useEffect(() => {
-    if (fechaSeleccionada === fechaCargadaInicial) return
+    if (fechaSeleccionadaStr === fechaCargadaInicial) return
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchBookings(fechaSeleccionada)
-  }, [fechaSeleccionada, fechaCargadaInicial, fetchBookings])
+    fetchBookings(fechaSeleccionadaStr)
+  }, [fechaSeleccionadaStr, fechaCargadaInicial, fetchBookings])
 
   const clases = useMemo(
     () => mapearClasesDesdeBookings(clasesBase, bookings),
     [clasesBase, bookings],
   )
 
+  // Orden estrictamente cronológico (de la más temprana a la más tardía) --
+  // la query base ya viene ordenada por start_time, pero lo reafirmamos acá
+  // porque es la garantía que le importa a esta pantalla en particular.
   const clasesDelDia = useMemo(
-    () => clases.filter((clase) => clase.diasSemana.includes(diaSeleccionado)),
-    [clases, diaSeleccionado],
+    () =>
+      clases
+        .filter((clase) => clase.diasSemana.includes(fechaSeleccionada.getDay()))
+        .sort((a, b) => a.horaInicio.localeCompare(b.horaInicio)),
+    [clases, fechaSeleccionada],
   )
+
+  // Jerarquía visual: solo tiene sentido "en curso" / "próxima" mirando el
+  // día de HOY -- en cualquier otro día todas las clases son simplemente
+  // futuras, ninguna requiere atención inmediata todavía.
+  const { enCursoIds, proximaClaseId } = useMemo(() => {
+    if (!esHoy) return { enCursoIds: new Set(), proximaClaseId: null }
+
+    const ahora = new Date()
+    const enCurso = new Set()
+    let proxima = null
+    let proximaInicio = null
+
+    for (const clase of clasesDelDia) {
+      const inicio = combinarFechaYHora(fechaSeleccionadaStr, clase.horaInicio)
+      const fin = combinarFechaYHora(fechaSeleccionadaStr, clase.horaFin) ?? inicio
+      if (!inicio) continue
+
+      if (ahora >= inicio && ahora < fin) {
+        enCurso.add(clase.id)
+      } else if (ahora < inicio && (!proximaInicio || inicio < proximaInicio)) {
+        proxima = clase.id
+        proximaInicio = inicio
+      }
+    }
+
+    return { enCursoIds: enCurso, proximaClaseId: proxima }
+  }, [clasesDelDia, esHoy, fechaSeleccionadaStr])
 
   const claseInscriptos = useMemo(
     () => clasesDelDia.find((c) => c.id === claseInscriptosId) ?? null,
     [clasesDelDia, claseInscriptosId],
   )
-
-  const kpis = useMemo(() => {
-    const cuposTotales = clasesDelDia.reduce((total, clase) => total + clase.cupoMaximo, 0)
-    const inscriptosHoy = clasesDelDia.reduce((total, clase) => total + clase.inscriptos.length, 0)
-    const ocupacion = cuposTotales === 0 ? 0 : Math.round((inscriptosHoy / cuposTotales) * 100)
-
-    return [
-      { label: 'Clases Hoy', value: clasesDelDia.length, icon: CalendarDays },
-      { label: 'Cupos Totales', value: cuposTotales, icon: Users },
-      { label: 'Inscriptos Hoy', value: inscriptosHoy, icon: Users },
-      { label: 'Ocupación', value: `${ocupacion}%`, icon: Percent },
-    ]
-  }, [clasesDelDia])
 
   const handleVerInscriptos = (clase) => setClaseInscriptosId(clase.id)
 
@@ -135,7 +164,7 @@ function Clases() {
     const { error: rpcError } = await supabase.rpc('admin_book_class', {
       p_user_id: candidatos[0].id,
       p_class_id: clase.id,
-      p_booking_date: fechaSeleccionada,
+      p_booking_date: fechaSeleccionadaStr,
     })
 
     if (rpcError) {
@@ -143,7 +172,7 @@ function Clases() {
       return
     }
 
-    await fetchBookings(fechaSeleccionada)
+    await fetchBookings(fechaSeleccionadaStr)
   }
 
   const handleQuitarInscripto = async (clase, inscripto) => {
@@ -153,7 +182,7 @@ function Clases() {
     const { error: rpcError } = await supabase.rpc('admin_cancel_booking', {
       p_user_id: inscripto.userId,
       p_class_id: clase.id,
-      p_booking_date: fechaSeleccionada,
+      p_booking_date: fechaSeleccionadaStr,
       p_reason: 'Quitado por el admin desde el panel',
     })
 
@@ -162,7 +191,7 @@ function Clases() {
       return
     }
 
-    await fetchBookings(fechaSeleccionada)
+    await fetchBookings(fechaSeleccionadaStr)
   }
 
   const handleAbrirNuevaClase = () => {
@@ -207,36 +236,27 @@ function Clases() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {kpis.map(({ label, value, icon: Icon }) => (
-          <div key={label} className="flex items-center gap-4 rounded-xl bg-greenfit-card p-5">
-            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-greenfit-primary/15">
-              <Icon className="h-5 w-5 text-greenfit-primary" />
-            </div>
-            <div>
-              <p className="text-sm text-gray-400">{label}</p>
-              <p className="text-2xl font-semibold text-white">{value}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap gap-2">
-          {DIAS_SEMANA.map(({ numero, nombre }) => (
-            <button
-              key={numero}
-              type="button"
-              onClick={() => setDiaSeleccionado(numero)}
-              className={`min-h-[44px] rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
-                diaSeleccionado === numero
-                  ? 'bg-greenfit-primary text-greenfit-dark'
-                  : 'bg-greenfit-card text-gray-300 hover:text-white'
-              }`}
-            >
-              {nombre}
-            </button>
-          ))}
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {DIAS_VISIBLES.map((fecha, index) => {
+            const fechaStr = formatDateOnly(fecha)
+            const seleccionado = fechaStr === fechaSeleccionadaStr
+            return (
+              <button
+                key={fechaStr}
+                type="button"
+                onClick={() => setFechaSeleccionada(fecha)}
+                className={`flex min-h-[52px] w-16 shrink-0 flex-col items-center justify-center rounded-lg px-2 py-2 text-sm font-medium transition-colors ${
+                  seleccionado
+                    ? 'bg-greenfit-primary text-greenfit-dark'
+                    : 'bg-greenfit-card text-gray-300 hover:text-white'
+                }`}
+              >
+                <span className="text-xs capitalize">{etiquetaDia(fecha, index)}</span>
+                <span className="text-base font-semibold">{fecha.getDate()}</span>
+              </button>
+            )
+          })}
         </div>
 
         <button
@@ -268,6 +288,8 @@ function Clases() {
       ) : (
         <ClasesGrid
           clases={clasesDelDia}
+          enCursoIds={enCursoIds}
+          proximaClaseId={proximaClaseId}
           onVerInscriptos={handleVerInscriptos}
           onEditar={handleEditar}
           onCancelar={handleCancelarClase}
@@ -287,7 +309,10 @@ function Clases() {
         <NuevaClaseModal
           key={claseEnEdicion?.id ?? 'nueva'}
           clase={claseEnEdicion}
-          diaPorDefecto={diaSeleccionado}
+          // El picker de días de NuevaClaseModal solo cubre Lunes-Sábado (el
+          // gimnasio no abre los domingos) -- si se está viendo un domingo,
+          // el prefill cae en Lunes en vez de un día que no existe ahí.
+          diaPorDefecto={fechaSeleccionada.getDay() === 0 ? 1 : fechaSeleccionada.getDay()}
           onClose={() => {
             setModalNuevaClaseAbierto(false)
             setClaseEnEdicion(null)

@@ -40,12 +40,12 @@ function Toast({ message }) {
 const DIAS_POR_VENCER = 5
 
 const filtroOptions = [
-  { value: 'todos', label: 'Todos' },
   { value: 'activo', label: 'Activo' },
   { value: 'vencido', label: 'Cuota Vencida' },
-  { value: 'tolerancia', label: 'En Tolerancia' },
   { value: 'por_vencer', label: `Por Vencer (${DIAS_POR_VENCER} días)` },
+  { value: 'tolerancia', label: 'En Tolerancia' },
   { value: 'nuevo', label: 'Nuevos del Mes' },
+  { value: 'todos', label: 'Todos' },
 ]
 
 // Activo (no vencido, no en tolerancia) y con fecha_vencimiento dentro de los
@@ -92,7 +92,7 @@ function Socios() {
   // El Dashboard linkea acá con ?filtro=por_vencer (u otro value de
   // filtroOptions) para llegar con la lista ya filtrada.
   const [filtroEstado, setFiltroEstado] = useState(
-    () => filtroOptions.find((o) => o.value === searchParams.get('filtro'))?.value ?? 'todos',
+    () => filtroOptions.find((o) => o.value === searchParams.get('filtro'))?.value ?? 'activo',
   )
   const [modalAbierto, setModalAbierto] = useState(false)
   const [socioEnEdicion, setSocioEnEdicion] = useState(null)
