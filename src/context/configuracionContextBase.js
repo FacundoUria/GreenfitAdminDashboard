@@ -8,7 +8,7 @@ export const configuracionPorDefecto = {
   precio_kickboxing: 0,
   precio_aparatos: 0,
   dias_tolerancia: 5,
-  limite_cancelacion_hs: 2,
+  limite_cancelacion_minutos: 120,
   alias_cvu: '',
   titular_cuenta: '',
   notif_vencimiento_activo: true,

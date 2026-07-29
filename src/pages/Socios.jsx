@@ -236,8 +236,9 @@ function Socios() {
       cambios.plan = payload.plan
     }
 
-    if (payload.creditos) {
-      cambios.creditos = (socio.creditos ?? 0) + payload.creditos.cantidad
+    if (payload.creditosPorDisciplina) {
+      const total = payload.creditosPorDisciplina.reduce((suma, item) => suma + item.cantidad, 0)
+      cambios.creditos = (socio.creditos ?? 0) + total
     }
 
     if (payload.vencimiento) {
@@ -270,14 +271,12 @@ function Socios() {
     }
 
     let mensaje = 'Pago registrado correctamente'
-    if (payload.creditos) {
-      const resultado = await sincronizarCreditosPwa({
-        dni: socio.dni,
-        disciplina: payload.creditos.disciplina,
-        delta: payload.creditos.cantidad,
-      })
-      if (!resultado.synced && resultado.reason !== 'sin_cuenta_pwa') {
-        mensaje = 'Pago registrado, pero no se pudo sincronizar con la app. Revisá la consola.'
+    if (payload.creditosPorDisciplina) {
+      for (const { disciplina, cantidad } of payload.creditosPorDisciplina) {
+        const resultado = await sincronizarCreditosPwa({ dni: socio.dni, disciplina, delta: cantidad })
+        if (!resultado.synced && resultado.reason !== 'sin_cuenta_pwa') {
+          mensaje = 'Pago registrado, pero no se pudo sincronizar con la app. Revisá la consola.'
+        }
       }
     }
     if (payload.vencimiento) {

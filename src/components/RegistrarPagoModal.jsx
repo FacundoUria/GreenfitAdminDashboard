@@ -22,21 +22,30 @@ function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
   const tieneCredito = esPlanDeCreditos(planes)
   const tieneVencimiento = tienePlanDeVencimiento(planes)
   const planesCredito = planesDeCreditos(planes)
-  const [disciplinaCredito, setDisciplinaCredito] = useState(planesCredito[0] ?? null)
-  const [cantidad, setCantidad] = useState(12)
+  // Una cantidad de créditos por cada actividad de créditos que tenga el
+  // socio (ej: CrossFit y Boxeo por separado) -- así una renovación
+  // multi-disciplina se carga en un solo envío en vez de repetir la acción
+  // una vez por actividad.
+  const [cantidades, setCantidades] = useState(() =>
+    Object.fromEntries(planesDeCreditos(normalizarPlanes(socio.plan)).map((p) => [p, ''])),
+  )
   const [guardando, setGuardando] = useState(false)
 
   const handleTogglePlan = (plan) => {
     setError(null)
     setPlanes((prev) => {
       const siguiente = prev.includes(plan) ? prev.filter((p) => p !== plan) : [...prev, plan]
-      // Si la actividad que estaba elegida como destino de los créditos dejó
-      // de estar marcada (o se agregó una nueva y era la única), reencauzamos
-      // la selección en vez de dejarla apuntando a un plan ya no marcado.
-      const creditosSiguiente = planesDeCreditos(siguiente)
-      setDisciplinaCredito((actual) => (creditosSiguiente.includes(actual) ? actual : creditosSiguiente[0] ?? null))
       return siguiente
     })
+  }
+
+  const handleChangeCantidad = (disciplina) => (event) => {
+    const { value } = event.target
+    setCantidades((prev) => ({ ...prev, [disciplina]: value }))
+  }
+
+  const handleQuickSelect = (disciplina, valor) => {
+    setCantidades((prev) => ({ ...prev, [disciplina]: valor }))
   }
 
   const handleConfirmar = async () => {
@@ -44,17 +53,19 @@ function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
       setError('Elegí al menos una actividad/plan.')
       return
     }
-    if (tieneCredito && !disciplinaCredito) {
-      setError('Elegí a qué actividad van los créditos de este pago.')
+    const creditosPorDisciplina = planesDeCreditos(planes)
+      .map((disciplina) => ({ disciplina, cantidad: Number(cantidades[disciplina]) || 0 }))
+      .filter((item) => item.cantidad > 0)
+
+    if (tieneCredito && creditosPorDisciplina.length === 0) {
+      setError('Cargá al menos una cantidad de créditos para alguna actividad.')
       return
     }
     setError(null)
     setGuardando(true)
     await onConfirmar(socio, {
       plan: planes,
-      ...(tieneCredito
-        ? { creditos: { cantidad: Number(cantidad) || 0, disciplina: disciplinaCredito } }
-        : {}),
+      ...(creditosPorDisciplina.length > 0 ? { creditosPorDisciplina } : {}),
       ...(tieneVencimiento ? { vencimiento: true } : {}),
     })
     setGuardando(false)
@@ -114,66 +125,41 @@ function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
 
         <div className="flex flex-col gap-5">
           {tieneCredito && (
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-5">
               <p className="text-sm text-gray-400">
-                Renovación mensual: sumá los créditos correspondientes a sus actividades. Créditos
-                actuales: <span className="font-semibold text-white">{socio.creditos ?? 0}</span>
+                Renovación mensual: cargá los créditos de cada actividad por separado. Créditos
+                actuales (total del panel): <span className="font-semibold text-white">{socio.creditos ?? 0}</span>
               </p>
 
-              {planesCredito.length > 1 && (
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="disciplinaCredito" className="text-xs font-medium text-gray-400">
-                    ¿A qué actividad van estos créditos en la app? (tiene varias)
-                  </label>
-                  <select
-                    id="disciplinaCredito"
-                    value={disciplinaCredito ?? ''}
-                    onChange={(event) => setDisciplinaCredito(event.target.value)}
-                    className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
-                  >
-                    {planesCredito.map((plan) => (
-                      <option key={plan} value={plan}>
-                        {plan}
-                      </option>
+              {planesCredito.map((disciplina) => (
+                <div key={disciplina} className="flex flex-col gap-2 rounded-lg border border-white/5 p-3">
+                  <span className="text-xs font-semibold text-white">{disciplina}</span>
+                  <div className="flex flex-wrap gap-2">
+                    {PACKS_RENOVACION.map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => handleQuickSelect(disciplina, n)}
+                        className={`min-h-[40px] rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                          Number(cantidades[disciplina]) === n
+                            ? 'bg-greenfit-primary text-greenfit-dark'
+                            : 'border border-white/10 text-gray-300 hover:bg-white/5 hover:text-white'
+                        }`}
+                      >
+                        +{n}
+                      </button>
                     ))}
-                  </select>
+                  </div>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                    value={cantidades[disciplina] ?? ''}
+                    onChange={handleChangeCantidad(disciplina)}
+                    className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
+                  />
                 </div>
-              )}
-
-              <div className="flex flex-wrap gap-2">
-                {PACKS_RENOVACION.map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    onClick={() => setCantidad(n)}
-                    className={`min-h-[44px] rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
-                      Number(cantidad) === n
-                        ? 'bg-greenfit-primary text-greenfit-dark'
-                        : 'border border-white/10 text-gray-300 hover:bg-white/5 hover:text-white'
-                    }`}
-                  >
-                    +{n}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor="cantidadCreditos" className="text-xs font-medium text-gray-400">
-                  O ajustá la cantidad manualmente
-                </label>
-                <input
-                  id="cantidadCreditos"
-                  type="number"
-                  min="1"
-                  value={cantidad}
-                  onChange={(event) => setCantidad(event.target.value)}
-                  className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
-                />
-              </div>
-
-              <p className="text-xs text-gray-500">
-                Créditos resultantes: {(socio.creditos ?? 0) + (Number(cantidad) || 0)}
-              </p>
+              ))}
             </div>
           )}
 

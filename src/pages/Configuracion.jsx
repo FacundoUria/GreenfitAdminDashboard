@@ -13,7 +13,7 @@ function mapConfigToForm(config) {
     precioKickboxing: String(config.precio_kickboxing ?? 0),
     precioAparatos: String(config.precio_aparatos ?? 0),
     diasTolerancia: String(config.dias_tolerancia ?? 5),
-    limiteCancelacionHs: String(config.limite_cancelacion_hs ?? 2),
+    limiteCancelacionMinutos: String(config.limite_cancelacion_minutos ?? (config.limite_cancelacion_hs ?? 2) * 60),
     aliasCvu: config.alias_cvu ?? '',
     titularCuenta: config.titular_cuenta ?? '',
     notifVencimientoActivo: Boolean(config.notif_vencimiento_activo ?? true),
@@ -104,7 +104,7 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
       .update({
         ...precios,
         dias_tolerancia: Number(form.diasTolerancia) || 0,
-        limite_cancelacion_hs: Number(form.limiteCancelacionHs) || 0,
+        limite_cancelacion_minutos: Number(form.limiteCancelacionMinutos) || 0,
         alias_cvu: form.aliasCvu,
         titular_cuenta: form.titularCuenta,
         notif_vencimiento_activo: form.notifVencimientoActivo,
@@ -208,9 +208,9 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
           />
           <NumberField
             label="Límite para cancelar una clase"
-            value={form.limiteCancelacionHs}
-            onChange={(value) => updateField('limiteCancelacionHs', value)}
-            suffix="hs antes"
+            value={form.limiteCancelacionMinutos}
+            onChange={(value) => updateField('limiteCancelacionMinutos', value)}
+            suffix="min antes"
           />
         </ConfigCard>
 
