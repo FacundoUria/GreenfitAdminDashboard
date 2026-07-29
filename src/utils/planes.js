@@ -1,4 +1,4 @@
-export const PLANES_DISPONIBLES = ['CrossFit', 'Boxeo', 'Kickstrike', 'Aparatos / Musculación']
+export const PLANES_DISPONIBLES = ['Pase Libre', 'CrossFit', 'Boxeo', 'Kickstrike', 'Aparatos / Musculación']
 export const PLANES_DE_CREDITOS = ['crossfit', 'boxeo', 'kickstrike']
 
 const PRECIO_POR_PLAN = {
@@ -23,14 +23,14 @@ export function tienePlanDeVencimiento(plan) {
   return normalizarPlanes(plan).some((p) => !PLANES_DE_CREDITOS.includes((p ?? '').toLowerCase()))
 }
 
-// "Pase Libre" no es un plan real elegible (no está en PLANES_DISPONIBLES) --
-// es el valor que quedó por default en los ~969 socios importados del CSV
-// de Crossfy, que nunca traía qué actividad hacía cada uno. Se filtra acá
-// para no mostrarlo como si fuera la membresía real del socio.
-const PLACEHOLDER_LEGACY = 'pase libre'
-
+// "Pase Libre" SÍ es un plan real (membresía de acceso libre a Aparatos/
+// Musculación, sin créditos ni turnos) -- no hay que descartarlo: la
+// mayoría de los socios activos lo tienen como su membresía de verdad. Acá
+// solo formateamos lo que haya; "Sin plan" es nada más el fallback para un
+// `plan` null/vacío de verdad (no debería pasar si se cargó desde el panel,
+// que exige elegir al menos uno).
 export function formatearPlanes(plan) {
-  const lista = normalizarPlanes(plan).filter((p) => (p ?? '').trim().toLowerCase() !== PLACEHOLDER_LEGACY)
+  const lista = normalizarPlanes(plan)
   return lista.length > 0 ? lista.join(', ') : 'Sin plan'
 }
 

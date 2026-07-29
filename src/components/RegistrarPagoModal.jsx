@@ -15,15 +15,8 @@ function iniciales(nombre, apellido) {
   return `${(nombre ?? '?').charAt(0)}${(apellido ?? '').charAt(0)}`.toUpperCase()
 }
 
-// "Pase Libre" (legacy, sin actividad real cargada) no cuenta como
-// preselección -- si es lo único que tiene el socio, arranca sin nada
-// tildado para que quien cobra elija la actividad real de una vez.
-function planesActualesValidos(plan) {
-  return normalizarPlanes(plan).filter((p) => p.toLowerCase() !== 'pase libre')
-}
-
 function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
-  const [planes, setPlanes] = useState(() => planesActualesValidos(socio.plan))
+  const [planes, setPlanes] = useState(() => normalizarPlanes(socio.plan))
   const [error, setError] = useState(null)
   const tieneCredito = esPlanDeCreditos(planes)
   const tieneVencimiento = tienePlanDeVencimiento(planes)
