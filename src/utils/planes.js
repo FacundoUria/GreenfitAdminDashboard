@@ -19,6 +19,14 @@ export function esPlanDeCreditos(plan) {
   return normalizarPlanes(plan).some((p) => PLANES_DE_CREDITOS.includes((p ?? '').toLowerCase()))
 }
 
+// Subconjunto de `plan` que son actividades de créditos (no de vencimiento).
+// Un socio puede tener más de una (ej: CrossFit + Kickstrike) -- eso es lo
+// que obliga a preguntar a qué disciplina van los créditos de un pago,
+// porque `creditos` es un solo pozo y no se puede repartir solo.
+export function planesDeCreditos(plan) {
+  return normalizarPlanes(plan).filter((p) => PLANES_DE_CREDITOS.includes((p ?? '').toLowerCase()))
+}
+
 export function tienePlanDeVencimiento(plan) {
   return normalizarPlanes(plan).some((p) => !PLANES_DE_CREDITOS.includes((p ?? '').toLowerCase()))
 }

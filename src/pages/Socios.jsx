@@ -20,6 +20,8 @@ import {
   proximoVencimiento,
   toISODate,
 } from '../utils/fecha'
+import { planesDeCreditos } from '../utils/planes'
+import { sincronizarCreditosPwa } from '../utils/creditosPwa'
 import SociosTabla from '../components/SociosTabla'
 import NuevoSocioModal from '../components/NuevoSocioModal'
 import RegistrarPagoModal from '../components/RegistrarPagoModal'
@@ -95,7 +97,7 @@ function Socios() {
   const [modalAbierto, setModalAbierto] = useState(false)
   const [socioEnEdicion, setSocioEnEdicion] = useState(null)
   const [socioParaPago, setSocioParaPago] = useState(null)
-  const [toastVisible, setToastVisible] = useState(false)
+  const [toastMessage, setToastMessage] = useState(null)
   const [seleccionados, setSeleccionados] = useState(new Set())
   const [whatsappDestinatarios, setWhatsappDestinatarios] = useState(null)
   const [whatsappPreset, setWhatsappPreset] = useState(null)
@@ -207,6 +209,18 @@ function Socios() {
       return
     }
 
+    // El ajuste rápido +/-1 solo se sincroniza con la app cuando la
+    // actividad de créditos es inequívoca. Con varias (ej: CrossFit +
+    // Kickstrike) no hay forma de saber a cuál de las dos va este click sin
+    // preguntar, así que para esos casos hay que usar "Registrar pago".
+    const [unicaDisciplina, ...resto] = planesDeCreditos(socio.plan)
+    if (unicaDisciplina && resto.length === 0) {
+      await sincronizarCreditosPwa({ dni: socio.dni, disciplina: unicaDisciplina, delta })
+    } else if (resto.length > 0) {
+      setToastMessage('Créditos del panel actualizados. Para sincronizar con la app usá "Registrar pago" (tiene varias actividades).')
+      setTimeout(() => setToastMessage(null), 4000)
+    }
+
     fetchSocios()
   }
 
@@ -255,9 +269,21 @@ function Socios() {
       return
     }
 
+    let mensaje = 'Pago registrado correctamente'
+    if (payload.creditos) {
+      const resultado = await sincronizarCreditosPwa({
+        dni: socio.dni,
+        disciplina: payload.creditos.disciplina,
+        delta: payload.creditos.cantidad,
+      })
+      if (!resultado.synced && resultado.reason !== 'sin_cuenta_pwa') {
+        mensaje = 'Pago registrado, pero no se pudo sincronizar con la app. Revisá la consola.'
+      }
+    }
+
     setSocioParaPago(null)
-    setToastVisible(true)
-    setTimeout(() => setToastVisible(false), 2500)
+    setToastMessage(mensaje)
+    setTimeout(() => setToastMessage(null), 2500)
     fetchSocios()
   }
 
@@ -431,7 +457,7 @@ function Socios() {
         />
       )}
 
-      {toastVisible && <Toast message="Pago registrado correctamente" />}
+      {toastMessage && <Toast message={toastMessage} />}
     </div>
   )
 }

@@ -4,6 +4,7 @@ import {
   esPlanDeCreditos,
   formatearPlanes,
   normalizarPlanes,
+  planesDeCreditos,
   PLANES_DISPONIBLES,
   tienePlanDeVencimiento,
 } from '../utils/planes'
@@ -20,12 +21,22 @@ function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
   const [error, setError] = useState(null)
   const tieneCredito = esPlanDeCreditos(planes)
   const tieneVencimiento = tienePlanDeVencimiento(planes)
+  const planesCredito = planesDeCreditos(planes)
+  const [disciplinaCredito, setDisciplinaCredito] = useState(planesCredito[0] ?? null)
   const [cantidad, setCantidad] = useState(12)
   const [guardando, setGuardando] = useState(false)
 
   const handleTogglePlan = (plan) => {
     setError(null)
-    setPlanes((prev) => (prev.includes(plan) ? prev.filter((p) => p !== plan) : [...prev, plan]))
+    setPlanes((prev) => {
+      const siguiente = prev.includes(plan) ? prev.filter((p) => p !== plan) : [...prev, plan]
+      // Si la actividad que estaba elegida como destino de los créditos dejó
+      // de estar marcada (o se agregó una nueva y era la única), reencauzamos
+      // la selección en vez de dejarla apuntando a un plan ya no marcado.
+      const creditosSiguiente = planesDeCreditos(siguiente)
+      setDisciplinaCredito((actual) => (creditosSiguiente.includes(actual) ? actual : creditosSiguiente[0] ?? null))
+      return siguiente
+    })
   }
 
   const handleConfirmar = async () => {
@@ -33,11 +44,17 @@ function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
       setError('Elegí al menos una actividad/plan.')
       return
     }
+    if (tieneCredito && !disciplinaCredito) {
+      setError('Elegí a qué actividad van los créditos de este pago.')
+      return
+    }
     setError(null)
     setGuardando(true)
     await onConfirmar(socio, {
       plan: planes,
-      ...(tieneCredito ? { creditos: { cantidad: Number(cantidad) || 0 } } : {}),
+      ...(tieneCredito
+        ? { creditos: { cantidad: Number(cantidad) || 0, disciplina: disciplinaCredito } }
+        : {}),
       ...(tieneVencimiento ? { vencimiento: true } : {}),
     })
     setGuardando(false)
@@ -102,6 +119,26 @@ function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
                 Renovación mensual: sumá los créditos correspondientes a sus actividades. Créditos
                 actuales: <span className="font-semibold text-white">{socio.creditos ?? 0}</span>
               </p>
+
+              {planesCredito.length > 1 && (
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="disciplinaCredito" className="text-xs font-medium text-gray-400">
+                    ¿A qué actividad van estos créditos en la app? (tiene varias)
+                  </label>
+                  <select
+                    id="disciplinaCredito"
+                    value={disciplinaCredito ?? ''}
+                    onChange={(event) => setDisciplinaCredito(event.target.value)}
+                    className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
+                  >
+                    {planesCredito.map((plan) => (
+                      <option key={plan} value={plan}>
+                        {plan}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div className="flex flex-wrap gap-2">
                 {PACKS_RENOVACION.map((n) => (
