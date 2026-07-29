@@ -21,7 +21,7 @@ import {
   toISODate,
 } from '../utils/fecha'
 import { planesDeCreditos } from '../utils/planes'
-import { sincronizarCreditosPwa } from '../utils/creditosPwa'
+import { sincronizarCreditosPwa, sincronizarVencimientoPwa } from '../utils/creditosPwa'
 import SociosTabla from '../components/SociosTabla'
 import NuevoSocioModal from '../components/NuevoSocioModal'
 import RegistrarPagoModal from '../components/RegistrarPagoModal'
@@ -275,6 +275,15 @@ function Socios() {
         dni: socio.dni,
         disciplina: payload.creditos.disciplina,
         delta: payload.creditos.cantidad,
+      })
+      if (!resultado.synced && resultado.reason !== 'sin_cuenta_pwa') {
+        mensaje = 'Pago registrado, pero no se pudo sincronizar con la app. Revisá la consola.'
+      }
+    }
+    if (payload.vencimiento) {
+      const resultado = await sincronizarVencimientoPwa({
+        dni: socio.dni,
+        fechaVencimiento: cambios.fecha_vencimiento,
       })
       if (!resultado.synced && resultado.reason !== 'sin_cuenta_pwa') {
         mensaje = 'Pago registrado, pero no se pudo sincronizar con la app. Revisá la consola.'

@@ -58,3 +58,41 @@ export async function sincronizarCreditosPwa({ dni, disciplina, delta }) {
   }
   return { synced: true }
 }
+
+// El pase de Aparatos / Musculación (y "Pase Libre", que es el mismo acceso
+// libre sin créditos ni turnos -- ver planes.js) vence por fecha, no se
+// consume por reserva. A diferencia de sincronizarCreditosPwa, acá SÍ
+// pisamos con el valor absoluto que calculó el admin: no hay uso del lado
+// de la PWA que pueda desincronizarse (nadie "gasta" días de membresía
+// reservando una clase), la fecha de vencimiento siempre sale de una sola
+// fuente de verdad (el ciclo de pago que gestiona el admin).
+export async function sincronizarVencimientoPwa({ dni, fechaVencimiento }) {
+  const userId = await resolverUserId(dni)
+  if (!userId) return { synced: false, reason: 'sin_cuenta_pwa' }
+
+  const { data: discipline } = await supabase
+    .from('disciplines')
+    .select('id')
+    .eq('kind', 'membership')
+    .limit(1)
+    .maybeSingle()
+  if (!discipline) return { synced: false, reason: 'disciplina_no_encontrada' }
+
+  // Mediodía local en vez de medianoche: evita que la conversión a UTC que
+  // hace timestamptz corra la fecha un día para atrás/adelante según el
+  // huso horario del navegador que ejecuta esto.
+  const expiresAt = new Date(`${fechaVencimiento}T12:00:00`).toISOString()
+
+  const { error } = await supabase.from('user_credits').insert({
+    user_id: userId,
+    discipline_id: discipline.id,
+    remaining_credits: null,
+    expires_at: expiresAt,
+  })
+
+  if (error) {
+    console.error('No se pudo sincronizar el vencimiento con la PWA:', error.message)
+    return { synced: false, reason: 'error_supabase' }
+  }
+  return { synced: true }
+}
