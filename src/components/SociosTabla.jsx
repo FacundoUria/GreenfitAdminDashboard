@@ -179,10 +179,6 @@ function SocioCard({
           <p className="text-gray-300">{formatearPlanes(socio.plan)}</p>
         </div>
         <div>
-          <p className="text-xs text-gray-500">Último Pago</p>
-          <p className="text-gray-300">{socio.ultimoPago}</p>
-        </div>
-        <div>
           <p className="text-xs text-gray-500">Vencimiento</p>
           <p className="text-gray-300">
             <VencimientoCell socio={socio} />
@@ -257,7 +253,7 @@ function SociosTabla({
 
       {/* Vista de tabla: pantallas medianas y grandes (>= md) */}
       <div className="hidden overflow-x-auto rounded-xl bg-greenfit-card md:block">
-        <table className="w-full min-w-[1040px] text-left text-sm">
+        <table className="w-full min-w-[920px] text-left text-sm">
           <thead>
             <tr className="border-b border-white/5 text-xs uppercase tracking-wide text-gray-400">
               <th className="w-10 px-5 py-3">
@@ -274,7 +270,6 @@ function SociosTabla({
               <th className="px-5 py-3 font-medium">Estado</th>
               <th className="px-5 py-3 font-medium">Plan / Membresía</th>
               <th className="px-5 py-3 font-medium">Créditos</th>
-              <th className="px-5 py-3 font-medium">Último Pago</th>
               <th className="px-5 py-3 font-medium">Vencimiento</th>
               <th className="px-5 py-3 text-right font-medium">Acciones</th>
             </tr>
@@ -312,7 +307,6 @@ function SociosTabla({
                 <td className="px-5 py-3">
                   <CreditosCell socio={socio} onAjustarCredito={onAjustarCredito} />
                 </td>
-                <td className="px-5 py-3 text-gray-300">{socio.ultimoPago}</td>
                 <td className="px-5 py-3 text-gray-300">
                   <VencimientoCell socio={socio} />
                 </td>
