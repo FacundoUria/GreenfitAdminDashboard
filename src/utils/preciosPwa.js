@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabaseClient'
 const CAMPO_A_DISCIPLINA = [
   { campo: 'precio_crossfit', disciplina: 'CrossFit' },
   { campo: 'precio_boxeo', disciplina: 'Boxeo' },
-  { campo: 'precio_kickstrike', disciplina: 'Kickstrike' },
+  { campo: 'precio_kickboxing', disciplina: 'Kickboxing' },
   { campo: 'precio_aparatos', disciplina: 'Aparatos' },
 ]
 

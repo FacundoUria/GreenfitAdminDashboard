@@ -211,7 +211,7 @@ function Socios() {
 
     // El ajuste rápido +/-1 solo se sincroniza con la app cuando la
     // actividad de créditos es inequívoca. Con varias (ej: CrossFit +
-    // Kickstrike) no hay forma de saber a cuál de las dos va este click sin
+    // Kickboxing) no hay forma de saber a cuál de las dos va este click sin
     // preguntar, así que para esos casos hay que usar "Registrar pago".
     const [unicaDisciplina, ...resto] = planesDeCreditos(socio.plan)
     if (unicaDisciplina && resto.length === 0) {
