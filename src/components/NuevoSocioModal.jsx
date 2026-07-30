@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { hoyISO, proximoVencimiento, toISODate } from '../utils/fecha'
 import { PLANES_DISPONIBLES, normalizarPlanes, planesDeCreditos, tienePlanDeVencimiento } from '../utils/planes'
 import { sincronizarCreditosPwa, sincronizarVencimientoPwa } from '../utils/creditosPwa'
+import { normalizarTexto } from '../utils/coincidenciaSocios'
 
 function formInicial(socio) {
   if (socio) {
@@ -47,15 +48,66 @@ async function esperarCuentaPwa(dni, intentos = 6, esperaMs = 800) {
   return false
 }
 
-function NuevoSocioModal({ socio, onClose, onSaved, onBuscarSocioPorDni, onEditarSocioExistente }) {
+function NuevoSocioModal({
+  socio,
+  onClose,
+  onSaved,
+  onBuscarSocioPorDni,
+  onEditarSocioExistente,
+  onBuscarSocioPorNombre,
+}) {
   const esEdicion = Boolean(socio)
   const [form, setForm] = useState(() => formInicial(socio))
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState(null)
   const [socioDuplicado, setSocioDuplicado] = useState(null)
+  // Coincidencia por nombre (posible duplicado sin DNI, registro viejo, etc.)
+  // -- distinta del DNI duplicado: acá no hay certeza, es una sospecha que el
+  // admin tiene que confirmar o descartar.
+  const [coincidenciaNombre, setCoincidenciaNombre] = useState(null)
+  const [nombreDescartado, setNombreDescartado] = useState(null)
+  const [socioAUnificar, setSocioAUnificar] = useState(null)
 
   const handleChange = (field) => (event) => {
     setForm((prev) => ({ ...prev, [field]: event.target.value }))
+  }
+
+  // Chequeo en vivo mientras se escribe nombre/apellido -- solo tiene sentido
+  // en un alta nueva (no al editar una ficha ya existente ni mientras se está
+  // en medio de una unificación ya elegida).
+  useEffect(() => {
+    if (esEdicion || socioAUnificar || !onBuscarSocioPorNombre) return
+    // El propio setTimeout es lo que hace la actualización "asíncrona" a
+    // ojos del linter -- evita que las llamadas a setState queden colgando
+    // directamente del cuerpo del efecto.
+    const timeoutId = setTimeout(() => {
+      const clave = normalizarTexto(`${form.nombre} ${form.apellido}`)
+      if (clave.length < 5 || clave === nombreDescartado) {
+        setCoincidenciaNombre(null)
+        return
+      }
+      setCoincidenciaNombre(onBuscarSocioPorNombre(form.nombre, form.apellido) ?? null)
+    }, 500)
+    return () => clearTimeout(timeoutId)
+  }, [form.nombre, form.apellido, esEdicion, socioAUnificar, nombreDescartado, onBuscarSocioPorNombre])
+
+  const handleUnificar = () => {
+    if (!coincidenciaNombre) return
+    // Completa los huecos del formulario con lo que ya tenía la ficha vieja,
+    // pero sin pisar lo que el admin ya tipeó (DNI, plan, etc. son los datos
+    // nuevos que justamente se están integrando).
+    setForm((prev) => ({
+      ...prev,
+      telefono: prev.telefono || coincidenciaNombre.telefono || '',
+      email: prev.email || coincidenciaNombre.email || '',
+    }))
+    setSocioAUnificar(coincidenciaNombre)
+    setCoincidenciaNombre(null)
+  }
+
+  const handleIgnorarCoincidencia = () => {
+    setNombreDescartado(normalizarTexto(`${form.nombre} ${form.apellido}`))
+    setCoincidenciaNombre(null)
   }
 
   const handleTogglePlan = (plan) => {
@@ -81,6 +133,20 @@ function NuevoSocioModal({ socio, onClose, onSaved, onBuscarSocioPorDni, onEdita
     if (form.planes.length === 0) {
       setError('Seleccioná al menos un plan/actividad.')
       return
+    }
+
+    // Red de seguridad si el aviso en vivo todavía no llegó a dispararse
+    // (ej: pegar el nombre y guardar enseguida) -- no dejamos pasar el alta
+    // sin que el admin vea la coincidencia y elija qué hacer.
+    if (!esEdicion && !socioAUnificar && onBuscarSocioPorNombre) {
+      const clave = normalizarTexto(`${form.nombre} ${form.apellido}`)
+      if (clave !== nombreDescartado) {
+        const posibleMatch = onBuscarSocioPorNombre(form.nombre, form.apellido)
+        if (posibleMatch) {
+          setCoincidenciaNombre(posibleMatch)
+          return
+        }
+      }
     }
 
     setGuardando(true)
@@ -109,27 +175,50 @@ function NuevoSocioModal({ socio, onClose, onSaved, onBuscarSocioPorDni, onEdita
       const diaCorte = new Date(`${fechaInicio}T00:00:00`).getDate()
       fechaVencimientoNueva = toISODate(proximoVencimiento(fechaInicio, diaCorte))
 
-      resultado = await supabase
-        .from('socios')
-        .insert({
-          nombre: form.nombre,
-          apellido: form.apellido,
-          dni: form.dni,
-          email: form.email,
-          telefono: form.telefono,
-          plan: form.planes,
-          estado: 'Activo',
-          ultimo_pago: fechaInicio,
-          dia_corte: diaCorte,
-          fecha_vencimiento: fechaVencimientoNueva,
-        })
-        .select()
+      if (socioAUnificar) {
+        // Unificación: la ficha vieja (a veces sin DNI, de un alta manual
+        // incompleta) absorbe los datos nuevos en vez de crear un registro
+        // aparte -- mismo id, pero con DNI/plan/estado actualizados.
+        resultado = await supabase
+          .from('socios')
+          .update({
+            nombre: form.nombre,
+            apellido: form.apellido,
+            dni: form.dni,
+            email: form.email,
+            telefono: form.telefono,
+            plan: form.planes,
+            estado: 'Activo',
+            activo: true,
+            ultimo_pago: fechaInicio,
+            dia_corte: diaCorte,
+            fecha_vencimiento: fechaVencimientoNueva,
+          })
+          .eq('id', socioAUnificar.id)
+          .select()
+      } else {
+        resultado = await supabase
+          .from('socios')
+          .insert({
+            nombre: form.nombre,
+            apellido: form.apellido,
+            dni: form.dni,
+            email: form.email,
+            telefono: form.telefono,
+            plan: form.planes,
+            estado: 'Activo',
+            ultimo_pago: fechaInicio,
+            dia_corte: diaCorte,
+            fecha_vencimiento: fechaVencimientoNueva,
+          })
+          .select()
+      }
     }
 
     // Un UPDATE bloqueado por RLS puede volver sin `error` pero sin filas afectadas.
     if (resultado.error || !resultado.data || resultado.data.length === 0) {
       console.error(
-        `Error al ${esEdicion ? 'actualizar' : 'crear'} el socio en Supabase:`,
+        `Error al ${esEdicion || socioAUnificar ? 'actualizar' : 'crear'} el socio en Supabase:`,
         resultado.error?.message ?? 'no se guardó ninguna fila (revisá las políticas RLS)',
       )
       // `dni` es UNIQUE en la tabla -- en vez de un error genérico, buscamos
@@ -187,7 +276,7 @@ function NuevoSocioModal({ socio, onClose, onSaved, onBuscarSocioPorDni, onEdita
     }
 
     setGuardando(false)
-    onSaved()
+    onSaved(socioAUnificar ? '¡Usuario unificado con éxito!' : undefined)
     onClose()
   }
 
@@ -195,7 +284,9 @@ function NuevoSocioModal({ socio, onClose, onSaved, onBuscarSocioPorDni, onEdita
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 p-4">
       <div className="mx-auto my-6 w-full max-w-lg rounded-xl bg-greenfit-card p-5 shadow-xl sm:p-6">
         <div className="mb-5 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-white">{esEdicion ? 'Editar Socio' : 'Nuevo Socio'}</h2>
+          <h2 className="text-lg font-semibold text-white">
+            {esEdicion ? 'Editar Socio' : socioAUnificar ? 'Unificar Socio' : 'Nuevo Socio'}
+          </h2>
           <button
             type="button"
             onClick={onClose}
@@ -363,6 +454,53 @@ function NuevoSocioModal({ socio, onClose, onSaved, onBuscarSocioPorDni, onEdita
             </div>
           )}
 
+          {coincidenciaNombre && (
+            <div className="flex flex-col gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300 sm:col-span-2">
+              <p>
+                ⚠️ Encontramos un socio existente registrado como{' '}
+                <strong>
+                  "{coincidenciaNombre.nombre} {coincidenciaNombre.apellido}"
+                </strong>{' '}
+                (Email: {coincidenciaNombre.email || 'sin email'} | DNI: {coincidenciaNombre.dni || 'Sin DNI'}).
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleUnificar}
+                  className="rounded-lg border border-amber-400/40 px-3 py-1.5 text-xs font-semibold text-amber-200 transition-colors hover:bg-amber-500/15"
+                >
+                  Unificar e integrar a esta ficha
+                </button>
+                <button
+                  type="button"
+                  onClick={handleIgnorarCoincidencia}
+                  className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:bg-white/5"
+                >
+                  Crear como socio nuevo
+                </button>
+              </div>
+            </div>
+          )}
+
+          {socioAUnificar && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-greenfit-primary/30 bg-greenfit-primary/10 p-3 text-sm text-greenfit-primary sm:col-span-2">
+              <span>
+                Vas a unificar estos datos con la ficha existente de{' '}
+                <strong>
+                  {socioAUnificar.nombre} {socioAUnificar.apellido}
+                </strong>
+                .
+              </span>
+              <button
+                type="button"
+                onClick={() => setSocioAUnificar(null)}
+                className="text-xs font-medium text-gray-300 underline transition-colors hover:text-white"
+              >
+                Cancelar
+              </button>
+            </div>
+          )}
+
           <div className="mt-2 flex flex-col-reverse gap-3 sm:col-span-2 sm:flex-row sm:justify-end">
             <button
               type="button"
@@ -376,7 +514,7 @@ function NuevoSocioModal({ socio, onClose, onSaved, onBuscarSocioPorDni, onEdita
               disabled={guardando}
               className="flex min-h-[44px] items-center justify-center rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90 disabled:opacity-60"
             >
-              {guardando ? 'Guardando...' : 'Guardar'}
+              {guardando ? 'Guardando...' : socioAUnificar ? 'Unificar' : 'Guardar'}
             </button>
           </div>
         </form>

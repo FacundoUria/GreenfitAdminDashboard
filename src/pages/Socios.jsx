@@ -21,6 +21,7 @@ import {
   toISODate,
 } from '../utils/fecha'
 import { planesDeCreditos, PLANES_DISPONIBLES } from '../utils/planes'
+import { buscarCoincidenciaPorNombre } from '../utils/coincidenciaSocios'
 import { sincronizarCreditosPwa, sincronizarVencimientoPwa, sincronizarEstadoCuentaPwa } from '../utils/creditosPwa'
 import SociosTabla from '../components/SociosTabla'
 import NuevoSocioModal from '../components/NuevoSocioModal'
@@ -501,9 +502,18 @@ function Socios() {
             setModalAbierto(false)
             setSocioEnEdicion(null)
           }}
-          onSaved={fetchSocios}
+          onSaved={(mensaje) => {
+            fetchSocios()
+            if (mensaje) {
+              setToastMessage(mensaje)
+              setTimeout(() => setToastMessage(null), 3000)
+            }
+          }}
           onBuscarSocioPorDni={(dni) => sociosConEstado.find((s) => s.dni === dni) ?? null}
           onEditarSocioExistente={handleEditar}
+          onBuscarSocioPorNombre={(nombre, apellido) =>
+            buscarCoincidenciaPorNombre(sociosConEstado, nombre, apellido, { excluirId: socioEnEdicion?.id })
+          }
         />
       )}
 
