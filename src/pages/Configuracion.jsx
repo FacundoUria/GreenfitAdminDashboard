@@ -20,6 +20,12 @@ function mapConfigToForm(config) {
     notifVencimientoDiasAntes: String(config.notif_vencimiento_dias_antes ?? 3),
     notifClaseActivo: Boolean(config.notif_clase_activo ?? true),
     notifClaseHorasAntes: String(config.notif_clase_horas_antes ?? 2),
+    bannerActivo: Boolean(config.banner_activo ?? false),
+    bannerMensaje: config.banner_mensaje ?? '',
+    bannerLinkText: config.banner_link_text ?? '',
+    bannerLinkUrl: config.banner_link_url ?? '',
+    whatsappNumero: config.whatsapp_numero ?? '',
+    instagramUsuario: config.instagram_usuario ?? '',
   }
 }
 
@@ -111,6 +117,12 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
         notif_vencimiento_dias_antes: Number(form.notifVencimientoDiasAntes) || 0,
         notif_clase_activo: form.notifClaseActivo,
         notif_clase_horas_antes: Number(form.notifClaseHorasAntes) || 0,
+        banner_activo: form.bannerActivo,
+        banner_mensaje: form.bannerMensaje.trim(),
+        banner_link_text: form.bannerLinkText.trim() || null,
+        banner_link_url: form.bannerLinkUrl.trim() || null,
+        whatsapp_numero: form.whatsappNumero.trim(),
+        instagram_usuario: form.instagramUsuario.trim(),
       })
       .eq('id', 1)
       .select()
@@ -261,6 +273,54 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
             onChange={(value) => updateField('notifClaseHorasAntes', value)}
             suffix="hs antes"
             disabled={!form.notifClaseActivo}
+          />
+        </ConfigCard>
+
+        <ConfigCard title="📢 Banner de Anuncios">
+          <p className="-mt-2 text-xs text-gray-500">
+            Es la barra verde que aparece arriba de todo en la landing. Si está desactivado, o el mensaje queda
+            vacío, la landing no muestra nada ahí.
+          </p>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm text-gray-400">Mostrar banner en la landing</span>
+            <Toggle checked={form.bannerActivo} onChange={(value) => updateField('bannerActivo', value)} />
+          </div>
+          <TextField
+            label="Mensaje"
+            value={form.bannerMensaje}
+            onChange={(value) => updateField('bannerMensaje', value)}
+            placeholder="Ej: ¡Nuevo horario sábados! Aparatos también de 10 a 13 hs"
+          />
+          <TextField
+            label="Texto del link (opcional)"
+            value={form.bannerLinkText}
+            onChange={(value) => updateField('bannerLinkText', value)}
+            placeholder="Ej: Ver horarios completos"
+          />
+          <TextField
+            label="URL del link (opcional)"
+            value={form.bannerLinkUrl}
+            onChange={(value) => updateField('bannerLinkUrl', value)}
+            placeholder="Ej: https://greenfit.fit/#clases"
+          />
+        </ConfigCard>
+
+        <ConfigCard title="📱 Redes Sociales">
+          <p className="-mt-2 text-xs text-gray-500">
+            Se usan para todos los links e íconos de WhatsApp/Instagram de la landing (header, botón flotante,
+            contacto y footer).
+          </p>
+          <TextField
+            label="WhatsApp (solo número, con código de país)"
+            value={form.whatsappNumero}
+            onChange={(value) => updateField('whatsappNumero', value)}
+            placeholder="Ej: 5492617139662"
+          />
+          <TextField
+            label="Usuario de Instagram (sin @)"
+            value={form.instagramUsuario}
+            onChange={(value) => updateField('instagramUsuario', value)}
+            placeholder="Ej: green_fitargentina"
           />
         </ConfigCard>
 

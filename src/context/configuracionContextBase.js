@@ -15,4 +15,10 @@ export const configuracionPorDefecto = {
   notif_vencimiento_dias_antes: 3,
   notif_clase_activo: true,
   notif_clase_horas_antes: 2,
+  banner_activo: false,
+  banner_mensaje: '',
+  banner_link_text: '',
+  banner_link_url: '',
+  whatsapp_numero: '',
+  instagram_usuario: '',
 }
