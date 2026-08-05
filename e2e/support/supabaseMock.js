@@ -98,7 +98,7 @@ const PNG_1X1_TRANSPARENTE = Buffer.from(
 // detrás. `tables`/`rpc` quedan MUTABLES (se devuelve la referencia) para
 // que un test pueda simular una acción (ej: "Registrar Pago") agregando
 // una fila a mitad de camino y volviendo a consultar.
-export async function mockSupabase(page, { user, tables = {}, rpc = {} }) {
+export async function mockSupabase(page, { user, tables = {}, rpc = {}, functions = {} }) {
   // El profile del admin logueado SIEMPRE tiene que estar (lo necesita
   // AuthContext.fetchAdminProfile para no rebotar el login) -- se agrega
   // ADEMÁS de cualquier fixture de `profiles` que el test ya haya puesto
@@ -124,6 +124,24 @@ export async function mockSupabase(page, { user, tables = {}, rpc = {} }) {
       }
       if (pathname === '/auth/v1/logout') {
         await route.fulfill({ status: 204, body: '' })
+        return
+      }
+
+      // Edge Functions (supabase.functions.invoke) -- mismo patrón que
+      // `rpc`, pero bajo /functions/v1/<nombre> en vez de /rest/v1/rpc/.
+      // Usado por Anunciar.jsx (`send-push`).
+      if (pathname.startsWith('/functions/v1/')) {
+        const fnName = pathname.replace('/functions/v1/', '')
+        if (fnName in functions) {
+          const value = typeof functions[fnName] === 'function' ? await functions[fnName](request) : functions[fnName]
+          if (value && typeof value === 'object' && '__e2eError' in value) {
+            await responderJson(route, value.__e2eError.status ?? 400, value.__e2eError.body ?? {})
+          } else {
+            await responderJson(route, 200, value ?? null)
+          }
+        } else {
+          await responderJson(route, 404, { message: `[e2e mock] sin fixture para la function "${fnName}"` })
+        }
         return
       }
 
@@ -170,6 +188,16 @@ export async function mockSupabase(page, { user, tables = {}, rpc = {} }) {
             } catch {
               // sin body parseable -- no aplica ningún cambio.
             }
+          } else if (method === 'DELETE') {
+            // Elimina del array en memoria las filas que matchean el filtro
+            // de la URL (?id=eq.xxx, ?id=in.(a,b), etc.) -- antes esto era
+            // un no-op (el DELETE "funcionaba" pero nunca borraba nada de
+            // la fixture), lo que hubiera hecho pasar en falso cualquier
+            // test que borre una fila y después verifique que ya no está.
+            const aBorrar = new Set(aplicarFiltros(filas, reqUrl.searchParams).map((f) => f.id))
+            const restantes = filas.filter((f) => !aBorrar.has(f.id))
+            filas.length = 0
+            filas.push(...restantes)
           }
           await responderJson(route, 201, filas)
           return

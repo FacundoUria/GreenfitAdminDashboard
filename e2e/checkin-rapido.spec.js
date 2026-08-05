@@ -48,7 +48,12 @@ test('Check-in Rápido otorga +100 XP y respeta el límite de 1 por día', async
   await expect(page.getByText('DNI 40222333')).toBeVisible()
 
   await page.getByRole('button', { name: 'Otorgar' }).click()
-  await expect(page.getByText('+100 XP')).toBeVisible()
+  // exact:true -- el párrafo de ayuda del modal ("Buscá un socio y otorgale
+  // +100 XP de entreno libre...") contiene el mismo substring, y una vez
+  // otorgado también matchea. Con más workers en paralelo (suite más
+  // grande) esto se volvió flaky de verdad en vez de "ganarle por
+  // timing" a la ambigüedad.
+  await expect(page.getByText('+100 XP', { exact: true })).toBeVisible()
 
   // Cierra y vuelve a abrir -- el estado local del modal se resetea, pero
   // el índice único del lado del servidor (simulado acá) sigue recordando

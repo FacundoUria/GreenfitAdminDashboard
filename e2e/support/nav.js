@@ -4,3 +4,7 @@
 export async function irASocios(page) {
   await page.getByRole('link', { name: 'Socios', exact: true }).click()
 }
+
+export async function irADisciplinas(page) {
+  await page.getByRole('link', { name: 'Disciplinas', exact: true }).click()
+}

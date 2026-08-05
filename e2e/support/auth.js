@@ -10,8 +10,8 @@ export const ADMIN_DEMO = {
 // Login real por UI (tipear Email + Contraseña + tocar "Ingresar") contra
 // el backend mockeado -- ejercita el flujo de punta a punta tal cual lo usa
 // el admin real, sin inyectar sesión "por atrás".
-export async function loginComoAdmin(page, { user = ADMIN_DEMO, tables = {}, rpc = {} } = {}) {
-  await mockSupabase(page, { user, tables, rpc })
+export async function loginComoAdmin(page, { user = ADMIN_DEMO, tables = {}, rpc = {}, functions = {} } = {}) {
+  await mockSupabase(page, { user, tables, rpc, functions })
   await page.goto('/')
   await page.getByLabel('Email').fill(user.email)
   await page.getByLabel('Contraseña').fill('cualquier-clave')

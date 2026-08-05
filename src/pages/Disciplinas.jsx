@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, Loader2, Pencil, Plus, Power, Tags, Trash2 } from 'lucide-react'
+import { CheckCircle2, Clock, Loader2, Pencil, Plus, Power, Tags, Trash2 } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import DisciplinaModal from '../components/DisciplinaModal'
+import { agruparClasesPorBloqueHorario, formatearFranjaHoraria } from '../utils/horarios'
 
 function Toast({ message }) {
   return (
@@ -19,6 +20,11 @@ function Disciplinas() {
   const [modalAbierto, setModalAbierto] = useState(false)
   const [disciplinaEnEdicion, setDisciplinaEnEdicion] = useState(null)
   const [toastMessage, setToastMessage] = useState(null)
+  // Franjas horarias (tabla `classes`) agrupadas por discipline_id -- la
+  // MISMA tabla que ya consume "Elegí tu ritmo" en la landing y la pantalla
+  // de Clases, así la tarjeta acá muestra exactamente lo que vería un
+  // visitante del sitio. Se trae en batch (1 query para todas las tarjetas).
+  const [bloquesPorDisciplina, setBloquesPorDisciplina] = useState(new Map())
 
   const fetchDisciplinas = async () => {
     setLoading(true)
@@ -28,10 +34,41 @@ function Disciplinas() {
       console.error('Error al cargar disciplinas desde Supabase:', fetchError.message)
       setError('No se pudieron cargar las disciplinas. Verificá la conexión con Supabase.')
       setDisciplinas([])
-    } else {
-      setDisciplinas(data ?? [])
+      setLoading(false)
+      return
     }
+
+    const filas = data ?? []
+    setDisciplinas(filas)
     setLoading(false)
+
+    // Best-effort, aparte del fetch principal -- si falla no debe bloquear
+    // el catálogo, es un dato "de más" (horarios), no crítico para
+    // administrar altas/bajas de disciplinas.
+    const idsCreditos = filas.filter((d) => d.kind !== 'membership').map((d) => d.id)
+    if (idsCreditos.length === 0) {
+      setBloquesPorDisciplina(new Map())
+      return
+    }
+    const { data: clases, error: clasesError } = await supabase
+      .from('classes')
+      .select('discipline_id, days_of_week, start_time, end_time')
+      .in('discipline_id', idsCreditos)
+    if (clasesError) {
+      console.error('No se pudieron cargar los horarios de las disciplinas:', clasesError.message)
+      return
+    }
+    const porDisciplina = new Map()
+    for (const clase of clases ?? []) {
+      const lista = porDisciplina.get(clase.discipline_id) ?? []
+      lista.push(clase)
+      porDisciplina.set(clase.discipline_id, lista)
+    }
+    const bloques = new Map()
+    for (const [discId, clasesDeEsta] of porDisciplina) {
+      bloques.set(discId, agruparClasesPorBloqueHorario(clasesDeEsta))
+    }
+    setBloquesPorDisciplina(bloques)
   }
 
   useEffect(() => {
@@ -145,7 +182,11 @@ function Disciplinas() {
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {disciplinas.map((disciplina) => (
-            <div key={disciplina.id} className="flex flex-col gap-3 rounded-xl border border-white/5 bg-greenfit-card p-5">
+            <div
+              key={disciplina.id}
+              data-testid={`disciplina-card-${disciplina.id}`}
+              className="flex flex-col gap-3 rounded-xl border border-white/5 bg-greenfit-card p-5"
+            >
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <p className="text-sm font-semibold text-white">{disciplina.name}</p>
@@ -168,6 +209,25 @@ function Disciplinas() {
               {disciplina.default_capacity != null && (
                 <p className="text-xs text-gray-500">Cupo predeterminado: {disciplina.default_capacity}</p>
               )}
+
+              <div className="flex items-start gap-2 rounded-lg bg-white/[0.03] px-3 py-2.5 text-xs text-gray-300">
+                <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-greenfit-primary" />
+                {disciplina.kind === 'membership' ? (
+                  <span className="text-gray-400">Pase libre / Horario de gimnasio</span>
+                ) : (
+                  (() => {
+                    const bloques = bloquesPorDisciplina.get(disciplina.id) ?? []
+                    if (bloques.length === 0) return <span className="text-gray-500">Sin horarios cargados</span>
+                    return (
+                      <div className="flex flex-col gap-1">
+                        {bloques.map((bloque, indice) => (
+                          <span key={indice}>{formatearFranjaHoraria(bloque)}</span>
+                        ))}
+                      </div>
+                    )
+                  })()
+                )}
+              </div>
 
               <div className="mt-auto flex items-center gap-2 border-t border-white/5 pt-3">
                 <button
@@ -208,7 +268,10 @@ function Disciplinas() {
             setModalAbierto(false)
             setDisciplinaEnEdicion(null)
           }}
-          onSaved={fetchDisciplinas}
+          onSaved={(mensaje) => {
+            fetchDisciplinas()
+            mostrarToast(mensaje ?? (disciplinaEnEdicion ? 'Disciplina actualizada' : 'Disciplina creada'))
+          }}
         />
       )}
 
