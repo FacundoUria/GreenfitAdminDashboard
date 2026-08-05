@@ -20,14 +20,16 @@ import {
   proximoVencimiento,
   toISODate,
 } from '../utils/fecha'
-import { planesDeCreditos, PLANES_DISPONIBLES } from '../utils/planes'
+import { formatearPlanes, planesDeCreditos, PLANES_DISPONIBLES } from '../utils/planes'
 import { buscarCoincidenciaPorNombre } from '../utils/coincidenciaSocios'
 import { sincronizarCreditosPwa, sincronizarVencimientoPwa, sincronizarEstadoCuentaPwa } from '../utils/creditosPwa'
+import { fetchAvataresYNiveles, resolverUserIdPorDni, registrarPago } from '../utils/fichaSocioPwa'
 import SociosTabla from '../components/SociosTabla'
 import NuevoSocioModal from '../components/NuevoSocioModal'
 import RegistrarPagoModal from '../components/RegistrarPagoModal'
 import WhatsAppModal from '../components/WhatsAppModal'
 import { useConfiguracion } from '../context/useConfiguracion'
+import { useAuth } from '../context/useAuth'
 
 function Toast({ message }) {
   return (
@@ -87,12 +89,17 @@ function mapearSocio(row) {
 
 function Socios() {
   const { configuracion } = useConfiguracion()
+  const { usuario } = useAuth()
   const diasTolerancia = configuracion?.dias_tolerancia ?? 5
   const [searchParams] = useSearchParams()
 
   const [socios, setSocios] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  // Avatar real + nivel de XP por DNI (Ficha 360°/tabla principal) -- se
+  // trae en batch (2 queries para TODA la lista, no una por socio) apenas
+  // cambia el listado de socios, y se mergea en sociosConEstado más abajo.
+  const [gamificacionPorDni, setGamificacionPorDni] = useState(new Map())
   const [busqueda, setBusqueda] = useState('')
   // El Dashboard linkea acá con ?filtro=por_vencer (u otro value de
   // filtroOptions) para llegar con la lista ya filtrada.
@@ -135,13 +142,26 @@ function Socios() {
     fetchSocios()
   }, [])
 
+  // Aparte del fetch de `socios` -- si falla o tarda no debe bloquear la
+  // tabla principal, es un dato "de más" (avatar + badge de nivel), no
+  // crítico para la gestión de cuotas/créditos.
+  useEffect(() => {
+    if (socios.length === 0) return
+    fetchAvataresYNiveles(socios.map((s) => s.dni)).then(setGamificacionPorDni)
+  }, [socios])
+
   const sociosConEstado = useMemo(
     () =>
-      socios.map((socio) => ({
-        ...socio,
-        estado: calcularEstadoCuota(socio.fechaVencimiento, diasTolerancia) ?? socio.estadoDb,
-      })),
-    [socios, diasTolerancia],
+      socios.map((socio) => {
+        const gamificacion = gamificacionPorDni.get(socio.dni)
+        return {
+          ...socio,
+          estado: calcularEstadoCuota(socio.fechaVencimiento, diasTolerancia) ?? socio.estadoDb,
+          avatarUrl: gamificacion?.avatarUrl ?? null,
+          nivelXp: gamificacion?.nivel ?? null,
+        }
+      }),
+    [socios, diasTolerancia, gamificacionPorDni],
   )
 
   const counts = useMemo(
@@ -330,6 +350,27 @@ function Socios() {
       })
       if (!resultado.synced && resultado.reason !== 'sin_cuenta_pwa') {
         mensaje = 'Pago registrado, pero no se pudo sincronizar con la app. Revisá la consola.'
+      }
+    }
+
+    // Historial de pagos (Ficha 360°) -- best-effort: si el socio todavía no
+    // tiene cuenta PWA, o pagos_socio no está desplegada, el pago YA se
+    // registró arriba (socios + créditos/vencimiento), así que no hay que
+    // cortar el flujo por esto, solo no queda un renglón en el historial.
+    const userId = await resolverUserIdPorDni(socio.dni)
+    if (userId) {
+      try {
+        await registrarPago({
+          userId,
+          paquete: formatearPlanes(payload.plan ?? socio.plan),
+          monto: payload.monto,
+          metodoPago: payload.metodoPago,
+          periodoDesde: hoy,
+          periodoHasta: cambios.fecha_vencimiento ?? null,
+          creadoPor: usuario?.id ?? null,
+        })
+      } catch (err) {
+        console.error('No se pudo guardar el pago en el historial (pagos_socio):', err.message)
       }
     }
 

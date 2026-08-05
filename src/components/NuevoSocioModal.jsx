@@ -5,6 +5,7 @@ import { hoyISO, proximoVencimiento, toISODate } from '../utils/fecha'
 import { PLANES_DISPONIBLES, normalizarPlanes, planesDeCreditos, tienePlanDeVencimiento } from '../utils/planes'
 import { sincronizarCreditosPwa, sincronizarVencimientoPwa } from '../utils/creditosPwa'
 import { normalizarTexto } from '../utils/coincidenciaSocios'
+import FichaSocioHistorial from './FichaSocioHistorial'
 
 function formInicial(socio) {
   if (socio) {
@@ -282,7 +283,11 @@ function NuevoSocioModal({
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 p-4">
-      <div className="mx-auto my-6 w-full max-w-lg rounded-xl bg-greenfit-card p-5 shadow-xl sm:p-6">
+      <div
+        className={`mx-auto my-6 w-full rounded-xl bg-greenfit-card p-5 shadow-xl sm:p-6 ${
+          esEdicion ? 'max-w-3xl' : 'max-w-lg'
+        }`}
+      >
         <div className="mb-5 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">
             {esEdicion ? 'Editar Socio' : socioAUnificar ? 'Unificar Socio' : 'Nuevo Socio'}
@@ -500,6 +505,8 @@ function NuevoSocioModal({
               </button>
             </div>
           )}
+
+          {esEdicion && <FichaSocioHistorial socio={socio} />}
 
           <div className="mt-2 flex flex-col-reverse gap-3 sm:col-span-2 sm:flex-row sm:justify-end">
             <button

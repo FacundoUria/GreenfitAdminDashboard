@@ -4,10 +4,12 @@ import { AuthContext } from './authContextBase'
 
 // Trae el profile solo si es admin — un socio que por error intentara
 // loguearse acá (o cuya cuenta perdió el rol) no debe poder entrar al panel.
+// `id` se expone además de nombre/rol para poder atribuir quién registró
+// una acción (ej: created_by en pagos_socio -- Ficha 360°).
 async function fetchAdminProfile(userId) {
-  const { data, error } = await supabase.from('profiles').select('full_name, role').eq('id', userId).single()
+  const { data, error } = await supabase.from('profiles').select('id, full_name, role').eq('id', userId).single()
   if (error || !data || data.role !== 'admin') return null
-  return { nombre: data.full_name, rol: 'Administrador' }
+  return { id: data.id, nombre: data.full_name, rol: 'Administrador' }
 }
 
 export function AuthProvider({ children }) {

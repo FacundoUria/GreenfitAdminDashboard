@@ -135,6 +135,60 @@ function iniciales(nombre, apellido) {
   return `${(nombre ?? '?').charAt(0)}${(apellido ?? '').charAt(0)}`.toUpperCase()
 }
 
+// Misma paleta/criterio que src/components/Avatar.tsx de la PWA: color
+// dinámico por nombre (siempre el mismo color para el mismo socio) para que
+// el fallback de iniciales no sea el mismo verde repetido para todo el mundo.
+const PALETA_AVATAR = ['#80C026', '#3DDC97', '#5FA8FF', '#B98CFF', '#FF7BAC', '#FFB84D', '#FF6B6B', '#4DD0E1']
+
+function colorAvatar(texto) {
+  let hash = 0
+  for (let i = 0; i < texto.length; i += 1) {
+    hash = (hash * 31 + texto.charCodeAt(i)) >>> 0
+  }
+  return PALETA_AVATAR[hash % PALETA_AVATAR.length]
+}
+
+// Avatar sincronizado con la foto real de la PWA (profiles.avatar_url) --
+// mismo criterio de fallback que la app: foto si existe, si no iniciales
+// con fondo de color dinámico.
+function AvatarSocio({ socio, size = 36 }) {
+  const dimension = `${size}px`
+  if (socio.avatarUrl) {
+    return (
+      <img
+        src={socio.avatarUrl}
+        alt={`Foto de ${socio.nombre ?? ''} ${socio.apellido ?? ''}`.trim()}
+        style={{ width: dimension, height: dimension }}
+        className="shrink-0 rounded-full object-cover"
+      />
+    )
+  }
+  const color = colorAvatar(`${socio.nombre ?? ''}${socio.apellido ?? ''}`)
+  return (
+    <div
+      style={{ width: dimension, height: dimension, backgroundColor: `${color}26`, color, borderColor: color }}
+      className="flex shrink-0 items-center justify-center rounded-full border text-xs font-semibold"
+    >
+      {iniciales(socio.nombre, socio.apellido)}
+    </div>
+  )
+}
+
+// Badge "N{x}" de nivel de gamificación -- null mientras no se resolvió
+// (socio sin cuenta PWA todavía, o la XP no cargó) para no mostrar "N1" a
+// alguien que en realidad no tiene ninguna actividad registrada.
+function NivelBadge({ nivel }) {
+  if (nivel == null) return null
+  return (
+    <span
+      title={`Nivel ${nivel} (gamificación PWA)`}
+      className="inline-flex shrink-0 items-center rounded-full bg-greenfit-primary px-1.5 py-0.5 text-[10px] font-bold text-greenfit-dark"
+    >
+      {`N${nivel}`}
+    </span>
+  )
+}
+
 function SocioAcciones({ socio, onRegistrarPago, onEditar, onAbrirWhatsapp, onCambiarBaja }) {
   return (
     <div className="flex items-center gap-2">
@@ -201,12 +255,11 @@ function SocioCard({
             className="h-5 w-5 shrink-0 accent-greenfit-primary"
             aria-label={`Seleccionar ${socio.nombre}`}
           />
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-greenfit-primary/15 text-xs font-semibold text-greenfit-primary">
-            {iniciales(socio.nombre, socio.apellido)}
-          </div>
+          <AvatarSocio socio={socio} size={40} />
           <div className="min-w-0">
-            <p className="truncate font-medium text-white">
+            <p className="flex items-center gap-1.5 truncate font-medium text-white">
               {socio.nombre} {socio.apellido}
+              <NivelBadge nivel={socio.nivelXp} />
             </p>
             <p className="truncate text-xs text-gray-400">{socio.email}</p>
           </div>
@@ -336,12 +389,11 @@ function SociosTabla({
                 </td>
                 <td className="px-5 py-3">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-greenfit-primary/15 text-xs font-semibold text-greenfit-primary">
-                      {iniciales(socio.nombre, socio.apellido)}
-                    </div>
+                    <AvatarSocio socio={socio} size={36} />
                     <div>
-                      <p className="font-medium text-white">
+                      <p className="flex items-center gap-1.5 font-medium text-white">
                         {socio.nombre} {socio.apellido}
+                        <NivelBadge nivel={socio.nivelXp} />
                       </p>
                       <p className="text-xs text-gray-400">{socio.email}</p>
                     </div>

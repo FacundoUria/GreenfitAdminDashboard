@@ -12,6 +12,13 @@ import { formatFecha } from '../utils/fecha'
 
 const PACKS_RENOVACION = [4, 8, 12, 20]
 
+const METODOS_PAGO = [
+  { value: 'efectivo', label: 'Efectivo' },
+  { value: 'transferencia', label: 'Transferencia' },
+  { value: 'tarjeta', label: 'Tarjeta' },
+  { value: 'otro', label: 'Otro' },
+]
+
 function iniciales(nombre, apellido) {
   return `${(nombre ?? '?').charAt(0)}${(apellido ?? '').charAt(0)}`.toUpperCase()
 }
@@ -29,6 +36,11 @@ function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
   const [cantidades, setCantidades] = useState(() =>
     Object.fromEntries(planesDeCreditos(normalizarPlanes(socio.plan)).map((p) => [p, ''])),
   )
+  // Monto/Método de pago: quedan en el historial de pagos (pagos_socio) --
+  // ninguno es obligatorio, Seba puede seguir registrando un pago sin
+  // cargarlos si no los tiene a mano en el momento.
+  const [monto, setMonto] = useState('')
+  const [metodoPago, setMetodoPago] = useState('efectivo')
   const [guardando, setGuardando] = useState(false)
 
   const handleTogglePlan = (plan) => {
@@ -67,6 +79,8 @@ function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
       plan: planes,
       ...(creditosPorDisciplina.length > 0 ? { creditosPorDisciplina } : {}),
       ...(tieneVencimiento ? { vencimiento: true } : {}),
+      monto: monto ? Number(monto) : null,
+      metodoPago,
     })
     setGuardando(false)
   }
@@ -173,6 +187,41 @@ function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
               </p>
             </div>
           )}
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 gap-3 border-t border-white/5 pt-5 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="monto" className="text-xs font-medium text-gray-400">
+              Monto cobrado (opcional)
+            </label>
+            <input
+              id="monto"
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="$"
+              value={monto}
+              onChange={(e) => setMonto(e.target.value)}
+              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="metodoPago" className="text-xs font-medium text-gray-400">
+              Método de pago
+            </label>
+            <select
+              id="metodoPago"
+              value={metodoPago}
+              onChange={(e) => setMetodoPago(e.target.value)}
+              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
+            >
+              {METODOS_PAGO.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
