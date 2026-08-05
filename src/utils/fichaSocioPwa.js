@@ -236,3 +236,116 @@ export async function registrarPago({ userId, paquete, monto, metodoPago, period
   })
   if (error && !esErrorDeRelacionFaltante(error)) throw new Error(error.message)
 }
+
+// ============================================================
+// Check-in Rápido de Musculación (botón "Check-in Rápido ⚡" del Navbar)
+// ============================================================
+
+export async function buscarSociosParaCheckin(query) {
+  const termino = query.trim()
+  if (!termino) return []
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, full_name, dni, avatar_url')
+    .eq('role', 'socio')
+    .or(`full_name.ilike.%${termino}%,dni.ilike.%${termino}%`)
+    .limit(10)
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((p) => ({ userId: p.id, nombre: p.full_name, dni: p.dni, avatarUrl: p.avatar_url ?? null }))
+}
+
+export const CHECKIN_OTORGADO = 'otorgado'
+export const CHECKIN_YA_REGISTRADO = 'ya_registrado_hoy'
+
+// +100 XP de entreno libre (Musculación/Aparatos), 1 vez por día por socio
+// -- lo hace cumplir el índice único de xp_events del lado del servidor
+// (idx_xp_events_asistencia_por_dia_disciplina): un segundo intento el
+// mismo día tira 23505, que acá se trata como "ya registrado hoy", no
+// como un error real.
+export async function otorgarCheckinMusculacion(userId) {
+  const { error } = await supabase.rpc('admin_otorgar_checkin_musculacion', { p_user_id: userId })
+  if (error) {
+    if (error.code === '23505') return CHECKIN_YA_REGISTRADO
+    throw new Error(error.message)
+  }
+  return CHECKIN_OTORGADO
+}
+
+// ============================================================
+// Actividad Reciente (Dashboard) -- unifica Reservas creadas, Check-ins de
+// Musculación, Asistencias confirmadas a clases y sus Reversiones en un
+// solo stream cronológico.
+// ============================================================
+
+export async function fetchActividadReciente(limite = 20) {
+  const [{ data: bookings, error: bookingsError }, { data: eventos, error: eventosError }] = await Promise.all([
+    supabase
+      .from('bookings')
+      .select('id, created_at, profiles(full_name), classes(title)')
+      .order('created_at', { ascending: false })
+      .limit(limite),
+    supabase
+      .from('xp_events')
+      .select('id, event_type, xp_amount, reference_id, created_at, profiles(full_name), disciplines(name)')
+      .in('event_type', ['asistencia', 'reversion'])
+      .order('created_at', { ascending: false })
+      .limit(limite),
+  ])
+  if (bookingsError) throw new Error(bookingsError.message)
+  if (eventosError && !esErrorDeRelacionFaltante(eventosError)) throw new Error(eventosError.message)
+
+  const eventosFilas = eventos ?? []
+  // Qué eventos de XP ya tienen una reversión registrada -- para no ofrecer
+  // "Revertir" dos veces sobre el mismo (el RPC igual lo bloquea del lado
+  // servidor, esto es solo para no mostrar un botón que va a fallar).
+  const revertidos = new Set(
+    eventosFilas.filter((e) => e.event_type === 'reversion' && e.reference_id).map((e) => e.reference_id),
+  )
+
+  const itemsReservas = (bookings ?? []).map((b) => {
+    const clase = Array.isArray(b.classes) ? b.classes[0] : b.classes
+    const perfil = Array.isArray(b.profiles) ? b.profiles[0] : b.profiles
+    return {
+      id: `reserva-${b.id}`,
+      tipo: 'reserva',
+      fecha: b.created_at,
+      socioNombre: perfil?.full_name ?? 'Socio',
+      detalle: `Reservó ${clase?.title ?? 'una clase'}`,
+      xpEventId: null,
+      xpAmount: null,
+      revertido: false,
+    }
+  })
+
+  const itemsXp = eventosFilas.map((e) => {
+    const disciplina = Array.isArray(e.disciplines) ? e.disciplines[0] : e.disciplines
+    const perfil = Array.isArray(e.profiles) ? e.profiles[0] : e.profiles
+    const esReversion = e.event_type === 'reversion'
+    const esClase = !esReversion && e.reference_id != null
+    return {
+      id: `xp-${e.id}`,
+      tipo: esReversion ? 'reversion' : esClase ? 'asistencia_clase' : 'checkin_musculacion',
+      fecha: e.created_at,
+      socioNombre: perfil?.full_name ?? 'Socio',
+      detalle: esReversion
+        ? `Reversión de ${disciplina?.name ?? 'un evento'} (${e.xp_amount} XP)`
+        : esClase
+          ? `Asistencia confirmada: ${disciplina?.name ?? 'clase'}`
+          : `Check-in de ${disciplina?.name ?? 'Musculación'}`,
+      xpEventId: esReversion ? null : e.id,
+      xpAmount: e.xp_amount,
+      revertido: !esReversion && revertidos.has(e.id),
+    }
+  })
+
+  return [...itemsReservas, ...itemsXp].sort((a, b) => new Date(b.fecha) - new Date(a.fecha)).slice(0, limite)
+}
+
+// Revierte un evento de XP (clase confirmada o check-in de Musculación) --
+// inserta una fila de compensación NEGATIVA server-side (admin_revertir_xp_evento),
+// nunca borra el evento original: la Actividad Reciente y el historial de
+// la Ficha 360° siguen mostrando ambos movimientos.
+export async function revertirXpEvento(xpEventId) {
+  const { error } = await supabase.rpc('admin_revertir_xp_evento', { p_xp_event_id: xpEventId })
+  if (error) throw new Error(error.message)
+}

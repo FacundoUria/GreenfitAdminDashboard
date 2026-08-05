@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('../../lib/supabaseClient', () => ({
-  supabase: { from: vi.fn() },
+  supabase: { from: vi.fn(), rpc: vi.fn() },
 }))
 
 import { supabase } from '../../lib/supabaseClient'
@@ -11,9 +11,16 @@ import {
   fetchAvataresYNiveles,
   fetchHistorialAsistencias,
   fetchHistorialPagos,
+  buscarSociosParaCheckin,
+  otorgarCheckinMusculacion,
+  fetchActividadReciente,
+  revertirXpEvento,
+  CHECKIN_OTORGADO,
+  CHECKIN_YA_REGISTRADO,
 } from '../../utils/fichaSocioPwa'
 
 const mockedFrom = supabase.from
+const mockedRpc = supabase.rpc
 
 function makeChain(result) {
   const chain = {}
@@ -153,5 +160,174 @@ describe('fetchHistorialPagos (cae a lista vacía si pagos_socio todavía no exi
         origen: 'manual',
       },
     ])
+  })
+})
+
+describe('buscarSociosParaCheckin (Check-in Rápido -- buscador del modal)', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('busca solo profiles con role=socio y mapea el resultado', async () => {
+    const orMock = vi.fn().mockReturnValue({
+      limit: vi.fn().mockResolvedValue({
+        data: [{ id: 'u1', full_name: 'Martina Ríos', dni: '30111222', avatar_url: null }],
+        error: null,
+      }),
+    })
+    mockedFrom.mockReturnValue({ select: vi.fn().mockReturnValue({ eq: vi.fn().mockReturnValue({ or: orMock }) }) })
+
+    const resultados = await buscarSociosParaCheckin('Martina')
+    expect(resultados).toEqual([{ userId: 'u1', nombre: 'Martina Ríos', dni: '30111222', avatarUrl: null }])
+  })
+
+  it('con búsqueda vacía, no consulta Supabase', async () => {
+    expect(await buscarSociosParaCheckin('   ')).toEqual([])
+    expect(mockedFrom).not.toHaveBeenCalled()
+  })
+})
+
+describe('otorgarCheckinMusculacion (+100 XP de entreno libre, 1 vez por día)', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('camino feliz: llama al RPC admin_otorgar_checkin_musculacion y devuelve "otorgado"', async () => {
+    mockedRpc.mockResolvedValue({ data: 'xp-1', error: null })
+    const resultado = await otorgarCheckinMusculacion('u1')
+    expect(mockedRpc).toHaveBeenCalledWith('admin_otorgar_checkin_musculacion', { p_user_id: 'u1' })
+    expect(resultado).toBe(CHECKIN_OTORGADO)
+  })
+
+  it('si ya tiene un check-in de Musculación hoy (23505), devuelve "ya_registrado_hoy" en vez de romper', async () => {
+    mockedRpc.mockResolvedValue({ data: null, error: { code: '23505', message: 'duplicate key' } })
+    expect(await otorgarCheckinMusculacion('u1')).toBe(CHECKIN_YA_REGISTRADO)
+  })
+
+  it('otro error real sí se propaga', async () => {
+    mockedRpc.mockResolvedValue({ data: null, error: { code: '42501', message: 'permission denied' } })
+    await expect(otorgarCheckinMusculacion('u1')).rejects.toThrow('permission denied')
+  })
+})
+
+describe('fetchActividadReciente (unifica Reservas, Check-ins de Musculación, Asistencias a clase y Reversiones)', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('suma XP de dos disciplinas distintas el mismo día como dos eventos separados (doble turno legítimo)', async () => {
+    mockedFrom.mockImplementation((tabla) => {
+      if (tabla === 'bookings') {
+        return {
+          select: vi.fn().mockReturnValue({
+            order: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue({ data: [], error: null }) }),
+          }),
+        }
+      }
+      if (tabla === 'xp_events') {
+        return {
+          select: vi.fn().mockReturnValue({
+            in: vi.fn().mockReturnValue({
+              order: vi.fn().mockReturnValue({
+                limit: vi.fn().mockResolvedValue({
+                  data: [
+                    {
+                      id: 'e1',
+                      event_type: 'asistencia',
+                      xp_amount: 100,
+                      reference_id: 'booking-1',
+                      created_at: '2026-08-10T09:00:00.000Z',
+                      profiles: { full_name: 'Martina Ríos' },
+                      disciplines: { name: 'CrossFit' },
+                    },
+                    {
+                      id: 'e2',
+                      event_type: 'asistencia',
+                      xp_amount: 100,
+                      reference_id: 'booking-2',
+                      created_at: '2026-08-10T18:00:00.000Z',
+                      profiles: { full_name: 'Martina Ríos' },
+                      disciplines: { name: 'Boxeo' },
+                    },
+                  ],
+                  error: null,
+                }),
+              }),
+            }),
+          }),
+        }
+      }
+      return { select: vi.fn() }
+    })
+
+    const items = await fetchActividadReciente()
+    const deMartina = items.filter((i) => i.socioNombre === 'Martina Ríos')
+    expect(deMartina).toHaveLength(2)
+    expect(deMartina.map((i) => i.detalle)).toEqual([
+      'Asistencia confirmada: Boxeo', // más reciente (18hs) primero
+      'Asistencia confirmada: CrossFit',
+    ])
+    expect(deMartina.every((i) => i.xpAmount === 100 && !i.revertido)).toBe(true)
+  })
+
+  it('marca "revertido" un evento que ya tiene una fila de reversión asociada, y NO ofrece revertir la reversión en sí', async () => {
+    mockedFrom.mockImplementation((tabla) => {
+      if (tabla === 'bookings') {
+        return {
+          select: vi.fn().mockReturnValue({
+            order: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue({ data: [], error: null }) }),
+          }),
+        }
+      }
+      return {
+        select: vi.fn().mockReturnValue({
+          in: vi.fn().mockReturnValue({
+            order: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue({
+                data: [
+                  {
+                    id: 'e1',
+                    event_type: 'asistencia',
+                    xp_amount: 100,
+                    reference_id: null,
+                    created_at: '2026-08-10T09:00:00.000Z',
+                    profiles: { full_name: 'Bruno Álvarez' },
+                    disciplines: { name: 'Aparatos' },
+                  },
+                  {
+                    id: 'e2',
+                    event_type: 'reversion',
+                    xp_amount: -100,
+                    reference_id: 'e1',
+                    created_at: '2026-08-10T10:00:00.000Z',
+                    profiles: { full_name: 'Bruno Álvarez' },
+                    disciplines: { name: 'Aparatos' },
+                  },
+                ],
+                error: null,
+              }),
+            }),
+          }),
+        }),
+      }
+    })
+
+    const items = await fetchActividadReciente()
+    const checkin = items.find((i) => i.id === 'xp-e1')
+    const reversion = items.find((i) => i.id === 'xp-e2')
+
+    expect(checkin.revertido).toBe(true)
+    expect(checkin.xpEventId).toBe('e1')
+    expect(reversion.tipo).toBe('reversion')
+    expect(reversion.xpEventId).toBeNull()
+  })
+})
+
+describe('revertirXpEvento', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('llama al RPC admin_revertir_xp_evento con el id del evento', async () => {
+    mockedRpc.mockResolvedValue({ data: 'rev-1', error: null })
+    await revertirXpEvento('e1')
+    expect(mockedRpc).toHaveBeenCalledWith('admin_revertir_xp_evento', { p_xp_event_id: 'e1' })
+  })
+
+  it('propaga el error si el servidor rechaza la reversión (ej: ya estaba revertido)', async () => {
+    mockedRpc.mockResolvedValue({ data: null, error: { message: 'Este evento ya fue revertido anteriormente.' } })
+    await expect(revertirXpEvento('e1')).rejects.toThrow('ya fue revertido')
   })
 })

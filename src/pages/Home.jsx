@@ -17,6 +17,7 @@ import { colorOcupacion } from '../utils/ocupacion'
 import { diaActualPorDefecto, fechaDeEstaSemana, mapearClasesDesdeBookings } from '../utils/clases'
 import { calcularEstadoCuota } from '../utils/fecha'
 import { useConfiguracion } from '../context/useConfiguracion'
+import ActividadReciente from '../components/ActividadReciente'
 
 const usuario = 'Seba'
 
@@ -353,6 +354,8 @@ function Home() {
               </div>
             </div>
           </div>
+
+          <ActividadReciente />
         </>
       )}
     </div>
