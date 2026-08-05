@@ -315,6 +315,28 @@ describe('fetchActividadReciente (unifica Reservas, Check-ins de Musculación, A
     expect(reversion.tipo).toBe('reversion')
     expect(reversion.xpEventId).toBeNull()
   })
+
+  it('desambigua la FK a profiles en xp_events (user_id, no created_by) -- sin esto, PostgREST tira "Could not embed because more than one relationship was found for xp_events and profiles"', async () => {
+    const selectXpEvents = vi.fn().mockReturnValue({
+      in: vi.fn().mockReturnValue({
+        order: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue({ data: [], error: null }) }),
+      }),
+    })
+    mockedFrom.mockImplementation((tabla) => {
+      if (tabla === 'bookings') {
+        return {
+          select: vi.fn().mockReturnValue({
+            order: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue({ data: [], error: null }) }),
+          }),
+        }
+      }
+      return { select: selectXpEvents }
+    })
+
+    await fetchActividadReciente()
+
+    expect(selectXpEvents).toHaveBeenCalledWith(expect.stringContaining('profiles!xp_events_user_id_fkey'))
+  })
 })
 
 describe('revertirXpEvento', () => {

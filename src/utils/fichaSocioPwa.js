@@ -286,7 +286,14 @@ export async function fetchActividadReciente(limite = 20) {
       .limit(limite),
     supabase
       .from('xp_events')
-      .select('id, event_type, xp_amount, reference_id, created_at, profiles(full_name), disciplines(name)')
+      // `xp_events` tiene DOS foreign keys a `profiles` (user_id -- quién
+      // recibió el XP -- y created_by -- quién lo otorgó, ej. el admin desde
+      // Check-in Rápido), así que el embed implícito `profiles(...)` es
+      // ambiguo para PostgREST ("Could not embed because more than one
+      // relationship was found for 'xp_events' and 'profiles'"). Se fuerza
+      // la FK exacta -- acá siempre queremos el nombre del SOCIO (user_id),
+      // no de quién otorgó el evento.
+      .select('id, event_type, xp_amount, reference_id, created_at, profiles!xp_events_user_id_fkey(full_name), disciplines(name)')
       .in('event_type', ['asistencia', 'reversion'])
       .order('created_at', { ascending: false })
       .limit(limite),

@@ -13,13 +13,13 @@ import {
 } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import {
-  calcularEstadoCuota,
   esDelMesActual,
   formatFecha,
   hoyISO,
   proximoVencimiento,
   toISODate,
 } from '../utils/fecha'
+import { estadoOperativoSocio, getSocioMetrics } from '../utils/socioMetrics'
 import { formatearPlanes, planesDeCreditos, PLANES_DISPONIBLES } from '../utils/planes'
 import { buscarCoincidenciaPorNombre } from '../utils/coincidenciaSocios'
 import { sincronizarCreditosPwa, sincronizarVencimientoPwa, sincronizarEstadoCuentaPwa } from '../utils/creditosPwa'
@@ -150,13 +150,19 @@ function Socios() {
     fetchAvataresYNiveles(socios.map((s) => s.dni)).then(setGamificacionPorDni)
   }, [socios])
 
+  // estadoOperativoSocio() es la MISMA función que usa Home.jsx -- antes
+  // acá un socio sin fecha_vencimiento (planes de créditos) caía a
+  // `socio.estadoDb` (texto legacy, potencialmente desactualizado), mientras
+  // que Home lo excluía directamente de los tres conteos. Eso hacía que
+  // "Socios Activos"/"Cuotas Vencidas" mostraran números distintos en las
+  // dos pantallas para los mismos socios.
   const sociosConEstado = useMemo(
     () =>
       socios.map((socio) => {
         const gamificacion = gamificacionPorDni.get(socio.dni)
         return {
           ...socio,
-          estado: calcularEstadoCuota(socio.fechaVencimiento, diasTolerancia) ?? socio.estadoDb,
+          estado: estadoOperativoSocio(socio, diasTolerancia),
           avatarUrl: gamificacion?.avatarUrl ?? null,
           nivelXp: gamificacion?.nivel ?? null,
         }
@@ -164,21 +170,36 @@ function Socios() {
     [socios, diasTolerancia, gamificacionPorDni],
   )
 
-  const counts = useMemo(
-    () => ({
-      activo: sociosConEstado.filter((s) => (s.estado ?? '').toLowerCase() === 'activo').length,
-      vencido: sociosConEstado.filter((s) => (s.estado ?? '').toLowerCase() === 'vencido').length,
-      tolerancia: sociosConEstado.filter((s) => (s.estado ?? '').toLowerCase() === 'tolerancia').length,
+  const counts = useMemo(() => {
+    const metrics = getSocioMetrics(sociosConEstado, diasTolerancia)
+    return {
+      activo: metrics.activos,
+      vencido: metrics.vencidos,
+      tolerancia: metrics.tolerancia,
       nuevo: sociosConEstado.filter((s) => esDelMesActual(s.fechaInicio)).length,
-    }),
-    [sociosConEstado],
-  )
+    }
+  }, [sociosConEstado, diasTolerancia])
 
+  // testId comparte prefijo con las tarjetas equivalentes de Home.jsx
+  // (kpi-activos/kpi-vencidos/kpi-tolerancia) a propósito -- permite a un
+  // test E2E leer "el mismo número" en las dos pantallas sin depender del
+  // texto exacto de la etiqueta (que además difiere: "Cuotas Vencidas" en
+  // Home vs "Cuota Vencida" acá).
   const kpis = [
-    { key: 'activo', label: 'Socios Activos', value: counts.activo, icon: Users },
-    { key: 'vencido', label: 'Cuota Vencida', value: counts.vencido, icon: AlertCircle },
-    { key: 'tolerancia', label: 'En Tolerancia', value: counts.tolerancia, icon: Clock },
-    { key: 'nuevo', label: 'Nuevos del Mes', value: counts.nuevo, icon: UserPlus },
+    { key: 'activo', testId: 'kpi-activos', label: 'Socios Activos', value: counts.activo, icon: Users },
+    { key: 'vencido', testId: 'kpi-vencidos', label: 'Cuota Vencida', value: counts.vencido, icon: AlertCircle },
+    {
+      key: 'tolerancia',
+      testId: 'kpi-tolerancia',
+      label: 'En Tolerancia',
+      // Mismo criterio de claridad que la tarjeta equivalente de Home --
+      // aclara el rango de días de gracia configurado en vez de un genérico
+      // "En Tolerancia" sin contexto.
+      subtitulo: `1 a ${diasTolerancia} día${diasTolerancia === 1 ? '' : 's'} vencido`,
+      value: counts.tolerancia,
+      icon: Clock,
+    },
+    { key: 'nuevo', testId: 'kpi-nuevos', label: 'Nuevos del Mes', value: counts.nuevo, icon: UserPlus },
   ]
 
   const sociosFiltrados = useMemo(() => {
@@ -416,11 +437,13 @@ function Socios() {
   return (
     <div className="flex flex-col gap-6">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {kpis.map(({ key, label, value, icon: Icon }) => (
+        {kpis.map(({ key, testId, label, subtitulo, value, icon: Icon }) => (
           <button
             key={key}
+            data-testid={testId}
             type="button"
             onClick={() => handleKpiClick(key)}
+            title={subtitulo}
             className={`flex items-center gap-4 rounded-xl bg-greenfit-card p-5 text-left transition-shadow ${
               filtroEstado === key ? 'ring-2 ring-greenfit-primary' : 'hover:ring-1 hover:ring-white/10'
             }`}
@@ -429,7 +452,10 @@ function Socios() {
               <Icon className="h-5 w-5 text-greenfit-primary" />
             </div>
             <div>
-              <p className="text-sm text-gray-400">{label}</p>
+              <p className="text-sm text-gray-400">
+                {label}
+                {subtitulo && <span className="block text-xs text-gray-500">({subtitulo})</span>}
+              </p>
               <p className="text-2xl font-semibold text-white">{value}</p>
             </div>
           </button>

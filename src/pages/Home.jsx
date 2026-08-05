@@ -15,7 +15,7 @@ import {
 import { supabase } from '../lib/supabaseClient'
 import { colorOcupacion } from '../utils/ocupacion'
 import { diaActualPorDefecto, fechaDeEstaSemana, mapearClasesDesdeBookings } from '../utils/clases'
-import { calcularEstadoCuota } from '../utils/fecha'
+import { getSocioMetrics, estadoOperativoSocio } from '../utils/socioMetrics'
 import { useConfiguracion } from '../context/useConfiguracion'
 import ActividadReciente from '../components/ActividadReciente'
 
@@ -90,15 +90,14 @@ function Home() {
     fetchDatos()
   }, [])
 
-  const sociosActivos = socios.filter(
-    (s) => calcularEstadoCuota(s.fecha_vencimiento, diasTolerancia) === 'activo',
-  ).length
-  const cuotasVencidas = socios.filter(
-    (s) => calcularEstadoCuota(s.fecha_vencimiento, diasTolerancia) === 'vencido',
-  ).length
-  const sociosTolerancia = socios.filter(
-    (s) => calcularEstadoCuota(s.fecha_vencimiento, diasTolerancia) === 'tolerancia',
-  ).length
+  // getSocioMetrics() es la MISMA función que usa Socios.jsx para sus
+  // tarjetas de KPI -- fuente única de verdad, así los números de acá y los
+  // de Socios coinciden siempre (antes no: acá se ignoraba a los socios sin
+  // fecha_vencimiento, en Socios cualquiera de esos caía a un texto legacy).
+  const { activos: sociosActivos, vencidos: cuotasVencidas, tolerancia: sociosTolerancia } = useMemo(
+    () => getSocioMetrics(socios, diasTolerancia),
+    [socios, diasTolerancia],
+  )
 
   const proximasClases = useMemo(() => {
     const horaActual = horaActualStr()
@@ -115,7 +114,7 @@ function Home() {
   const sociosPorVencerCompleto = useMemo(
     () =>
       socios
-        .filter((s) => calcularEstadoCuota(s.fecha_vencimiento, diasTolerancia) === 'activo')
+        .filter((s) => estadoOperativoSocio(s, diasTolerancia) === 'activo')
         .map((s) => ({ id: s.id, nombre: s.nombre, apellido: s.apellido, diasRestantes: diasHastaVencimiento(s) }))
         .filter((s) => s.diasRestantes !== null && s.diasRestantes >= 0 && s.diasRestantes <= DIAS_POR_VENCER)
         .sort((a, b) => a.diasRestantes - b.diasRestantes),
@@ -142,15 +141,26 @@ function Home() {
   )
 
   const kpis = [
-    { label: 'Socios Activos', value: `${sociosActivos}`, icon: Users },
+    { testId: 'kpi-activos', label: 'Socios Activos', value: `${sociosActivos}`, icon: Users },
     {
+      testId: 'kpi-vencidos',
       label: 'Cuotas Vencidas',
       value: `${cuotasVencidas}`,
       icon: AlertCircle,
       alerta: cuotasVencidas > 0,
     },
-    { label: 'En Tolerancia', value: `${sociosTolerancia}`, icon: Clock },
     {
+      testId: 'kpi-tolerancia',
+      label: 'En Tolerancia',
+      // Aclara explícitamente cuántos días de gracia contempla -- antes
+      // decía solo "En Tolerancia" sin indicar el rango, y `diasTolerancia`
+      // es configurable (Configuración > días de tolerancia), no siempre 5.
+      subtitulo: `1 a ${diasTolerancia} día${diasTolerancia === 1 ? '' : 's'} vencido`,
+      value: `${sociosTolerancia}`,
+      icon: Clock,
+    },
+    {
+      testId: 'kpi-por-vencer',
       label: `Cuotas por Vencer (${DIAS_POR_VENCER} días)`,
       value: `${sociosPorVencerCompleto.length}`,
       icon: CalendarClock,
@@ -214,12 +224,14 @@ function Home() {
       ) : (
         <>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {kpis.map(({ label, value, icon: Icon, alerta, to }) => {
+            {kpis.map(({ testId, label, subtitulo, value, icon: Icon, alerta, to }) => {
               const Wrapper = to ? Link : 'div'
               return (
                 <Wrapper
                   key={label}
+                  data-testid={testId}
                   {...(to ? { to } : {})}
+                  title={subtitulo}
                   className={`flex items-center gap-4 rounded-xl border border-white/5 bg-greenfit-card p-5 ${
                     to ? 'transition-colors hover:border-greenfit-primary/40 hover:bg-white/5' : ''
                   }`}
@@ -232,7 +244,10 @@ function Home() {
                     <Icon className={`h-5 w-5 ${alerta ? 'text-red-400' : 'text-greenfit-primary'}`} />
                   </div>
                   <div>
-                    <p className="text-sm text-gray-400">{label}</p>
+                    <p className="text-sm text-gray-400">
+                      {label}
+                      {subtitulo && <span className="block text-xs text-gray-500">({subtitulo})</span>}
+                    </p>
                     <p className={`text-2xl font-semibold ${alerta ? 'text-red-400' : 'text-white'}`}>
                       {value}
                     </p>
