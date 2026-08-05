@@ -10,5 +10,10 @@ export default defineConfig({
     // globals nuevo para los archivos de test.
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.js'],
+    // Vitest por defecto matchea *.spec.js -- sin esto, intenta correr los
+    // specs de Playwright de e2e/ como si fueran tests de Vitest (y
+    // explota: Playwright detecta que no lo estás llamando vía
+    // `playwright test` y tira "did not expect test() to be called here").
+    exclude: ['**/node_modules/**', '**/dist/**', 'e2e/**'],
   },
 })

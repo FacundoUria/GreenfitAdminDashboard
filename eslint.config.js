@@ -25,4 +25,13 @@ export default defineConfig([
       globals: globals.node,
     },
   },
+  {
+    // Playwright corre en Node, no en el browser -- process/Buffer del mock
+    // y playwright.config.js necesitan los globals de Node, no los de browser.
+    files: ['e2e/**/*.js', 'playwright.config.js'],
+    extends: [js.configs.recommended],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
 ])

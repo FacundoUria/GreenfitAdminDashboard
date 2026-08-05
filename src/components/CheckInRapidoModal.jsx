@@ -35,8 +35,13 @@ function CheckInRapidoModal({ visible, onClose }) {
 
   useEffect(() => {
     if (!visible || !busqueda.trim()) {
+      // Sin esto, borrar la búsqueda (o cerrar y reabrir el modal con un
+      // término previo todavía en estado) mientras una búsqueda anterior
+      // seguía "en vuelo" dejaba `buscando` trabado en true para siempre:
+      // esta rama corta ese timer/petición pero nunca limpiaba el spinner.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setResultados([])
+      setBuscando(false)
       return
     }
     setBuscando(true)
