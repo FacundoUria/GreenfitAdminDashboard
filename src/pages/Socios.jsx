@@ -12,13 +12,7 @@ import {
   Users,
 } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
-import {
-  esDelMesActual,
-  formatFecha,
-  hoyISO,
-  proximoVencimiento,
-  toISODate,
-} from '../utils/fecha'
+import { esDelMesActual, formatFecha, hoyISO } from '../utils/fecha'
 import { estadoOperativoSocio, getSocioMetrics } from '../utils/socioMetrics'
 import { formatearPlanes, planesDeCreditos, PLANES_DISPONIBLES } from '../utils/planes'
 import { buscarCoincidenciaPorNombre } from '../utils/coincidenciaSocios'
@@ -81,6 +75,9 @@ function mapearSocio(row) {
     fechaVencimiento: row.fecha_vencimiento,
     diaCorte: row.dia_corte,
     fechaInicio: row.created_at,
+    // Inicio de la cuota VIGENTE (elegido a mano en Registrar Pago), distinto de
+    // `fechaInicio` de arriba que es la fecha de alta de la cuenta -- no confundir.
+    fechaInicioCuota: row.fecha_inicio_cuota,
     ultimoPago: formatFecha(row.ultimo_pago),
     creditos: row.creditos ?? 0,
     activo: row.activo ?? true,
@@ -327,13 +324,17 @@ function Socios() {
     }
 
     if (payload.vencimiento) {
-      // Ciclo fijo: el próximo vencimiento sale de sumar 1 mes a la fecha_vencimiento
-      // anterior (nunca de sumar días a HOY), así una cuota pagada tarde no corre el
-      // ciclo de cobro hacia adelante. `dia_corte` es el ancla fija de ese cálculo.
-      const diaCorte = socio.diaCorte ?? new Date(`${socio.fechaVencimiento ?? hoy}T00:00:00`).getDate()
-      const fechaBaseCiclo = socio.fechaVencimiento ?? hoy
-      cambios.fecha_vencimiento = toISODate(proximoVencimiento(fechaBaseCiclo, diaCorte))
-      cambios.dia_corte = diaCorte
+      // Fechas de inicio/vencimiento 100% elegidas por Seba en el modal (ya no se
+      // calculan solas a +1 mes fijo) -- así puede cargar cualquier rango custom
+      // (10 días, 15 días, 2 meses). `dia_corte` se recalcula a partir del día del
+      // mes de la NUEVA fecha_vencimiento para que, si más adelante deja el modal
+      // en los valores sugeridos por defecto, el ciclo siga anclado a lo último
+      // que él mismo cargó. El estado (Activo/Vencido/Tolerancia) no se guarda de
+      // verdad acá -- se recalcula reactivamente en todos lados a partir de
+      // `fecha_vencimiento` vía `calcularEstadoCuota` (ver utils/fecha.js).
+      cambios.fecha_inicio_cuota = payload.vencimiento.fechaInicio
+      cambios.fecha_vencimiento = payload.vencimiento.fechaVencimiento
+      cambios.dia_corte = new Date(`${payload.vencimiento.fechaVencimiento}T00:00:00`).getDate()
       cambios.estado = 'Activo'
     }
 
@@ -386,7 +387,10 @@ function Socios() {
           paquete: formatearPlanes(payload.plan ?? socio.plan),
           monto: payload.monto,
           metodoPago: payload.metodoPago,
-          periodoDesde: hoy,
+          // Para planes con vencimiento el período es el que Seba eligió en el
+          // modal (puede no arrancar hoy); para planes de créditos no hay rango
+          // de fechas, así que el período queda simplemente en "hoy".
+          periodoDesde: cambios.fecha_inicio_cuota ?? hoy,
           periodoHasta: cambios.fecha_vencimiento ?? null,
           creadoPor: usuario?.id ?? null,
         })

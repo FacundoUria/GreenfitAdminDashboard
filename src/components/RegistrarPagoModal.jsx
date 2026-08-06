@@ -8,7 +8,7 @@ import {
   PLANES_DISPONIBLES,
   tienePlanDeVencimiento,
 } from '../utils/planes'
-import { formatFecha } from '../utils/fecha'
+import { formatFecha, hoyISO, proximoVencimiento, toISODate } from '../utils/fecha'
 
 const PACKS_RENOVACION = [4, 8, 12, 20]
 
@@ -42,6 +42,18 @@ function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
   const [monto, setMonto] = useState('')
   const [metodoPago, setMetodoPago] = useState('efectivo')
   const [guardando, setGuardando] = useState(false)
+  // Fecha de inicio/vencimiento de esta cuota -- 100% editables por Seba
+  // (rangos de 10 días, 15 días, 2 meses, lo que necesite). El valor por
+  // defecto sigue el mismo criterio que antes tenía la renovación automática
+  // (continuar desde el vencimiento vigente, o desde hoy si el socio no
+  // tiene uno todavía) para no cambiar el comportamiento de nadie que
+  // confirme sin tocar las fechas.
+  const [fechaInicio, setFechaInicio] = useState(() => socio.fechaVencimiento ?? hoyISO())
+  const [fechaVencimiento, setFechaVencimiento] = useState(() => {
+    const inicio = socio.fechaVencimiento ?? hoyISO()
+    const diaCorte = socio.diaCorte ?? new Date(`${inicio}T00:00:00`).getDate()
+    return toISODate(proximoVencimiento(inicio, diaCorte))
+  })
 
   const handleTogglePlan = (plan) => {
     setError(null)
@@ -73,12 +85,20 @@ function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
       setError('Cargá al menos una cantidad de créditos para alguna actividad.')
       return
     }
+    if (tieneVencimiento && (!fechaInicio || !fechaVencimiento)) {
+      setError('Elegí la fecha de inicio y de vencimiento de la cuota.')
+      return
+    }
+    if (tieneVencimiento && fechaVencimiento < fechaInicio) {
+      setError('La fecha de vencimiento no puede ser anterior a la de inicio.')
+      return
+    }
     setError(null)
     setGuardando(true)
     await onConfirmar(socio, {
       plan: planes,
       ...(creditosPorDisciplina.length > 0 ? { creditosPorDisciplina } : {}),
-      ...(tieneVencimiento ? { vencimiento: true } : {}),
+      ...(tieneVencimiento ? { vencimiento: { fechaInicio, fechaVencimiento } } : {}),
       monto: monto ? Number(monto) : null,
       metodoPago,
     })
@@ -178,13 +198,43 @@ function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
           )}
 
           {tieneVencimiento && (
-            <div className="flex items-start gap-2 rounded-lg border border-white/10 px-4 py-3 text-sm text-gray-300">
-              <RefreshCw className="mt-0.5 h-4 w-4 shrink-0 text-greenfit-primary" />
-              <p>
-                Se va a renovar la cuota por <span className="font-medium text-white">1 mes</span> desde
-                el vencimiento actual ({formatFecha(socio.fechaVencimiento)}), respetando el día de corte
-                fijo (día {socio.diaCorte ?? '—'}).
-              </p>
+            <div className="flex flex-col gap-3 rounded-lg border border-white/10 px-4 py-3">
+              <div className="flex items-start gap-2 text-sm text-gray-300">
+                <RefreshCw className="mt-0.5 h-4 w-4 shrink-0 text-greenfit-primary" />
+                <p>
+                  Por defecto se sugiere 1 mes desde{' '}
+                  {socio.fechaVencimiento ? `el vencimiento actual (${formatFecha(socio.fechaVencimiento)})` : 'hoy'},
+                  pero podés cambiar las fechas libremente (ej. 10 días, 15 días, 2 meses). El estado del
+                  socio (Activo / Vencido / En Tolerancia) se recalcula solo según lo que elijas acá.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="fechaInicioCuota" className="text-xs font-medium text-gray-400">
+                    Fecha de inicio
+                  </label>
+                  <input
+                    id="fechaInicioCuota"
+                    type="date"
+                    value={fechaInicio}
+                    onChange={(e) => setFechaInicio(e.target.value)}
+                    className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="fechaVencimientoCuota" className="text-xs font-medium text-gray-400">
+                    Fecha de vencimiento
+                  </label>
+                  <input
+                    id="fechaVencimientoCuota"
+                    type="date"
+                    min={fechaInicio}
+                    value={fechaVencimiento}
+                    onChange={(e) => setFechaVencimiento(e.target.value)}
+                    className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
+                  />
+                </div>
+              </div>
             </div>
           )}
         </div>
