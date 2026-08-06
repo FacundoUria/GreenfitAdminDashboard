@@ -169,11 +169,17 @@ export async function mockSupabase(page, { user, tables = {}, rpc = {}, function
 
         if (method === 'POST' || method === 'PATCH' || method === 'DELETE') {
           const filas = tables[table] ?? (tables[table] = [])
+          let insertadas = []
           if (method === 'POST') {
             try {
               const payload = request.postDataJSON()
               const nuevas = Array.isArray(payload) ? payload : [payload]
-              for (const fila of nuevas) filas.push({ id: `e2e-${table}-${filas.length + 1}`, ...fila })
+              const offsetInicial = filas.length
+              insertadas = nuevas.map((fila, i) => {
+                const nueva = { id: `e2e-${table}-${offsetInicial + i + 1}`, ...fila }
+                filas.push(nueva)
+                return nueva
+              })
             } catch {
               // sin body parseable -- no hay nada que agregar al fixture.
             }
@@ -199,7 +205,17 @@ export async function mockSupabase(page, { user, tables = {}, rpc = {}, function
             filas.length = 0
             filas.push(...restantes)
           }
-          await responderJson(route, 201, filas)
+          // Un INSERT con `.select()` espera de vuelta la(s) fila(s) recién
+          // creada(s) -- no la tabla entera (PostgREST real hace lo mismo con
+          // `Prefer: return=representation`). Con `.single()` además espera
+          // UN objeto, no un array (mismo criterio que ya usa el branch de
+          // GET más abajo con `esperaUnaSola`). UPDATE/DELETE se quedan
+          // devolviendo `filas` completo como antes -- nada más de esta
+          // suite necesitaba algo más preciso ahí todavía.
+          const acceptHeader = request.headers()['accept'] ?? ''
+          const esperaUnaSola = acceptHeader.includes('vnd.pgrst.object')
+          const cuerpo = method === 'POST' ? insertadas : filas
+          await responderJson(route, 201, esperaUnaSola ? (cuerpo[0] ?? null) : cuerpo)
           return
         }
 

@@ -85,7 +85,14 @@ function EjerciciosLibreriaModal({ onClose }) {
           </button>
         </div>
 
-        <form onSubmit={handleGuardar} className="mb-5 grid grid-cols-1 gap-3 rounded-lg border border-white/10 bg-greenfit-dark/40 p-4 sm:grid-cols-2">
+        <p className="mb-4 text-sm text-gray-400">
+          Agregá los ejercicios que usás siempre para no tener que escribirlos de cero cada vez.
+        </p>
+
+        <form onSubmit={handleGuardar} className="mb-6 grid grid-cols-1 gap-3 rounded-lg border border-white/10 bg-greenfit-dark/40 p-4 sm:grid-cols-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 sm:col-span-2">
+            {form.id ? 'Editar ejercicio' : 'Nuevo ejercicio'}
+          </p>
           <input
             type="text"
             placeholder="Nombre del ejercicio"
@@ -139,6 +146,10 @@ function EjerciciosLibreriaModal({ onClose }) {
             )}
           </div>
         </form>
+
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+          Tu biblioteca{ejercicios.length > 0 ? ` (${ejercicios.length})` : ''}
+        </p>
 
         {cargando ? (
           <div className="flex items-center justify-center gap-2 py-10 text-sm text-gray-400">

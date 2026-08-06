@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Copy, Dumbbell, Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ClipboardList, Copy, Dumbbell, Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
 import { deleteRoutine, duplicateRoutine, fetchRoutinesList } from '../../utils/routinesApi'
 import RutinaEditorModal from './RutinaEditorModal'
 import EjerciciosLibreriaModal from './EjerciciosLibreriaModal'
@@ -94,8 +94,22 @@ function BibliotecaRutinas() {
       ) : error ? (
         <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-6 text-center text-sm text-red-400">{error}</div>
       ) : plantillas.length === 0 ? (
-        <div className="rounded-xl border border-white/5 bg-greenfit-card p-10 text-center text-sm text-gray-400">
-          Todavía no creaste ninguna plantilla base.
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-white/10 bg-greenfit-card p-10 text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-greenfit-primary/15">
+            <ClipboardList className="h-6 w-6 text-greenfit-primary" />
+          </div>
+          <p className="text-sm font-semibold text-white">Tu cajón de rutinas base</p>
+          <p className="max-w-sm text-sm text-gray-400">
+            Armá rutinas generales acá (ej. "Adaptación 4 días") y asignalas rápido a tus socios desde su perfil.
+          </p>
+          <button
+            type="button"
+            onClick={handleNueva}
+            className="mt-1 flex min-h-[40px] items-center justify-center gap-2 rounded-lg bg-greenfit-primary px-4 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90"
+          >
+            <Plus className="h-4 w-4" />
+            Crear la primera plantilla
+          </button>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">

@@ -184,46 +184,49 @@ function RutinaEditorModal({ routineId, socioPreset, onClose, onSaved }) {
           </div>
         ) : (
           <div className="flex flex-col gap-5">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="flex flex-col gap-1.5 sm:col-span-2">
-                <label className="text-xs font-medium text-gray-400">Nombre de la rutina / Objetivo</label>
-                <input
-                  type="text"
-                  value={titulo}
-                  onChange={(e) => setTitulo(e.target.value)}
-                  placeholder="Ej: Rutina Fuerza 4 días"
-                  className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none placeholder:text-gray-600 focus:border-greenfit-primary"
-                />
+            <div className="flex flex-col gap-4 rounded-lg border border-white/10 bg-greenfit-dark/40 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Información general</p>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="flex flex-col gap-1.5 sm:col-span-2">
+                  <label className="text-xs font-medium text-gray-400">Nombre de la rutina / Objetivo</label>
+                  <input
+                    type="text"
+                    value={titulo}
+                    onChange={(e) => setTitulo(e.target.value)}
+                    placeholder="Ej: Rutina Fuerza 4 días"
+                    className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none placeholder:text-gray-600 focus:border-greenfit-primary"
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5 sm:col-span-2">
+                  <label className="text-xs font-medium text-gray-400">Notas generales</label>
+                  <input
+                    type="text"
+                    value={notas}
+                    onChange={(e) => setNotas(e.target.value)}
+                    placeholder="Opcional"
+                    className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none placeholder:text-gray-600 focus:border-greenfit-primary"
+                  />
+                </div>
               </div>
-              <div className="flex flex-col gap-1.5 sm:col-span-2">
-                <label className="text-xs font-medium text-gray-400">Notas generales</label>
-                <input
-                  type="text"
-                  value={notas}
-                  onChange={(e) => setNotas(e.target.value)}
-                  placeholder="Opcional"
-                  className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none placeholder:text-gray-600 focus:border-greenfit-primary"
-                />
-              </div>
-            </div>
 
-            {!socioPreset && (
-              <label className="flex items-center gap-2 text-sm text-gray-300">
-                <input
-                  type="checkbox"
-                  checked={esPlantilla}
-                  onChange={(e) => setEsPlantilla(e.target.checked)}
-                  className="accent-greenfit-primary"
-                />
-                Guardar como plantilla base (no asignada a ningún socio)
-              </label>
-            )}
+              {!socioPreset && (
+                <label className="flex items-center gap-2 text-sm text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={esPlantilla}
+                    onChange={(e) => setEsPlantilla(e.target.checked)}
+                    className="accent-greenfit-primary"
+                  />
+                  Guardar como plantilla base (no asignada a ningún socio)
+                </label>
+              )}
+            </div>
 
             <div className="flex flex-col gap-4">
               {dias.map((dia, dayIdx) => (
-                <div key={dayIdx} className="rounded-lg border border-white/10 bg-greenfit-dark/40 p-4">
-                  <div className="mb-3 flex items-center gap-2">
-                    <span className="shrink-0 rounded-md bg-greenfit-primary/15 px-2 py-1 text-xs font-bold text-greenfit-primary">
+                <div key={dayIdx} className="rounded-xl border border-white/10 bg-greenfit-dark/40 p-4">
+                  <div className="mb-4 flex items-center gap-3 border-b border-white/5 pb-3">
+                    <span className="flex h-9 shrink-0 items-center justify-center rounded-lg bg-greenfit-primary/15 px-3 text-sm font-bold text-greenfit-primary">
                       Día {dayIdx + 1}
                     </span>
                     <input
@@ -231,7 +234,7 @@ function RutinaEditorModal({ routineId, socioPreset, onClose, onSaved }) {
                       value={dia.title}
                       onChange={(e) => handleCambiarTituloDia(dayIdx, e.target.value)}
                       placeholder="Ej: Pecho y Espalda"
-                      className="min-w-0 flex-1 rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
+                      className="min-w-0 flex-1 rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm font-medium text-white outline-none focus:border-greenfit-primary"
                     />
                     {dias.length > 1 && (
                       <button
@@ -260,8 +263,8 @@ function RutinaEditorModal({ routineId, socioPreset, onClose, onSaved }) {
                           </button>
                         </div>
 
-                        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                          <div className="flex flex-col gap-1 sm:col-span-2">
+                        <div className="flex flex-col gap-3">
+                          <div className="flex flex-col gap-1">
                             <label className="text-[11px] font-medium text-gray-500">Ejercicio de la biblioteca (o escribí uno nuevo)</label>
                             <select
                               value={bloque.exerciseId ?? ''}
@@ -277,74 +280,82 @@ function RutinaEditorModal({ routineId, socioPreset, onClose, onSaved }) {
                             </select>
                           </div>
 
-                          <div className="flex flex-col gap-1">
-                            <label className="text-[11px] font-medium text-gray-500">Nombre</label>
-                            <input
-                              type="text"
-                              value={bloque.exerciseName}
-                              disabled={!!bloque.exerciseId}
-                              onChange={(e) => handleCambiarBloque(dayIdx, exIdx, 'exerciseName', e.target.value)}
-                              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary disabled:opacity-50"
-                            />
+                          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                            <div className="flex flex-col gap-1">
+                              <label className="text-[11px] font-medium text-gray-500">Nombre</label>
+                              <input
+                                type="text"
+                                value={bloque.exerciseName}
+                                disabled={!!bloque.exerciseId}
+                                onChange={(e) => handleCambiarBloque(dayIdx, exIdx, 'exerciseName', e.target.value)}
+                                className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary disabled:opacity-50"
+                              />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <label className="text-[11px] font-medium text-gray-500">Grupo muscular</label>
+                              <select
+                                value={bloque.muscleGroup}
+                                disabled={!!bloque.exerciseId}
+                                onChange={(e) => handleCambiarBloque(dayIdx, exIdx, 'muscleGroup', e.target.value)}
+                                className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary disabled:opacity-50"
+                              >
+                                {GRUPOS_MUSCULARES.map((g) => (
+                                  <option key={g} value={g}>
+                                    {g}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
                           </div>
-                          <div className="flex flex-col gap-1">
-                            <label className="text-[11px] font-medium text-gray-500">Grupo muscular</label>
-                            <select
-                              value={bloque.muscleGroup}
-                              disabled={!!bloque.exerciseId}
-                              onChange={(e) => handleCambiarBloque(dayIdx, exIdx, 'muscleGroup', e.target.value)}
-                              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary disabled:opacity-50"
-                            >
-                              {GRUPOS_MUSCULARES.map((g) => (
-                                <option key={g} value={g}>
-                                  {g}
-                                </option>
-                              ))}
-                            </select>
+
+                          {/* Grilla horizontal compacta: los 4 números clave del
+                              bloque juntos y alineados, para leerlos de un
+                              vistazo en vez de ir buscándolos entre el resto de
+                              los campos descriptivos. */}
+                          <div className="grid grid-cols-2 gap-2 rounded-lg bg-greenfit-dark/60 p-2.5 sm:grid-cols-4">
+                            <div className="flex flex-col gap-1">
+                              <label className="text-[10px] font-medium uppercase tracking-wide text-gray-500">Series</label>
+                              <input
+                                type="number"
+                                min="1"
+                                value={bloque.sets}
+                                onChange={(e) => handleCambiarBloque(dayIdx, exIdx, 'sets', e.target.value)}
+                                className="rounded-md border border-white/10 bg-greenfit-dark px-2 py-1.5 text-sm text-white outline-none focus:border-greenfit-primary"
+                              />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <label className="text-[10px] font-medium uppercase tracking-wide text-gray-500">Reps</label>
+                              <input
+                                type="text"
+                                value={bloque.reps}
+                                placeholder="10-12"
+                                onChange={(e) => handleCambiarBloque(dayIdx, exIdx, 'reps', e.target.value)}
+                                className="rounded-md border border-white/10 bg-greenfit-dark px-2 py-1.5 text-sm text-white outline-none placeholder:text-gray-600 focus:border-greenfit-primary"
+                              />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <label className="text-[10px] font-medium uppercase tracking-wide text-gray-500">Carga</label>
+                              <input
+                                type="text"
+                                value={bloque.weightSuggestion}
+                                placeholder="20kg"
+                                onChange={(e) => handleCambiarBloque(dayIdx, exIdx, 'weightSuggestion', e.target.value)}
+                                className="rounded-md border border-white/10 bg-greenfit-dark px-2 py-1.5 text-sm text-white outline-none placeholder:text-gray-600 focus:border-greenfit-primary"
+                              />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <label className="text-[10px] font-medium uppercase tracking-wide text-gray-500">Descanso (s)</label>
+                              <input
+                                type="number"
+                                min="0"
+                                value={bloque.restSeconds}
+                                onChange={(e) => handleCambiarBloque(dayIdx, exIdx, 'restSeconds', e.target.value)}
+                                className="rounded-md border border-white/10 bg-greenfit-dark px-2 py-1.5 text-sm text-white outline-none focus:border-greenfit-primary"
+                              />
+                            </div>
                           </div>
 
                           <div className="flex flex-col gap-1">
-                            <label className="text-[11px] font-medium text-gray-500">Series</label>
-                            <input
-                              type="number"
-                              min="1"
-                              value={bloque.sets}
-                              onChange={(e) => handleCambiarBloque(dayIdx, exIdx, 'sets', e.target.value)}
-                              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
-                            />
-                          </div>
-                          <div className="flex flex-col gap-1">
-                            <label className="text-[11px] font-medium text-gray-500">Repeticiones</label>
-                            <input
-                              type="text"
-                              value={bloque.reps}
-                              placeholder="Ej: 10-12"
-                              onChange={(e) => handleCambiarBloque(dayIdx, exIdx, 'reps', e.target.value)}
-                              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none placeholder:text-gray-600 focus:border-greenfit-primary"
-                            />
-                          </div>
-                          <div className="flex flex-col gap-1">
-                            <label className="text-[11px] font-medium text-gray-500">Carga / Peso sugerido</label>
-                            <input
-                              type="text"
-                              value={bloque.weightSuggestion}
-                              placeholder="Ej: 20kg"
-                              onChange={(e) => handleCambiarBloque(dayIdx, exIdx, 'weightSuggestion', e.target.value)}
-                              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none placeholder:text-gray-600 focus:border-greenfit-primary"
-                            />
-                          </div>
-                          <div className="flex flex-col gap-1">
-                            <label className="text-[11px] font-medium text-gray-500">Descanso (seg)</label>
-                            <input
-                              type="number"
-                              min="0"
-                              value={bloque.restSeconds}
-                              onChange={(e) => handleCambiarBloque(dayIdx, exIdx, 'restSeconds', e.target.value)}
-                              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
-                            />
-                          </div>
-
-                          <div className="flex flex-col gap-1 sm:col-span-2">
                             <label className="text-[11px] font-medium text-gray-500">Notas de técnica / instrucciones</label>
                             <textarea
                               rows={2}
@@ -354,7 +365,7 @@ function RutinaEditorModal({ routineId, socioPreset, onClose, onSaved }) {
                             />
                           </div>
                           {!bloque.exerciseId && (
-                            <div className="flex flex-col gap-1 sm:col-span-2">
+                            <div className="flex flex-col gap-1">
                               <label className="text-[11px] font-medium text-gray-500">Video URL / GIF (opcional)</label>
                               <input
                                 type="text"
