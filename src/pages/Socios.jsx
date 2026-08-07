@@ -105,9 +105,13 @@ function Socios() {
   const [creditosPorDni, setCreditosPorDni] = useState(new Map())
   const [busqueda, setBusqueda] = useState('')
   // El Dashboard linkea acá con ?filtro=por_vencer (u otro value de
-  // filtroOptions) para llegar con la lista ya filtrada.
+  // filtroOptions) para llegar con la lista ya filtrada. Sin ese query
+  // param (entrando desde el Sidebar), el default es 'todos' -- ver TODOS
+  // los socios sin tener que tocar el filtro es el punto de partida
+  // esperado del módulo, "Activo" quedaba escondiendo altas/bajas/
+  // vencidos apenas se entraba.
   const [filtroEstado, setFiltroEstado] = useState(
-    () => filtroOptions.find((o) => o.value === searchParams.get('filtro'))?.value ?? 'activo',
+    () => filtroOptions.find((o) => o.value === searchParams.get('filtro'))?.value ?? 'todos',
   )
   const [filtroPlan, setFiltroPlan] = useState('todos')
   const [modalAbierto, setModalAbierto] = useState(false)
