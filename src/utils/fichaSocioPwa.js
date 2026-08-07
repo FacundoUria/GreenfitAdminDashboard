@@ -414,8 +414,16 @@ export async function darPresenteClase(bookingId) {
 // solo stream cronológico.
 // ============================================================
 
+function formatMontoActividad(monto) {
+  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(monto ?? 0)
+}
+
 export async function fetchActividadReciente(limite = 20) {
-  const [{ data: bookings, error: bookingsError }, { data: eventos, error: eventosError }] = await Promise.all([
+  const [
+    { data: bookings, error: bookingsError },
+    { data: eventos, error: eventosError },
+    { data: pagosMp, error: pagosMpError },
+  ] = await Promise.all([
     supabase
       .from('bookings')
       .select('id, created_at, profiles(full_name), classes(title)')
@@ -434,9 +442,22 @@ export async function fetchActividadReciente(limite = 20) {
       .in('event_type', ['asistencia', 'reversion'])
       .order('created_at', { ascending: false })
       .limit(limite),
+    // Compras aprobadas por Mercado Pago (mp_process_payment las inserta acá
+    // -- no hay una tabla de "actividad" aparte, se reusa pagos_socio como
+    // ya se hacía con reservas/xp_events, mismo criterio de "una sola
+    // fuente de verdad" que el resto del panel). Filtrado a estado='pagado':
+    // un intento pendiente o rechazado no es "actividad" todavía.
+    supabase
+      .from('pagos_socio')
+      .select('id, user_id, paquete, monto, created_at, mercado_pago_payment_id, profiles(full_name)')
+      .eq('origen', 'mercado_pago')
+      .eq('estado', 'pagado')
+      .order('created_at', { ascending: false })
+      .limit(limite),
   ])
   if (bookingsError) throw new Error(bookingsError.message)
   if (eventosError && !esErrorDeRelacionFaltante(eventosError)) throw new Error(eventosError.message)
+  if (pagosMpError && !esErrorDeRelacionFaltante(pagosMpError)) throw new Error(pagosMpError.message)
 
   const eventosFilas = eventos ?? []
   // Qué eventos de XP ya tienen una reversión registrada -- para no ofrecer
@@ -482,7 +503,26 @@ export async function fetchActividadReciente(limite = 20) {
     }
   })
 
-  return [...itemsReservas, ...itemsXp].sort((a, b) => new Date(b.fecha) - new Date(a.fecha)).slice(0, limite)
+  // El nombre del socio queda separado del detalle (mismo criterio que
+  // reservas/asistencias arriba: el render ya antepone "{socioNombre} —
+  // {detalle}") en vez de repetirlo dentro del texto.
+  const itemsPagosMp = (pagosMp ?? []).map((p) => {
+    const perfil = Array.isArray(p.profiles) ? p.profiles[0] : p.profiles
+    return {
+      id: `pago-mp-${p.id}`,
+      tipo: 'pago_mercado_pago',
+      fecha: p.created_at,
+      socioNombre: perfil?.full_name ?? 'Socio',
+      detalle: `Compró ${p.paquete} por ${formatMontoActividad(p.monto)} (Mercado Pago)`,
+      xpEventId: null,
+      xpAmount: null,
+      revertido: false,
+    }
+  })
+
+  return [...itemsReservas, ...itemsXp, ...itemsPagosMp]
+    .sort((a, b) => new Date(b.fecha) - new Date(a.fecha))
+    .slice(0, limite)
 }
 
 // Revierte un evento de XP (clase confirmada o check-in de Musculación) --

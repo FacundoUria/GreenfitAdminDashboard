@@ -458,7 +458,23 @@ describe('darPresenteClase (marca una reserva de clase como asistida -- dispara 
   })
 })
 
-describe('fetchActividadReciente (unifica Reservas, Check-ins de Musculación, Asistencias a clase y Reversiones)', () => {
+// Cadena vacía para pagos_socio (.select().eq().eq().order().limit()) --
+// las 3 queries de fetchActividadReciente corren en el mismo Promise.all,
+// así que todos los tests de ese describe necesitan un handler para las
+// 3 tablas, no solo la que están probando puntualmente.
+function chainPagosMpVacio() {
+  return {
+    select: vi.fn().mockReturnValue({
+      eq: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          order: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue({ data: [], error: null }) }),
+        }),
+      }),
+    }),
+  }
+}
+
+describe('fetchActividadReciente (unifica Reservas, Check-ins de Musculación, Asistencias a clase, Reversiones y compras por Mercado Pago)', () => {
   beforeEach(() => vi.clearAllMocks())
 
   it('suma XP de dos disciplinas distintas el mismo día como dos eventos separados (doble turno legítimo)', async () => {
@@ -470,6 +486,7 @@ describe('fetchActividadReciente (unifica Reservas, Check-ins de Musculación, A
           }),
         }
       }
+      if (tabla === 'pagos_socio') return chainPagosMpVacio()
       if (tabla === 'xp_events') {
         return {
           select: vi.fn().mockReturnValue({
@@ -525,6 +542,7 @@ describe('fetchActividadReciente (unifica Reservas, Check-ins de Musculación, A
           }),
         }
       }
+      if (tabla === 'pagos_socio') return chainPagosMpVacio()
       return {
         select: vi.fn().mockReturnValue({
           in: vi.fn().mockReturnValue({
@@ -582,12 +600,79 @@ describe('fetchActividadReciente (unifica Reservas, Check-ins de Musculación, A
           }),
         }
       }
+      if (tabla === 'pagos_socio') return chainPagosMpVacio()
       return { select: selectXpEvents }
     })
 
     await fetchActividadReciente()
 
     expect(selectXpEvents).toHaveBeenCalledWith(expect.stringContaining('profiles!xp_events_user_id_fkey'))
+  })
+
+  it('incluye las compras aprobadas por Mercado Pago (pagos_socio origen=mercado_pago, estado=pagado) en el mismo stream', async () => {
+    const vacioBookingsYXp = {
+      select: vi.fn().mockReturnValue({
+        order: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue({ data: [], error: null }) }),
+      }),
+    }
+    mockedFrom.mockImplementation((tabla) => {
+      if (tabla === 'bookings') return vacioBookingsYXp
+      if (tabla === 'xp_events') {
+        return {
+          select: vi.fn().mockReturnValue({
+            in: vi.fn().mockReturnValue({
+              order: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue({ data: [], error: null }) }),
+            }),
+          }),
+        }
+      }
+      if (tabla === 'pagos_socio') {
+        return {
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                order: vi.fn().mockReturnValue({
+                  limit: vi.fn().mockResolvedValue({
+                    data: [
+                      {
+                        id: 'pago-1',
+                        user_id: 'u1',
+                        paquete: 'Pack 12 clases CrossFit',
+                        monto: 30000,
+                        created_at: '2026-08-10T12:00:00.000Z',
+                        mercado_pago_payment_id: 'mp-123',
+                        profiles: { full_name: 'Valentina Cruz' },
+                      },
+                    ],
+                    error: null,
+                  }),
+                }),
+              }),
+            }),
+          }),
+        }
+      }
+      throw new Error(`tabla inesperada: ${tabla}`)
+    })
+
+    // El símbolo/espaciado exacto de Intl.NumberFormat('es-AR', ...) varía
+    // según los datos de ICU del entorno que corre el test (a veces mete un
+    // espacio -- angosto o no -- entre "$" y el número) -- se arma el monto
+    // esperado con el mismo formatter en vez de hardcodear el string literal.
+    const montoEsperado = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(30000)
+
+    const items = await fetchActividadReciente()
+    const compra = items.find((i) => i.id === 'pago-mp-pago-1')
+    expect(compra).toEqual({
+      id: 'pago-mp-pago-1',
+      tipo: 'pago_mercado_pago',
+      fecha: '2026-08-10T12:00:00.000Z',
+      socioNombre: 'Valentina Cruz',
+      detalle: `Compró Pack 12 clases CrossFit por ${montoEsperado} (Mercado Pago)`,
+      xpEventId: null,
+      xpAmount: null,
+      revertido: false,
+    })
   })
 })
 

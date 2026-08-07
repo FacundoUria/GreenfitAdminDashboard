@@ -1,18 +1,23 @@
 import { useCallback, useEffect, useState } from 'react'
-import { CalendarPlus, CheckCircle2, Loader2, RefreshCw, RotateCcw, Undo2, Zap } from 'lucide-react'
+import { CalendarPlus, CheckCircle2, CreditCard, Loader2, RefreshCw, RotateCcw, Undo2, Zap } from 'lucide-react'
 import { fetchActividadReciente, revertirXpEvento } from '../utils/fichaSocioPwa'
+import { supabase } from '../lib/supabaseClient'
 
 const ICONOS_POR_TIPO = {
   reserva: { Icon: CalendarPlus, color: 'text-gray-400' },
   asistencia_clase: { Icon: CheckCircle2, color: 'text-greenfit-primary' },
   checkin_musculacion: { Icon: Zap, color: 'text-greenfit-primary' },
   reversion: { Icon: Undo2, color: 'text-amber-400' },
+  pago_mercado_pago: { Icon: CreditCard, color: 'text-greenfit-primary' },
 }
 
-// Cada 30s, no websockets -- "tiempo real" acá es polling liviano (2 queries
-// batch, sin joins pesados), suficiente para un panel de staff que queda
-// abierto en el mostrador durante el día. Si más adelante hace falta
-// verdadero push, esto es candidato a Supabase Realtime.
+// Polling cada 30s (sin websockets) como base -- suficiente para un panel
+// de staff que queda abierto en el mostrador durante el día. Sumado a una
+// suscripción Realtime sobre pagos_socio (ver más abajo) para que una
+// compra por Mercado Pago aparezca al instante mientras Seba ya tiene el
+// Dashboard abierto, sin esperar hasta 30s -- exactamente el caso que este
+// comentario ya anticipaba en una ronda anterior ("si más adelante hace
+// falta verdadero push, esto es candidato a Supabase Realtime").
 const INTERVALO_REFRESCO_MS = 30_000
 
 function formatHora(iso) {
@@ -56,6 +61,24 @@ function ActividadReciente() {
     cargar()
     const intervalId = setInterval(cargar, INTERVALO_REFRESCO_MS)
     return () => clearInterval(intervalId)
+  }, [cargar])
+
+  // Refresco instantáneo cuando el webhook de Mercado Pago inserta una
+  // compra nueva en pagos_socio -- mismo patrón ya probado en el HomeScreen
+  // de la PWA (suscripción a user_credits): el evento de Realtime no valida
+  // RLS por sí solo, así que no se confía en el payload crudo, se usa solo
+  // como disparador para volver a pedir la actividad real vía `cargar()`.
+  useEffect(() => {
+    const channel = supabase
+      .channel('actividad-reciente-pagos-mp')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'pagos_socio' }, () => {
+        cargar()
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [cargar])
 
   const handleRevertir = async (item) => {
