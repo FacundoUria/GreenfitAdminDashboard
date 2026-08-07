@@ -2,17 +2,12 @@ import { useState } from 'react'
 import { CheckCircle2, Loader2, Save } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { useConfiguracion } from '../context/useConfiguracion'
-import { sincronizarPreciosPacks } from '../utils/preciosPwa'
 import Toggle from '../components/Toggle'
 import DiasCerradosCard from '../components/DiasCerradosCard'
 import PlanesPacksCard from '../components/PlanesPacksCard'
 
 function mapConfigToForm(config) {
   return {
-    precioCrossfit: String(config.precio_crossfit ?? 0),
-    precioBoxeo: String(config.precio_boxeo ?? 0),
-    precioKickboxing: String(config.precio_kickboxing ?? 0),
-    precioAparatos: String(config.precio_aparatos ?? 0),
     diasTolerancia: String(config.dias_tolerancia ?? 5),
     limiteCancelacionMinutos: String(config.limite_cancelacion_minutos ?? (config.limite_cancelacion_hs ?? 2) * 60),
     aliasCvu: config.alias_cvu ?? '',
@@ -101,17 +96,9 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
     setGuardando(true)
     setError(null)
 
-    const precios = {
-      precio_crossfit: Number(form.precioCrossfit) || 0,
-      precio_boxeo: Number(form.precioBoxeo) || 0,
-      precio_kickboxing: Number(form.precioKickboxing) || 0,
-      precio_aparatos: Number(form.precioAparatos) || 0,
-    }
-
     const { data, error: updateError } = await supabase
       .from('configuracion')
       .update({
-        ...precios,
         dias_tolerancia: Number(form.diasTolerancia) || 0,
         limite_cancelacion_minutos: Number(form.limiteCancelacionMinutos) || 0,
         alias_cvu: form.aliasCvu,
@@ -143,21 +130,10 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
       return
     }
 
-    // Los precios que ve el socio en "Elegí tu pack" salen de `packs.price`,
-    // no de esta tabla -- sin este paso, Configuración y la PWA vuelven a
-    // desincronizarse apenas se edita un precio.
-    const resultadoSync = await sincronizarPreciosPacks(precios)
-
     setGuardando(false)
     await onGuardado()
     setToastVisible(true)
     setTimeout(() => setToastVisible(false), 2500)
-
-    if (!resultadoSync.synced) {
-      window.alert(
-        `Se guardó la configuración, pero no se pudo sincronizar el precio de: ${resultadoSync.errores.join(', ')}. Revisá la consola.`,
-      )
-    }
   }
 
   return (
@@ -185,37 +161,6 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
       )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <ConfigCard title="💰 Planes y Precios">
-          <p className="-mt-2 text-xs text-gray-500">
-            Estos valores son la única fuente de verdad: se reflejan automáticamente en "Elegí tu pack" de la
-            app de socios.
-          </p>
-          <NumberField
-            label="CrossFit"
-            value={form.precioCrossfit}
-            onChange={(value) => updateField('precioCrossfit', value)}
-            prefix="$"
-          />
-          <NumberField
-            label="Boxeo"
-            value={form.precioBoxeo}
-            onChange={(value) => updateField('precioBoxeo', value)}
-            prefix="$"
-          />
-          <NumberField
-            label="Kickboxing"
-            value={form.precioKickboxing}
-            onChange={(value) => updateField('precioKickboxing', value)}
-            prefix="$"
-          />
-          <NumberField
-            label="Aparatos / Musculación"
-            value={form.precioAparatos}
-            onChange={(value) => updateField('precioAparatos', value)}
-            prefix="$"
-          />
-        </ConfigCard>
-
         <ConfigCard title="⏳ Reglas de Negocio">
           <NumberField
             label="Días de tolerancia de pago"
