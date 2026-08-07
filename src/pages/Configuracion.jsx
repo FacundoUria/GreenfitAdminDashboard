@@ -5,6 +5,7 @@ import { useConfiguracion } from '../context/useConfiguracion'
 import { sincronizarPreciosPacks } from '../utils/preciosPwa'
 import Toggle from '../components/Toggle'
 import DiasCerradosCard from '../components/DiasCerradosCard'
+import PlanesPacksCard from '../components/PlanesPacksCard'
 
 function mapConfigToForm(config) {
   return {
@@ -345,6 +346,7 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
           />
         </ConfigCard>
 
+        <PlanesPacksCard />
         <DiasCerradosCard />
       </div>
 
