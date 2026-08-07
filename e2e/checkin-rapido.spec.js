@@ -43,6 +43,11 @@ test('Check-in Rápido otorga +100 XP y respeta el límite de 1 por día', async
   // TANTO el <button> como ese <span> (mismo texto normalizado en los dos).
   await page.getByRole('button', { name: 'Check-in Rápido' }).click()
   await expect(page.getByLabel('Buscar socio')).toBeVisible()
+  // Texto de la bajada del modal, actualizado en la unificación de reglas
+  // de XP (la acreditación es SIEMPRE vía check-in del Admin).
+  await expect(
+    page.getByText('Confirmá la asistencia del socio presente para acreditar sus +100 XP diarios de entrenamiento y registrar su presente.'),
+  ).toBeVisible()
 
   await page.getByLabel('Buscar socio').fill('Bruno')
   await expect(page.getByText('DNI 40222333')).toBeVisible()
@@ -65,11 +70,81 @@ test('Check-in Rápido otorga +100 XP y respeta el límite de 1 por día', async
   // El modal resetea su búsqueda cada vez que se reabre (useEffect en
   // `visible`) -- si el .fill() de abajo corre ANTES de que ese reset
   // termine de aplicarse, el reset gana la carrera y pisa el 'Bruno'
-  // recién tipeado. Se espera el placeholder de "sin búsqueda todavía"
-  // para asegurarse de tipear DESPUÉS de que el reset ya se aplicó.
-  await expect(page.getByText('Empezá a escribir para buscar un socio.')).toBeVisible()
+  // recién tipeado. Se espera el mensaje de "sin clase activa" (tablasBase()
+  // no tiene ninguna clase cargada) para asegurarse de tipear DESPUÉS de que
+  // el reset -- y la carga de sugerencias -- ya terminaron de aplicarse.
+  await expect(page.getByText('No hay ninguna clase en curso ni por arrancar ahora.', { exact: false })).toBeVisible()
   await page.getByLabel('Buscar socio').fill('Bruno')
   await expect(page.getByText('DNI 40222333')).toBeVisible()
   await page.getByRole('button', { name: 'Otorgar' }).click()
   await expect(page.getByText('Ya registrado hoy')).toBeVisible()
+})
+
+// -- Sugerencias inteligentes (inscriptos de la clase activa/por arrancar) --
+//
+// Reloj CONGELADO (page.clock) en vez de relativo a `new Date()` real:
+//  1) Determinismo total -- misma fecha/hora "Lunes 18:10, clase de 18 a 19"
+//     que ya usan (y tienen probado) los unit tests de
+//     fichaSocioPwa.test.js, en vez de reconstruir la ventana activa contra
+//     el reloj real de la máquina en el momento de correr la suite.
+//  2) `buscarSociosClaseActiva` compara strings "HH:MM:SS" de un solo día y
+//     su helper interno (restarMinutos) resuelve el "30 min antes" con
+//     wraparound (ej: 00:00 - 30min -> "23:30:00") -- si el reloj real de
+//     la máquina cae en la madrugada (00:00 a 00:29), CUALQUIER clase
+//     "activa ahora" construida en base a ese reloj real termina con ese
+//     wraparound y el filtro la descarta. Congelar el reloj evita pelear
+//     contra esa ventana angosta en vez de contra la lógica que se quiere
+//     probar.
+const HORA_CONGELADA = new Date('2026-08-10T18:10:00') // Lunes 18:10 -- clase de Lunes 18 a 19 en curso.
+
+const CLASE_ACTIVA = {
+  id: 'clase-e2e-activa',
+  title: 'CrossFit 18hs',
+  start_time: '18:00:00',
+  end_time: '19:00:00',
+  days_of_week: [1], // Lunes -- HORA_CONGELADA.getDay() === 1.
+  discipline: { name: 'CrossFit' },
+}
+
+const INSCRIPTO_CLASE = {
+  id: 'booking-e2e-activa',
+  user_id: 'e2e-profile-inscripto-clase',
+  class_id: 'clase-e2e-activa',
+  booking_date: HORA_CONGELADA.toISOString().slice(0, 10), // misma fecha (UTC) que usa buscarSociosClaseActiva para filtrar bookings de "hoy".
+  attended: false,
+  profiles: { full_name: 'Carla Suárez', dni: '35444555' },
+}
+
+test('Check-in Rápido lista automáticamente a los inscriptos de la clase en curso y les da presente sin buscarlos', async ({ page }) => {
+  await page.clock.setFixedTime(HORA_CONGELADA)
+  await loginComoAdmin(page, {
+    tables: { ...tablasBase(), classes: [CLASE_ACTIVA], bookings: [INSCRIPTO_CLASE] },
+  })
+
+  await page.getByRole('button', { name: 'Check-in Rápido' }).click()
+  // Modal-scoped (role="dialog") -- el Dashboard debajo del modal también
+  // puede mostrar a "Carla Suárez" en sus propios widgets de asistencias
+  // recientes (misma reserva de hoy), así que un getByText sin acotar a
+  // este diálogo puede resolver a más de un nodo.
+  const modal = page.getByRole('dialog', { name: 'Check-in Rápido' })
+  // Sin escribir nada en el buscador -- las sugerencias aparecen solas.
+  await expect(modal.getByText('Inscriptos en la clase en curso')).toBeVisible()
+  await expect(modal.getByText('Carla Suárez')).toBeVisible()
+  await expect(modal.getByText('CrossFit · 18:00 a 19:00')).toBeVisible()
+
+  await modal.getByRole('button', { name: /dar presente/i }).click()
+  await expect(modal.getByText('Presente', { exact: true })).toBeVisible()
+})
+
+test('un inscripto que ya tiene la asistencia marcada aparece directo como "Presente", sin botón', async ({ page }) => {
+  await page.clock.setFixedTime(HORA_CONGELADA)
+  await loginComoAdmin(page, {
+    tables: { ...tablasBase(), classes: [CLASE_ACTIVA], bookings: [{ ...INSCRIPTO_CLASE, attended: true }] },
+  })
+
+  await page.getByRole('button', { name: 'Check-in Rápido' }).click()
+  const modal = page.getByRole('dialog', { name: 'Check-in Rápido' })
+  await expect(modal.getByText('Carla Suárez')).toBeVisible()
+  await expect(modal.getByText('Presente', { exact: true })).toBeVisible()
+  await expect(modal.getByRole('button', { name: /dar presente/i })).toHaveCount(0)
 })

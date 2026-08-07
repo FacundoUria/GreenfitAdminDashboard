@@ -16,3 +16,7 @@ export async function irARutinas(page) {
 export async function irAConfiguracion(page) {
   await page.getByRole('link', { name: 'Configuración', exact: true }).click()
 }
+
+export async function irAComunidad(page) {
+  await page.getByRole('link', { name: 'Comunidad', exact: true }).click()
+}

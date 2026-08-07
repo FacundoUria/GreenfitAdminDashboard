@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('../../lib/supabaseClient', () => ({
   supabase: { from: vi.fn(), rpc: vi.fn() },
@@ -13,6 +13,8 @@ import {
   fetchHistorialPagos,
   buscarSociosParaCheckin,
   otorgarCheckinMusculacion,
+  buscarSociosClaseActiva,
+  darPresenteClase,
   fetchActividadReciente,
   revertirXpEvento,
   CHECKIN_OTORGADO,
@@ -203,6 +205,166 @@ describe('otorgarCheckinMusculacion (+100 XP de entreno libre, 1 vez por día)',
   it('otro error real sí se propaga', async () => {
     mockedRpc.mockResolvedValue({ data: null, error: { code: '42501', message: 'permission denied' } })
     await expect(otorgarCheckinMusculacion('u1')).rejects.toThrow('permission denied')
+  })
+})
+
+describe('buscarSociosClaseActiva (sugerencias inteligentes del Check-in Rápido)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.useFakeTimers()
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('trae los inscriptos de una clase EN CURSO ahora mismo', async () => {
+    // Lunes 18:10 -- una clase de Lunes 18 a 19 está en curso.
+    vi.setSystemTime(new Date('2026-08-10T18:10:00'))
+    mockedFrom.mockImplementation((table) => {
+      if (table === 'classes') {
+        return makeChain({
+          data: [
+            {
+              id: 'clase-1',
+              title: 'CrossFit 18hs',
+              start_time: '18:00:00',
+              end_time: '19:00:00',
+              days_of_week: [1],
+              discipline: { name: 'CrossFit' },
+            },
+          ],
+          error: null,
+        })
+      }
+      if (table === 'bookings') {
+        return makeChain({
+          data: [
+            {
+              id: 'booking-1',
+              user_id: 'u2',
+              class_id: 'clase-1',
+              attended: false,
+              profiles: { full_name: 'Bruno Álvarez', dni: '30999888' },
+            },
+          ],
+          error: null,
+        })
+      }
+      throw new Error(`tabla inesperada en el test: ${table}`)
+    })
+
+    expect(await buscarSociosClaseActiva()).toEqual([
+      {
+        bookingId: 'booking-1',
+        userId: 'u2',
+        nombre: 'Bruno Álvarez',
+        dni: '30999888',
+        turno: 'CrossFit · 18:00 a 19:00',
+        yaRegistrado: false,
+      },
+    ])
+  })
+
+  it('también incluye una clase que arranca dentro de los próximos 30 minutos', async () => {
+    // 17:45 -- una clase de 18:00 arranca en 15 minutos, dentro de la ventana.
+    vi.setSystemTime(new Date('2026-08-10T17:45:00'))
+    mockedFrom.mockImplementation((table) => {
+      if (table === 'classes') {
+        return makeChain({
+          data: [
+            { id: 'clase-1', title: 'Boxeo', start_time: '18:00:00', end_time: '19:00:00', days_of_week: [1], discipline: { name: 'Boxeo' } },
+          ],
+          error: null,
+        })
+      }
+      if (table === 'bookings') return makeChain({ data: [], error: null })
+      throw new Error(`tabla inesperada en el test: ${table}`)
+    })
+
+    await buscarSociosClaseActiva()
+    expect(mockedFrom).toHaveBeenCalledWith('bookings')
+  })
+
+  it('no trae nada si ninguna clase está en curso ni por arrancar (fuera de la ventana de 30 min)', async () => {
+    vi.setSystemTime(new Date('2026-08-10T08:00:00'))
+    mockedFrom.mockImplementation((table) => {
+      if (table === 'classes') {
+        return makeChain({
+          data: [
+            { id: 'clase-1', title: 'CrossFit', start_time: '18:00:00', end_time: '19:00:00', days_of_week: [1], discipline: { name: 'CrossFit' } },
+          ],
+          error: null,
+        })
+      }
+      throw new Error(`no debería consultar ${table} sin ninguna clase activa`)
+    })
+
+    expect(await buscarSociosClaseActiva()).toEqual([])
+  })
+
+  it('ignora clases de otro día de la semana', async () => {
+    vi.setSystemTime(new Date('2026-08-10T18:10:00')) // lunes
+    mockedFrom.mockImplementation((table) => {
+      if (table === 'classes') {
+        return makeChain({
+          data: [
+            { id: 'clase-1', title: 'CrossFit', start_time: '18:00:00', end_time: '19:00:00', days_of_week: [2], discipline: { name: 'CrossFit' } }, // martes
+          ],
+          error: null,
+        })
+      }
+      throw new Error(`no debería consultar ${table}`)
+    })
+
+    expect(await buscarSociosClaseActiva()).toEqual([])
+  })
+
+  it('un inscripto con attended=true ya viene marcado con yaRegistrado', async () => {
+    vi.setSystemTime(new Date('2026-08-10T18:10:00'))
+    mockedFrom.mockImplementation((table) => {
+      if (table === 'classes') {
+        return makeChain({
+          data: [
+            { id: 'clase-1', title: 'CrossFit', start_time: '18:00:00', end_time: '19:00:00', days_of_week: [1], discipline: { name: 'CrossFit' } },
+          ],
+          error: null,
+        })
+      }
+      if (table === 'bookings') {
+        return makeChain({
+          data: [
+            {
+              id: 'booking-1',
+              user_id: 'u2',
+              class_id: 'clase-1',
+              attended: true,
+              profiles: { full_name: 'Bruno Álvarez', dni: '30999888' },
+            },
+          ],
+          error: null,
+        })
+      }
+      throw new Error(`tabla inesperada en el test: ${table}`)
+    })
+
+    const [item] = await buscarSociosClaseActiva()
+    expect(item.yaRegistrado).toBe(true)
+  })
+})
+
+describe('darPresenteClase (marca una reserva de clase como asistida -- dispara el trigger de XP)', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('actualiza bookings.attended=true por id', async () => {
+    const eqMock = vi.fn().mockResolvedValue({ error: null })
+    mockedFrom.mockReturnValue({ update: vi.fn().mockReturnValue({ eq: eqMock }) })
+
+    await darPresenteClase('booking-1')
+    expect(mockedFrom).toHaveBeenCalledWith('bookings')
+    expect(eqMock).toHaveBeenCalledWith('id', 'booking-1')
+  })
+
+  it('un error real se propaga', async () => {
+    mockedFrom.mockReturnValue({ update: vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: { message: 'boom' } }) }) })
+    await expect(darPresenteClase('booking-1')).rejects.toThrow('boom')
   })
 })
 

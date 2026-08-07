@@ -271,6 +271,85 @@ export async function otorgarCheckinMusculacion(userId) {
   return CHECKIN_OTORGADO
 }
 
+// Le resta `minutos` a una hora "HH:MM:SS" -- para la ventana de "clase por
+// arrancar" de abajo. Si cruza medianoche hacia atrás, ajusta el día
+// (wrap-around simple, alcanza para franjas de gimnasio normales).
+function restarMinutos(horaStr, minutos) {
+  const [h, m, s] = (horaStr ?? '00:00:00').split(':').map(Number)
+  const totalMin = (((h * 60 + m - minutos) % 1440) + 1440) % 1440
+  const hh = String(Math.floor(totalMin / 60)).padStart(2, '0')
+  const mm = String(totalMin % 60).padStart(2, '0')
+  return `${hh}:${mm}:${String(s ?? 0).padStart(2, '0')}`
+}
+
+// "Sugerencias inteligentes" del Check-in Rápido: sin escribir nada en el
+// buscador, esto trae a quién ya hay que darle presente AHORA MISMO --
+// inscriptos (bookings de hoy) de cualquier clase que esté en curso o
+// arranque dentro de los próximos 30 minutos. Si hay 2 turnos superpuestos
+// (ej. CrossFit y Boxeo a la misma hora), aparecen las dos, cada fila con
+// su propia disciplina/turno.
+const VENTANA_PREVIA_MIN = 30
+
+export async function buscarSociosClaseActiva() {
+  const ahora = new Date()
+  const diaSemana = ahora.getDay()
+  const horaActual = ahora.toTimeString().slice(0, 8)
+  const hoyStr = ahora.toISOString().slice(0, 10)
+
+  const { data: clases, error: clasesError } = await supabase
+    .from('classes')
+    .select('id, title, start_time, end_time, days_of_week, discipline:disciplines(name)')
+  if (clasesError) {
+    if (esErrorDeRelacionFaltante(clasesError)) return []
+    throw new Error(clasesError.message)
+  }
+
+  const clasesActivas = (clases ?? []).filter((c) => {
+    if (!(c.days_of_week ?? []).includes(diaSemana)) return false
+    if (!c.start_time || !c.end_time) return false
+    const inicioConVentana = restarMinutos(c.start_time, VENTANA_PREVIA_MIN)
+    return horaActual >= inicioConVentana && horaActual <= c.end_time
+  })
+  if (clasesActivas.length === 0) return []
+
+  const { data: inscriptos, error: bookingsError } = await supabase
+    .from('bookings')
+    .select('id, user_id, class_id, attended, profiles(full_name, dni)')
+    .in(
+      'class_id',
+      clasesActivas.map((c) => c.id),
+    )
+    .eq('booking_date', hoyStr)
+  if (bookingsError) throw new Error(bookingsError.message)
+
+  const claseById = new Map(clasesActivas.map((c) => [c.id, c]))
+  return (inscriptos ?? []).map((b) => {
+    const clase = claseById.get(b.class_id)
+    const disciplina = Array.isArray(clase?.discipline) ? clase.discipline[0] : clase?.discipline
+    return {
+      bookingId: b.id,
+      userId: b.user_id,
+      nombre: b.profiles?.full_name ?? '(sin nombre)',
+      dni: b.profiles?.dni ?? null,
+      turno: clase
+        ? `${disciplina?.name ?? clase.title} · ${(clase.start_time ?? '').slice(0, 5)} a ${(clase.end_time ?? '').slice(0, 5)}`
+        : '',
+      yaRegistrado: !!b.attended,
+    }
+  })
+}
+
+// "Dar Presente" de un inscripto real (viene de buscarSociosClaseActiva) --
+// marca su booking de HOY como asistido, lo mismo que ya hace la pantalla
+// de Clases fila por fila. Dispara el trigger award_xp_asistencia() en
+// Supabase, que acredita los +100 XP con el discipline_id correcto de esa
+// clase (a diferencia del Check-in de Musculación, que siempre usa la
+// disciplina de membresía).
+export async function darPresenteClase(bookingId) {
+  const { error } = await supabase.from('bookings').update({ attended: true }).eq('id', bookingId)
+  if (error) throw new Error(error.message)
+}
+
 // ============================================================
 // Actividad Reciente (Dashboard) -- unifica Reservas creadas, Check-ins de
 // Musculación, Asistencias confirmadas a clases y sus Reversiones en un

@@ -11,6 +11,7 @@ import {
   X,
   ClipboardList,
   Tags,
+  MessageCircle,
 } from 'lucide-react'
 import logo from '../assets/logo.jpg'
 
@@ -24,6 +25,7 @@ const navItems = [
   { to: '/notas', label: 'Notas', icon: NotebookPen },
   { to: '/anunciar', label: 'Anunciar', icon: Megaphone },
   { to: '/configuracion', label: 'Configuración', icon: Settings },
+  { to: '/comunidad', label: 'Comunidad', icon: MessageCircle },
 ]
 
 function Sidebar({ abierto = false, onCerrar = () => {} }) {
