@@ -17,7 +17,7 @@ import { estadoOperativoSocio, getSocioMetrics } from '../utils/socioMetrics'
 import { formatearPlanes, planesDeCreditos, planesDeVencimiento, PLANES_DISPONIBLES } from '../utils/planes'
 import { buscarCoincidenciaPorNombre } from '../utils/coincidenciaSocios'
 import { sincronizarCreditosPwa, sincronizarVencimientoPwa, sincronizarEstadoCuentaPwa } from '../utils/creditosPwa'
-import { fetchAvataresYNiveles, resolverUserIdPorDni, registrarPago } from '../utils/fichaSocioPwa'
+import { fetchAvataresYNiveles, fetchCreditosPorDisciplina, resolverUserIdPorDni, registrarPago } from '../utils/fichaSocioPwa'
 import SociosTabla from '../components/SociosTabla'
 import NuevoSocioModal from '../components/NuevoSocioModal'
 import RegistrarPagoModal from '../components/RegistrarPagoModal'
@@ -97,6 +97,12 @@ function Socios() {
   // trae en batch (2 queries para TODA la lista, no una por socio) apenas
   // cambia el listado de socios, y se mergea en sociosConEstado más abajo.
   const [gamificacionPorDni, setGamificacionPorDni] = useState(new Map())
+  // Créditos REALES de la PWA por disciplina (user_credits), en batch --
+  // mismo criterio que gamificacionPorDni. Fuente de verdad para
+  // CreditosCell: `socios.creditos` es un solo pozo global (ver
+  // planesDeCreditos en utils/planes.js), esto es lo que la app realmente
+  // tiene cargado por cada disciplina de créditos del socio.
+  const [creditosPorDni, setCreditosPorDni] = useState(new Map())
   const [busqueda, setBusqueda] = useState('')
   // El Dashboard linkea acá con ?filtro=por_vencer (u otro value de
   // filtroOptions) para llegar con la lista ya filtrada.
@@ -145,6 +151,7 @@ function Socios() {
   useEffect(() => {
     if (socios.length === 0) return
     fetchAvataresYNiveles(socios.map((s) => s.dni)).then(setGamificacionPorDni)
+    fetchCreditosPorDisciplina(socios.map((s) => s.dni)).then(setCreditosPorDni)
   }, [socios])
 
   // estadoOperativoSocio() es la MISMA función que usa Home.jsx -- antes
@@ -162,9 +169,10 @@ function Socios() {
           estado: estadoOperativoSocio(socio, diasTolerancia),
           avatarUrl: gamificacion?.avatarUrl ?? null,
           nivelXp: gamificacion?.nivel ?? null,
+          creditosPwaPorDisciplina: creditosPorDni.get(socio.dni) ?? [],
         }
       }),
-    [socios, diasTolerancia, gamificacionPorDni],
+    [socios, diasTolerancia, gamificacionPorDni, creditosPorDni],
   )
 
   const counts = useMemo(() => {

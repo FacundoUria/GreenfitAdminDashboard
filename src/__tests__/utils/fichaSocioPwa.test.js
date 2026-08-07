@@ -9,6 +9,7 @@ import {
   calcularNivel,
   calcularRacha,
   fetchAvataresYNiveles,
+  fetchCreditosPorDisciplina,
   fetchHistorialAsistencias,
   fetchHistorialPagos,
   buscarSociosParaCheckin,
@@ -90,6 +91,95 @@ describe('fetchAvataresYNiveles (tabla principal -- avatar + badge de nivel en b
 
   it('sin DNIs, no consulta Supabase y devuelve un mapa vacío', async () => {
     const mapa = await fetchAvataresYNiveles([])
+    expect(mapa.size).toBe(0)
+    expect(mockedFrom).not.toHaveBeenCalled()
+  })
+})
+
+describe('fetchCreditosPorDisciplina (fix del bug de sincronización: fuente de verdad = user_credits real, no el pozo global socios.creditos)', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('un socio con dos disciplinas de créditos (CrossFit + Boxeo) devuelve el balance real de CADA UNA por separado', async () => {
+    mockedFrom.mockImplementation((tabla) => {
+      if (tabla === 'profiles') {
+        return makeChain({ data: [{ id: 'u1', dni: '20111222' }], error: null })
+      }
+      if (tabla === 'user_credits') {
+        return makeChain({
+          data: [
+            { user_id: 'u1', remaining_credits: 6, created_at: '2026-08-07T10:00:00.000Z', discipline: { id: 'd-crossfit', name: 'CrossFit', kind: 'credits' } },
+            { user_id: 'u1', remaining_credits: 0, created_at: '2026-08-06T10:00:00.000Z', discipline: { id: 'd-boxeo', name: 'Boxeo', kind: 'credits' } },
+          ],
+          error: null,
+        })
+      }
+      throw new Error(`tabla inesperada: ${tabla}`)
+    })
+
+    const mapa = await fetchCreditosPorDisciplina(['20111222'])
+    expect(mapa.get('20111222')).toEqual([
+      { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6 },
+      { disciplineId: 'd-boxeo', disciplineName: 'Boxeo', remainingCredits: 0 },
+    ])
+  })
+
+  it('con más de una fila para la MISMA disciplina, gana la más reciente (created_at desc) -- user_credits es un ledger append-only', async () => {
+    mockedFrom.mockImplementation((tabla) => {
+      if (tabla === 'profiles') return makeChain({ data: [{ id: 'u1', dni: '20111222' }], error: null })
+      if (tabla === 'user_credits') {
+        return makeChain({
+          data: [
+            { user_id: 'u1', remaining_credits: 6, created_at: '2026-08-07T10:00:00.000Z', discipline: { id: 'd-crossfit', name: 'CrossFit', kind: 'credits' } },
+            { user_id: 'u1', remaining_credits: 2, created_at: '2026-08-01T10:00:00.000Z', discipline: { id: 'd-crossfit', name: 'CrossFit', kind: 'credits' } },
+          ],
+          error: null,
+        })
+      }
+      throw new Error(`tabla inesperada: ${tabla}`)
+    })
+
+    const mapa = await fetchCreditosPorDisciplina(['20111222'])
+    expect(mapa.get('20111222')).toEqual([{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6 }])
+  })
+
+  it('ignora filas de disciplinas kind=membership (Aparatos) -- esta función es solo para créditos', async () => {
+    mockedFrom.mockImplementation((tabla) => {
+      if (tabla === 'profiles') return makeChain({ data: [{ id: 'u1', dni: '20111222' }], error: null })
+      if (tabla === 'user_credits') {
+        return makeChain({
+          data: [{ user_id: 'u1', remaining_credits: null, created_at: '2026-08-07T10:00:00.000Z', discipline: { id: 'd-aparatos', name: 'Aparatos', kind: 'membership' } }],
+          error: null,
+        })
+      }
+      throw new Error(`tabla inesperada: ${tabla}`)
+    })
+
+    const mapa = await fetchCreditosPorDisciplina(['20111222'])
+    expect(mapa.get('20111222')).toBeUndefined()
+  })
+
+  it('sin cuenta PWA para ese DNI, devuelve un mapa vacío sin consultar user_credits', async () => {
+    mockedFrom.mockImplementation((tabla) => {
+      if (tabla === 'profiles') return makeChain({ data: [], error: null })
+      throw new Error(`no debería consultar ${tabla} sin ninguna cuenta PWA resuelta`)
+    })
+
+    const mapa = await fetchCreditosPorDisciplina(['99999999'])
+    expect(mapa.size).toBe(0)
+  })
+
+  it('si user_credits todavía no existe, cae a mapa vacío en vez de romper', async () => {
+    mockedFrom.mockImplementation((tabla) => {
+      if (tabla === 'profiles') return makeChain({ data: [{ id: 'u1', dni: '20111222' }], error: null })
+      if (tabla === 'user_credits') return makeChain({ data: null, error: { code: '42P01', message: 'no existe' } })
+      throw new Error(`tabla inesperada: ${tabla}`)
+    })
+
+    expect((await fetchCreditosPorDisciplina(['20111222'])).size).toBe(0)
+  })
+
+  it('sin DNIs, no consulta Supabase y devuelve un mapa vacío', async () => {
+    const mapa = await fetchCreditosPorDisciplina([])
     expect(mapa.size).toBe(0)
     expect(mockedFrom).not.toHaveBeenCalled()
   })

@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { CreditCard, MessageCircle, Minus, Pencil, Plus, UserX, UserCheck } from 'lucide-react'
 import { esPlanDeCreditos, formatearPlanes, planesDeCreditos } from '../utils/planes'
 import { formatFecha } from '../utils/fecha'
@@ -55,67 +54,78 @@ function EstadoBadge({ socio }) {
   )
 }
 
+// BUG CRÍTICO DE SINCRONIZACIÓN (2026-08-07) -- ANTES esta celda mostraba y
+// editaba `socio.creditos`, un solo pozo GLOBAL (suma de TODAS las
+// disciplinas de créditos del socio -- ver planesDeCreditos() en
+// utils/planes.js), con un <select> aparte y fácil de pasar por alto para
+// elegir a CUÁL disciplina viajaba el ajuste hacia la PWA
+// (sincronizarCreditosPwa). Un socio con más de una disciplina de créditos
+// (ej. CrossFit + Boxeo) podía ver "6" en el panel sin que ese número
+// dijera nada de cuál disciplina realmente lo tenía -- y si el <select>
+// quedaba en la disciplina "equivocada" al tocar +6, el crédito real
+// terminaba sincronizado a la OTRA disciplina en `user_credits`, mientras
+// la que el admin creía haber cargado seguía en 0 en la app. Fix: una fila
+// POR disciplina, cada una con su propio stepper (nunca ambiguo sobre a
+// cuál va el click) y mostrando el número REAL que ya tiene la PWA
+// (`socio.creditosPwaPorDisciplina`, batch vía fetchCreditosPorDisciplina
+// en Socios.jsx) en vez del pozo global -- lo que ve el admin acá es,
+// siempre, lo mismo que tiene la PWA en ese instante.
 function CreditosCell({ socio, onAjustarCredito }) {
   const disciplinas = planesDeCreditos(socio.plan)
-  const [disciplinaElegida, setDisciplinaElegida] = useState(disciplinas[0] ?? null)
-
-  if (!esPlanDeCreditos(socio.plan)) {
+  if (disciplinas.length === 0) {
     return <span className="text-gray-600">—</span>
   }
 
-  // El contador de arriba es el total del panel (suma de todas las
-  // actividades) -- con más de una disciplina de créditos, hay que elegir
-  // primero a cuál de todas van a impactar los botones de ajuste rápido.
-  const disciplinaActiva = disciplinas.includes(disciplinaElegida) ? disciplinaElegida : disciplinas[0]
+  const realPorDisciplina = new Map(
+    (socio.creditosPwaPorDisciplina ?? []).map((c) => [c.disciplineName, c.remainingCredits]),
+  )
 
   return (
-    <div className="flex flex-col gap-2">
-      {disciplinas.length > 1 && (
-        <select
-          value={disciplinaActiva ?? ''}
-          onChange={(e) => setDisciplinaElegida(e.target.value)}
-          aria-label="Disciplina a ajustar"
-          className="rounded-md border border-white/10 bg-greenfit-dark px-1.5 py-1 text-[11px] text-gray-300 outline-none focus:border-greenfit-primary"
-        >
-          {disciplinas.map((d) => (
-            <option key={d} value={d}>
-              {d}
-            </option>
-          ))}
-        </select>
-      )}
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          title={`Restar 1 crédito${disciplinas.length > 1 ? ` de ${disciplinaActiva}` : ''}`}
-          onClick={() => onAjustarCredito(socio, -1, disciplinaActiva)}
-          className="flex h-10 w-10 items-center justify-center rounded-md border border-white/10 text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
-        >
-          <Minus className="h-3.5 w-3.5" />
-        </button>
-        <span className="w-6 text-center text-sm font-semibold text-white">{socio.creditos ?? 0}</span>
-        <button
-          type="button"
-          title={`Sumar 1 crédito${disciplinas.length > 1 ? ` a ${disciplinaActiva}` : ''}`}
-          onClick={() => onAjustarCredito(socio, 1, disciplinaActiva)}
-          className="flex h-10 w-10 items-center justify-center rounded-md border border-white/10 text-gray-300 transition-colors hover:bg-white/10 hover:text-greenfit-primary"
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </button>
-      </div>
-      <div className="flex flex-wrap items-center gap-1.5">
-        {PACKS_RAPIDOS.map((cantidad) => (
-          <button
-            key={cantidad}
-            type="button"
-            title={`Asignar pack de ${cantidad} créditos${disciplinas.length > 1 ? ` a ${disciplinaActiva}` : ''}`}
-            onClick={() => onAjustarCredito(socio, cantidad, disciplinaActiva)}
-            className="rounded-md border border-white/10 px-2 py-2 text-[11px] font-medium text-gray-400 transition-colors hover:bg-white/10 hover:text-greenfit-primary"
-          >
-            +{cantidad}
-          </button>
-        ))}
-      </div>
+    <div className="flex flex-col gap-3">
+      {disciplinas.map((disciplina) => (
+        <div key={disciplina} className="flex flex-col gap-1.5">
+          {disciplinas.length > 1 && (
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{disciplina}</span>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              title={`Restar 1 crédito de ${disciplina}`}
+              onClick={() => onAjustarCredito(socio, -1, disciplina)}
+              className="flex h-10 w-10 items-center justify-center rounded-md border border-white/10 text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </button>
+            <span
+              className="w-6 text-center text-sm font-semibold text-white"
+              title={`Créditos reales de ${disciplina} en la app`}
+            >
+              {realPorDisciplina.get(disciplina) ?? 0}
+            </span>
+            <button
+              type="button"
+              title={`Sumar 1 crédito a ${disciplina}`}
+              onClick={() => onAjustarCredito(socio, 1, disciplina)}
+              className="flex h-10 w-10 items-center justify-center rounded-md border border-white/10 text-gray-300 transition-colors hover:bg-white/10 hover:text-greenfit-primary"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {PACKS_RAPIDOS.map((cantidad) => (
+                <button
+                  key={cantidad}
+                  type="button"
+                  title={`Asignar pack de ${cantidad} créditos a ${disciplina}`}
+                  onClick={() => onAjustarCredito(socio, cantidad, disciplina)}
+                  className="rounded-md border border-white/10 px-2 py-2 text-[11px] font-medium text-gray-400 transition-colors hover:bg-white/10 hover:text-greenfit-primary"
+                >
+                  +{cantidad}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

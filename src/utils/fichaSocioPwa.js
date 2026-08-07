@@ -80,6 +80,64 @@ export async function fetchAvataresYNiveles(dnis) {
   return resultado
 }
 
+// Créditos REALES de la app de socios, por disciplina, para TODA la lista
+// visible en batch (mismo criterio que fetchAvataresYNiveles). Existe
+// porque `socios.creditos` es un solo pozo GLOBAL (suma de TODAS las
+// disciplinas de créditos que tenga el socio -- ver el comentario de
+// planesDeCreditos() en utils/planes.js) mientras que `user_credits` de la
+// PWA es una fila POR disciplina: un socio con CrossFit + Boxeo puede tener
+// 6 créditos reales en uno y 0 en el otro, y `socios.creditos` por sí solo
+// (un solo número) no alcanza para saber cuál es cuál. Esto lee directo de
+// `user_credits` -- la fuente de verdad real que usa la PWA -- para que el
+// ajuste rápido de créditos en la tabla de Socios (CreditosCell) muestre y
+// edite el número correcto por disciplina, no un total ambiguo.
+export async function fetchCreditosPorDisciplina(dnis) {
+  const dnisValidos = Array.from(new Set((dnis ?? []).filter(Boolean)))
+  if (dnisValidos.length === 0) return new Map()
+
+  const { data: perfiles, error: perfilesError } = await supabase.from('profiles').select('id, dni').in('dni', dnisValidos)
+  if (perfilesError) {
+    console.error('No se pudieron resolver las cuentas PWA para los créditos por disciplina:', perfilesError.message)
+    return new Map()
+  }
+  const dniPorUserId = new Map((perfiles ?? []).map((p) => [p.id, p.dni]))
+  const userIds = Array.from(dniPorUserId.keys())
+  if (userIds.length === 0) return new Map()
+
+  const { data: filas, error: creditosError } = await supabase
+    .from('user_credits')
+    .select('user_id, remaining_credits, created_at, discipline:disciplines(id, name, kind)')
+    .in('user_id', userIds)
+    .order('created_at', { ascending: false })
+  if (creditosError) {
+    if (esErrorDeRelacionFaltante(creditosError)) return new Map()
+    console.error('No se pudieron traer los créditos reales de la PWA:', creditosError.message)
+    return new Map()
+  }
+
+  // La fila más reciente por (user_id, discipline_id) gana -- mismo
+  // criterio "último inserta, último vale" que fetchUserBalances() del
+  // lado de la PWA (creditsApi.ts): user_credits es un ledger append-only,
+  // no se actualiza in place.
+  const vistos = new Set()
+  const resultado = new Map()
+  for (const fila of filas ?? []) {
+    const disciplina = Array.isArray(fila.discipline) ? fila.discipline[0] : fila.discipline
+    if (!disciplina || disciplina.kind !== 'credits') continue
+
+    const clave = `${fila.user_id}:${disciplina.id}`
+    if (vistos.has(clave)) continue
+    vistos.add(clave)
+
+    const dni = dniPorUserId.get(fila.user_id)
+    if (!dni) continue
+    const lista = resultado.get(dni) ?? []
+    lista.push({ disciplineId: disciplina.id, disciplineName: disciplina.name, remainingCredits: fila.remaining_credits ?? 0 })
+    resultado.set(dni, lista)
+  }
+  return resultado
+}
+
 // ============================================================
 // Ficha 360° -- Historial único de Asistencias y Entrenamientos
 // ============================================================
