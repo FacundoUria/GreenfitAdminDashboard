@@ -24,6 +24,8 @@ function mapConfigToForm(config) {
     bannerMensaje: config.banner_mensaje ?? '',
     bannerLinkText: config.banner_link_text ?? '',
     bannerLinkUrl: config.banner_link_url ?? '',
+    alertaAppActiva: Boolean(config.alerta_app_activa ?? false),
+    alertaAppMensaje: config.alerta_app_mensaje ?? '',
     whatsappNumero: config.whatsapp_numero ?? '',
     instagramUsuario: config.instagram_usuario ?? '',
   }
@@ -121,6 +123,8 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
         banner_mensaje: form.bannerMensaje.trim(),
         banner_link_text: form.bannerLinkText.trim() || null,
         banner_link_url: form.bannerLinkUrl.trim() || null,
+        alerta_app_activa: form.alertaAppActiva,
+        alerta_app_mensaje: form.alertaAppMensaje.trim(),
         whatsapp_numero: form.whatsappNumero.trim(),
         instagram_usuario: form.instagramUsuario.trim(),
       })
@@ -302,6 +306,23 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
             value={form.bannerLinkUrl}
             onChange={(value) => updateField('bannerLinkUrl', value)}
             placeholder="Ej: https://greenfit.fit/#clases"
+          />
+        </ConfigCard>
+
+        <ConfigCard title="🔔 Alerta Global (App de Socios)">
+          <p className="-mt-2 text-xs text-gray-500">
+            Es un aviso flotante que se muestra al abrir la app de socios (PWA) -- distinto del banner de la
+            landing de arriba, esta audiencia es solo la gente ya logueada en la app.
+          </p>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm text-gray-400">Mostrar alerta en la app de socios</span>
+            <Toggle checked={form.alertaAppActiva} onChange={(value) => updateField('alertaAppActiva', value)} />
+          </div>
+          <TextField
+            label="Mensaje"
+            value={form.alertaAppMensaje}
+            onChange={(value) => updateField('alertaAppMensaje', value)}
+            placeholder="Ej: El sábado el gimnasio cierra a las 14 hs por mantenimiento"
           />
         </ConfigCard>
 
