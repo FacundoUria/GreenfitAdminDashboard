@@ -610,6 +610,13 @@ describe('fetchActividadReciente (unifica Reservas, Check-ins de Musculación, A
   })
 
   it('incluye las compras aprobadas por Mercado Pago (pagos_socio origen=mercado_pago, estado=pagado) en el mismo stream', async () => {
+    // pagos_socio tiene DOS columnas que referencian profiles (user_id Y
+    // created_by) -- un embed `profiles(full_name)` sin FK explícita tira
+    // "Could not embed because more than one relationship was found" en
+    // Postgres real (el mock de Vitest no lo detectaría, así que esto es
+    // lo único que puede fijar la regresión: que el código SIGA pidiendo
+    // la relación por su nombre exacto).
+    const selectPagosSocio = vi.fn()
     const vacioBookingsYXp = {
       select: vi.fn().mockReturnValue({
         order: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue({ data: [], error: null }) }),
@@ -628,7 +635,7 @@ describe('fetchActividadReciente (unifica Reservas, Check-ins de Musculación, A
       }
       if (tabla === 'pagos_socio') {
         return {
-          select: vi.fn().mockReturnValue({
+          select: selectPagosSocio.mockReturnValue({
             eq: vi.fn().mockReturnValue({
               eq: vi.fn().mockReturnValue({
                 order: vi.fn().mockReturnValue({
@@ -673,6 +680,7 @@ describe('fetchActividadReciente (unifica Reservas, Check-ins de Musculación, A
       xpAmount: null,
       revertido: false,
     })
+    expect(selectPagosSocio).toHaveBeenCalledWith(expect.stringContaining('profiles!pagos_socio_user_id_fkey'))
   })
 })
 

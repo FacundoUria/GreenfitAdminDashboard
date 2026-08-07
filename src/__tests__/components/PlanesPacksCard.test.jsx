@@ -20,45 +20,49 @@ function makeChain(result) {
 }
 
 const DISC_CROSSFIT = { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' }
+const DISC_BOXEO = { id: 'disc-boxeo', name: 'Boxeo', kind: 'credits' }
 const DISC_APARATOS = { id: 'disc-aparatos', name: 'Aparatos', kind: 'membership' }
 
-const PACK_CROSSFIT = {
+const PACK_COMBO = {
   id: 'pack-1',
-  name: 'Pack 12 clases CrossFit',
-  price: 30000,
-  credits: 12,
-  duration_days: null,
+  name: 'Combo 8+8',
+  price: 55000,
   is_active: true,
-  discipline_id: 'disc-crossfit',
+  incluye_aparatos: false,
+  dias_vigencia: null,
+  creditos: [
+    { discipline_id: 'disc-boxeo', credits: 8 },
+    { discipline_id: 'disc-crossfit', credits: 8 },
+  ],
 }
 
 const PACK_APARATOS = {
   id: 'pack-2',
-  name: 'Mes libre Aparatos',
-  price: 21000,
-  credits: null,
-  duration_days: 30,
+  name: 'Pase 2 Meses Aparatos',
+  price: 70000,
   is_active: false,
-  discipline_id: 'disc-aparatos',
+  incluye_aparatos: true,
+  dias_vigencia: 60,
+  creditos: [],
 }
 
-describe('PlanesPacksCard -- gestión de packs en Configuración (lo que la PWA lee en "Elegí tu pack")', () => {
+describe('PlanesPacksCard -- gestión de packs/combos en Configuración (lo que la PWA lee en "Elegí tu pack")', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockedFrom.mockImplementation((tabla) => {
-      if (tabla === 'packs') return makeChain({ data: [PACK_CROSSFIT, PACK_APARATOS], error: null })
-      if (tabla === 'disciplines') return makeChain({ data: [DISC_CROSSFIT, DISC_APARATOS], error: null })
+      if (tabla === 'packs') return makeChain({ data: [PACK_COMBO, PACK_APARATOS], error: null })
+      if (tabla === 'disciplines') return makeChain({ data: [DISC_CROSSFIT, DISC_BOXEO, DISC_APARATOS], error: null })
       throw new Error(`tabla inesperada: ${tabla}`)
     })
   })
 
-  it('lista los packs con disciplina, créditos/días y precio -- un pack de membresía inactivo muestra el badge "Inactivo"', async () => {
+  it('lista un combo real con el subtítulo de las dos disciplinas y el precio -- un pase de Aparatos inactivo muestra el badge "Inactivo"', async () => {
     render(<PlanesPacksCard />)
 
-    await waitFor(() => expect(screen.getByText('Pack 12 clases CrossFit')).toBeInTheDocument())
-    expect(screen.getByText('CrossFit · 12 créditos')).toBeInTheDocument()
-    expect(screen.getByText('Mes libre Aparatos')).toBeInTheDocument()
-    expect(screen.getByText('Aparatos · 30 días')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('Combo 8+8')).toBeInTheDocument())
+    expect(screen.getByText('8 créditos Boxeo + 8 créditos CrossFit')).toBeInTheDocument()
+    expect(screen.getByText('Pase 2 Meses Aparatos')).toBeInTheDocument()
+    expect(screen.getByText('Aparatos Pase Libre')).toBeInTheDocument()
     expect(screen.getByText('Inactivo')).toBeInTheDocument()
   })
 
@@ -74,7 +78,7 @@ describe('PlanesPacksCard -- gestión de packs en Configuración (lo que la PWA 
 
   it('"Nuevo Pack" abre el modal de alta', async () => {
     render(<PlanesPacksCard />)
-    await waitFor(() => expect(screen.getByText('Pack 12 clases CrossFit')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Combo 8+8')).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole('button', { name: 'Nuevo Pack' }))
     expect(screen.getByRole('heading', { name: 'Nuevo Pack' })).toBeInTheDocument()
@@ -87,7 +91,7 @@ describe('PlanesPacksCard -- gestión de packs en Configuración (lo que la PWA 
     mockedFrom.mockImplementation((tabla) => {
       if (tabla === 'packs') {
         return {
-          ...makeChain({ data: [PACK_CROSSFIT], error: null }),
+          ...makeChain({ data: [PACK_COMBO], error: null }),
           delete: vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: { code: '23503' } }) })),
         }
       }
@@ -96,9 +100,9 @@ describe('PlanesPacksCard -- gestión de packs en Configuración (lo que la PWA 
     })
 
     render(<PlanesPacksCard />)
-    await waitFor(() => expect(screen.getByText('Pack 12 clases CrossFit')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Combo 8+8')).toBeInTheDocument())
 
-    fireEvent.click(screen.getByLabelText('Eliminar Pack 12 clases CrossFit'))
+    fireEvent.click(screen.getByLabelText('Eliminar Combo 8+8'))
 
     await waitFor(() =>
       expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('Desactivalo en su lugar')),

@@ -449,7 +449,13 @@ export async function fetchActividadReciente(limite = 20) {
     // un intento pendiente o rechazado no es "actividad" todavía.
     supabase
       .from('pagos_socio')
-      .select('id, user_id, paquete, monto, created_at, mercado_pago_payment_id, profiles(full_name)')
+      // FK explícita: pagos_socio tiene DOS columnas que referencian
+      // profiles (user_id Y created_by, ver supabase_migration_
+      // ficha360.sql) -- sin el hint, PostgREST no puede elegir cuál usar y
+      // tira "Could not embed because more than one relationship was
+      // found for 'pagos_socio' and 'profiles'" (mismo motivo por el que
+      // xp_events, más arriba, ya usa profiles!xp_events_user_id_fkey).
+      .select('id, user_id, paquete, monto, created_at, mercado_pago_payment_id, profiles!pagos_socio_user_id_fkey(full_name)')
       .eq('origen', 'mercado_pago')
       .eq('estado', 'pagado')
       .order('created_at', { ascending: false })

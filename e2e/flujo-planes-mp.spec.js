@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { loginComoAdmin } from './support/auth.js'
-import { tablasBase, DISCIPLINA_CROSSFIT, DISCIPLINA_APARATOS, PROFILE_MARTINA } from './support/fixtures.js'
+import { tablasBase, DISCIPLINA_CROSSFIT, PROFILE_MARTINA } from './support/fixtures.js'
 import { irAConfiguracion } from './support/nav.js'
 
 // Flujo de punta a punta pedido ("Prueba 1: Pack por Créditos" / "Prueba 2:
@@ -26,10 +26,11 @@ test.describe('Admin -- flujo de punta a punta: alta de pack en Configuración -
 
     await irAConfiguracion(page)
     await page.getByRole('button', { name: 'Nuevo Pack' }).click()
-    await page.getByLabel('Nombre').fill('Pack 4 clases CrossFit')
-    await page.getByLabel('Disciplina').selectOption(DISCIPLINA_CROSSFIT.id)
-    await page.getByLabel('Precio').fill('15000')
-    await page.getByLabel('Cantidad de créditos').fill('4')
+    await page.getByLabel('Nombre del Plan/Combo').fill('Pack 4 clases CrossFit')
+    await page.getByLabel('Precio ($)').fill('15000')
+    await page.getByRole('button', { name: 'Agregar Disciplina' }).click()
+    await page.getByLabel('Disciplina 1', { exact: true }).selectOption(DISCIPLINA_CROSSFIT.id)
+    await page.getByLabel('Créditos 1').fill('4')
     await page.getByRole('button', { name: 'Guardar', exact: true }).click()
     await expect(page.getByText('Pack 4 clases CrossFit')).toBeVisible()
 
@@ -66,14 +67,14 @@ test.describe('Admin -- flujo de punta a punta: alta de pack en Configuración -
 
     await irAConfiguracion(page)
     await page.getByRole('button', { name: 'Nuevo Pack' }).click()
-    await page.getByLabel('Nombre').fill('Pase 2 Meses Aparatos')
-    await page.getByLabel('Disciplina').selectOption(DISCIPLINA_APARATOS.id)
-    await expect(page.getByLabel('Días de vigencia')).toBeVisible()
-    await page.getByLabel('Precio').fill('70000')
-    await page.getByLabel('Días de vigencia').fill('60')
+    await page.getByLabel('Nombre del Plan/Combo').fill('Pase 2 Meses Aparatos')
+    await page.getByLabel('¿Incluye Aparatos / Musculación?').click()
+    await expect(page.getByLabel('Días de Vigencia')).toBeVisible()
+    await page.getByLabel('Precio ($)').fill('70000')
+    await page.getByLabel('Días de Vigencia').fill('60')
     await page.getByRole('button', { name: 'Guardar', exact: true }).click()
     await expect(page.getByText('Pase 2 Meses Aparatos')).toBeVisible()
-    await expect(page.getByText('Aparatos · 60 días')).toBeVisible()
+    await expect(page.getByText('Aparatos Pase Libre')).toBeVisible()
 
     tablas.pagos_socio = [
       {
