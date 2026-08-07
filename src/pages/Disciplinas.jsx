@@ -44,16 +44,18 @@ function Disciplinas() {
 
     // Best-effort, aparte del fetch principal -- si falla no debe bloquear
     // el catálogo, es un dato "de más" (horarios), no crítico para
-    // administrar altas/bajas de disciplinas.
-    const idsCreditos = filas.filter((d) => d.kind !== 'membership').map((d) => d.id)
-    if (idsCreditos.length === 0) {
+    // administrar altas/bajas de disciplinas. Se pide para TODAS las
+    // disciplinas, sin importar `kind`: una "por vencimiento" (Aparatos)
+    // también puede tener horario real de gimnasio cargado ahora.
+    const idsDisciplinas = filas.map((d) => d.id)
+    if (idsDisciplinas.length === 0) {
       setBloquesPorDisciplina(new Map())
       return
     }
     const { data: clases, error: clasesError } = await supabase
       .from('classes')
       .select('discipline_id, days_of_week, start_time, end_time')
-      .in('discipline_id', idsCreditos)
+      .in('discipline_id', idsDisciplinas)
     if (clasesError) {
       console.error('No se pudieron cargar los horarios de las disciplinas:', clasesError.message)
       return
@@ -212,12 +214,9 @@ function Disciplinas() {
 
               <div className="flex items-start gap-2 rounded-lg bg-white/[0.03] px-3 py-2.5 text-xs text-gray-300">
                 <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-greenfit-primary" />
-                {disciplina.kind === 'membership' ? (
-                  <span className="text-gray-400">Pase libre / Horario de gimnasio</span>
-                ) : (
-                  (() => {
-                    const bloques = bloquesPorDisciplina.get(disciplina.id) ?? []
-                    if (bloques.length === 0) return <span className="text-gray-500">Sin horarios cargados</span>
+                {(() => {
+                  const bloques = bloquesPorDisciplina.get(disciplina.id) ?? []
+                  if (bloques.length > 0) {
                     return (
                       <div className="flex flex-col gap-1">
                         {bloques.map((bloque, indice) => (
@@ -225,8 +224,18 @@ function Disciplinas() {
                         ))}
                       </div>
                     )
-                  })()
-                )}
+                  }
+                  // Sin franjas cargadas: para "por vencimiento" (Aparatos) es
+                  // el estado esperado por diseño (acceso libre real) más a
+                  // menudo que un olvido -- mismo texto que ya muestra la
+                  // landing en ese caso. Para créditos, sigue siendo "che,
+                  // faltan cargar los horarios".
+                  return disciplina.kind === 'membership' ? (
+                    <span className="text-gray-400">Pase libre / Horario de gimnasio</span>
+                  ) : (
+                    <span className="text-gray-500">Sin horarios cargados</span>
+                  )
+                })()}
               </div>
 
               <div className="mt-auto flex items-center gap-2 border-t border-white/5 pt-3">

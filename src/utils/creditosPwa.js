@@ -65,18 +65,31 @@ export async function sincronizarCreditosPwa({ dni, disciplina, delta }) {
 // pisamos con el valor absoluto que calculó el admin: no hay uso del lado
 // de la PWA que pueda desincronizarse (nadie "gasta" días de membresía
 // reservando una clase), la fecha de vencimiento siempre sale de una sola
-// fuente de verdad (el ciclo de pago que gestiona el admin).
-export async function sincronizarVencimientoPwa({ dni, fechaVencimiento }) {
+// fuente de verdad (el ciclo de pago/edición directa que gestiona el admin).
+//
+// `disciplina` es el nombre del plan tal cual está en `socios.plan` (ej.
+// "Aparatos / Musculación") -- se resuelve por nombre igual que
+// sincronizarCreditosPwa, en vez de asumir "la única disciplina kind=
+// membership que exista" (esa asunción era el bug real: se rompe apenas
+// haya una segunda disciplina por vencimiento en `disciplines`). Si el
+// nombre no matchea ninguna fila (ej. "Pase Libre" es una etiqueta legado
+// que nunca tuvo su propia fila en `disciplines`), cae al fallback viejo
+// -- sigue funcionando igual que antes para ese caso, no se pierde nada.
+export async function sincronizarVencimientoPwa({ dni, disciplina, fechaVencimiento }) {
   const userId = await resolverUserId(dni)
   if (!userId) return { synced: false, reason: 'sin_cuenta_pwa' }
 
-  const { data: discipline } = await supabase
-    .from('disciplines')
-    .select('id')
-    .eq('kind', 'membership')
-    .limit(1)
-    .maybeSingle()
-  if (!discipline) return { synced: false, reason: 'disciplina_no_encontrada' }
+  let disciplineId = await resolverDisciplinaId(disciplina)
+  if (!disciplineId) {
+    const { data: fallback } = await supabase
+      .from('disciplines')
+      .select('id')
+      .eq('kind', 'membership')
+      .limit(1)
+      .maybeSingle()
+    disciplineId = fallback?.id ?? null
+  }
+  if (!disciplineId) return { synced: false, reason: 'disciplina_no_encontrada' }
 
   // Mediodía local en vez de medianoche: evita que la conversión a UTC que
   // hace timestamptz corra la fecha un día para atrás/adelante según el
@@ -85,7 +98,7 @@ export async function sincronizarVencimientoPwa({ dni, fechaVencimiento }) {
 
   const { error } = await supabase.from('user_credits').insert({
     user_id: userId,
-    discipline_id: discipline.id,
+    discipline_id: disciplineId,
     remaining_credits: null,
     expires_at: expiresAt,
   })

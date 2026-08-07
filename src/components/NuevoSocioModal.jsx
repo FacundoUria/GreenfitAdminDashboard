@@ -2,7 +2,13 @@ import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { hoyISO, proximoVencimiento, toISODate } from '../utils/fecha'
-import { PLANES_DISPONIBLES, normalizarPlanes, planesDeCreditos, tienePlanDeVencimiento } from '../utils/planes'
+import {
+  PLANES_DISPONIBLES,
+  normalizarPlanes,
+  planesDeCreditos,
+  planesDeVencimiento,
+  tienePlanDeVencimiento,
+} from '../utils/planes'
 import { sincronizarCreditosPwa, sincronizarVencimientoPwa } from '../utils/creditosPwa'
 import { normalizarTexto } from '../utils/coincidenciaSocios'
 import FichaSocioHistorial from './FichaSocioHistorial'
@@ -18,6 +24,9 @@ function formInicial(socio) {
       telefono: socio.telefono ?? '',
       planes: planesActuales.length > 0 ? planesActuales : [PLANES_DISPONIBLES[0]],
       fechaInicio: hoyISO(),
+      // Edición directa del vencimiento -- no depende de pasar por
+      // "Registrar Pago". Vacío si el socio no tiene fecha cargada todavía.
+      fechaVencimiento: socio.fechaVencimiento ?? '',
       creditosPorDisciplina: {},
     }
   }
@@ -156,20 +165,30 @@ function NuevoSocioModal({
 
     let resultado
     let fechaVencimientoNueva = null
+    // Edición directa del vencimiento -- el admin puede tocar la fecha sin
+    // pasar por "Registrar Pago". `dia_corte` se recalcula del día-del-mes
+    // de la fecha nueva para que un futuro pago en modo "sugerido" (+1 mes)
+    // siga anclado a lo último que se cargó a mano acá.
+    const vencimientoEditado =
+      esEdicion &&
+      tienePlanDeVencimiento(form.planes) &&
+      !!form.fechaVencimiento &&
+      form.fechaVencimiento !== (socio?.fechaVencimiento ?? '')
 
     if (esEdicion) {
-      resultado = await supabase
-        .from('socios')
-        .update({
-          nombre: form.nombre,
-          apellido: form.apellido,
-          dni: form.dni,
-          email: form.email,
-          telefono: form.telefono,
-          plan: form.planes,
-        })
-        .eq('id', socio.id)
-        .select()
+      const cambios = {
+        nombre: form.nombre,
+        apellido: form.apellido,
+        dni: form.dni,
+        email: form.email,
+        telefono: form.telefono,
+        plan: form.planes,
+      }
+      if (vencimientoEditado) {
+        cambios.fecha_vencimiento = form.fechaVencimiento
+        cambios.dia_corte = new Date(`${form.fechaVencimiento}T00:00:00`).getDate()
+      }
+      resultado = await supabase.from('socios').update(cambios).eq('id', socio.id).select()
     } else {
       const fechaInicio = form.fechaInicio || hoyISO()
       // El día de alta fija el "día de corte" del ciclo de cobro del socio para siempre.
@@ -262,12 +281,15 @@ function NuevoSocioModal({
           }
 
           if (necesitaVencimiento) {
-            const resultadoSync = await sincronizarVencimientoPwa({
-              dni: form.dni,
-              fechaVencimiento: fechaVencimientoNueva,
-            })
-            if (!resultadoSync.synced) {
-              avisos.push('No se pudo cargar el vencimiento de Aparatos/Musculación en la app.')
+            for (const disciplina of planesDeVencimiento(form.planes)) {
+              const resultadoSync = await sincronizarVencimientoPwa({
+                dni: form.dni,
+                disciplina,
+                fechaVencimiento: fechaVencimientoNueva,
+              })
+              if (!resultadoSync.synced) {
+                avisos.push(`No se pudo cargar el vencimiento de ${disciplina} en la app.`)
+              }
             }
           }
         }
@@ -276,8 +298,27 @@ function NuevoSocioModal({
       if (avisos.length > 0) window.alert(avisos.join('\n'))
     }
 
+    // Edición de un socio ya existente: si se tocó la fecha de vencimiento,
+    // se sincroniza con la PWA -- sin esto, el cambio quedaría reflejado
+    // solo acá en el panel y la app seguiría mostrando la fecha vieja hasta
+    // el próximo "Registrar Pago" (exactamente el desfase que se pidió cerrar).
+    if (esEdicion && vencimientoEditado) {
+      const avisos = []
+      for (const disciplina of planesDeVencimiento(form.planes)) {
+        const resultadoSync = await sincronizarVencimientoPwa({
+          dni: form.dni,
+          disciplina,
+          fechaVencimiento: form.fechaVencimiento,
+        })
+        if (!resultadoSync.synced && resultadoSync.reason !== 'sin_cuenta_pwa') {
+          avisos.push(`No se pudo sincronizar el vencimiento de ${disciplina} con la app.`)
+        }
+      }
+      if (avisos.length > 0) window.alert(avisos.join('\n'))
+    }
+
     setGuardando(false)
-    onSaved(socioAUnificar ? '¡Usuario unificado con éxito!' : undefined)
+    onSaved(socioAUnificar ? '¡Usuario unificado con éxito!' : vencimientoEditado ? 'Vencimiento actualizado' : undefined)
     onClose()
   }
 
@@ -395,6 +436,25 @@ function NuevoSocioModal({
               ))}
             </div>
           </div>
+
+          {esEdicion && tienePlanDeVencimiento(form.planes) && (
+            <div className="flex flex-col gap-1.5 sm:col-span-2">
+              <label htmlFor="fechaVencimientoEdicion" className="text-xs font-medium text-gray-400">
+                Fecha de vencimiento
+              </label>
+              <input
+                id="fechaVencimientoEdicion"
+                type="date"
+                value={form.fechaVencimiento}
+                onChange={handleChange('fechaVencimiento')}
+                className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
+              />
+              <p className="text-[11px] text-gray-500">
+                Edición directa, independiente de "Registrar Pago" -- guardar acá actualiza la fecha ya y la
+                sincroniza con la app del socio.
+              </p>
+            </div>
+          )}
 
           {!esEdicion && planesDeCreditos(form.planes).length > 0 && (
             <div className="flex flex-col gap-1.5 sm:col-span-2">

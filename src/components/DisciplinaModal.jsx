@@ -37,11 +37,12 @@ function DisciplinaModal({ disciplina, onClose, onSaved }) {
 
   const updateField = (field, value) => setForm((prev) => ({ ...prev, [field]: value }))
 
-  // Las franjas de una disciplina existente salen de `classes` -- las de
-  // membresía (Aparatos/Musculación) son de acceso libre por diseño y no
-  // tienen filas ahí, así que ni se consulta para ese `kind`.
+  // Las franjas de una disciplina existente salen de `classes` -- ya no
+  // importa el `kind`: una disciplina "por vencimiento" (Aparatos) puede
+  // tener horario real de gimnasio (ej. 07 a 13 y 16 a 22) igual que una
+  // por créditos, simplemente no se usan para reservar cupo.
   useEffect(() => {
-    if (!esEdicion || disciplina.kind === 'membership') {
+    if (!esEdicion) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setCargandoFranjas(false)
       return
@@ -95,9 +96,11 @@ function DisciplinaModal({ disciplina, onClose, onSaved }) {
       return
     }
 
-    // Las franjas horarias solo aplican a disciplinas por créditos -- las de
-    // membresía son de acceso libre por diseño, sin horarios fijos.
-    const franjasAGuardar = form.kind === 'credits' ? franjas : []
+    // Las franjas horarias ya aplican a cualquier `kind` -- una disciplina
+    // "por vencimiento" puede tener horario real de gimnasio, o quedar sin
+    // ninguna franja cargada (ahí la landing muestra el fallback de "Pase
+    // Libre / Horario de Gimnasio").
+    const franjasAGuardar = franjas
     for (const franja of franjasAGuardar) {
       if (franja.dias.length === 0) {
         setError('Cada franja horaria necesita al menos un día seleccionado.')
@@ -281,12 +284,15 @@ function DisciplinaModal({ disciplina, onClose, onSaved }) {
               <Clock className="h-4 w-4 text-greenfit-primary" />
               <span className="text-sm font-medium text-white">Horarios</span>
             </div>
-
-            {form.kind === 'membership' ? (
+            {form.kind === 'membership' && (
               <p className="text-xs text-gray-500">
-                Este tipo de disciplina es de acceso libre (pase por vencimiento) y no tiene horarios fijos.
+                Opcional para "Por vencimiento": si es acceso realmente libre, dejá esto vacío -- la landing va a
+                mostrar "Pase Libre / Horario de Gimnasio". Si el gimnasio tiene un horario fijo (ej. 07 a 13 y 16 a
+                22 hs), cargalo acá y la landing muestra ese rango en su lugar.
               </p>
-            ) : cargandoFranjas ? (
+            )}
+
+            {cargandoFranjas ? (
               <p className="text-xs text-gray-500">Cargando horarios...</p>
             ) : (
               <>

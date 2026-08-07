@@ -14,7 +14,7 @@ import {
 import { supabase } from '../lib/supabaseClient'
 import { esDelMesActual, formatFecha, hoyISO } from '../utils/fecha'
 import { estadoOperativoSocio, getSocioMetrics } from '../utils/socioMetrics'
-import { formatearPlanes, planesDeCreditos, PLANES_DISPONIBLES } from '../utils/planes'
+import { formatearPlanes, planesDeCreditos, planesDeVencimiento, PLANES_DISPONIBLES } from '../utils/planes'
 import { buscarCoincidenciaPorNombre } from '../utils/coincidenciaSocios'
 import { sincronizarCreditosPwa, sincronizarVencimientoPwa, sincronizarEstadoCuentaPwa } from '../utils/creditosPwa'
 import { fetchAvataresYNiveles, resolverUserIdPorDni, registrarPago } from '../utils/fichaSocioPwa'
@@ -366,12 +366,18 @@ function Socios() {
       }
     }
     if (payload.vencimiento) {
-      const resultado = await sincronizarVencimientoPwa({
-        dni: socio.dni,
-        fechaVencimiento: cambios.fecha_vencimiento,
-      })
-      if (!resultado.synced && resultado.reason !== 'sin_cuenta_pwa') {
-        mensaje = 'Pago registrado, pero no se pudo sincronizar con la app. Revisá la consola.'
+      // Por nombre de plan (igual que los créditos arriba), no "la única
+      // disciplina kind=membership que exista" -- un socio podría tener más
+      // de una etiqueta de vencimiento a la vez (ej. Pase Libre + Aparatos).
+      for (const disciplina of planesDeVencimiento(payload.plan ?? socio.plan)) {
+        const resultado = await sincronizarVencimientoPwa({
+          dni: socio.dni,
+          disciplina,
+          fechaVencimiento: cambios.fecha_vencimiento,
+        })
+        if (!resultado.synced && resultado.reason !== 'sin_cuenta_pwa') {
+          mensaje = 'Pago registrado, pero no se pudo sincronizar con la app. Revisá la consola.'
+        }
       }
     }
 

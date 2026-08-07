@@ -59,7 +59,7 @@ test('editar los horarios de una disciplina se refleja en su tarjeta', async ({ 
   await expect(tarjeta.getByText('18:00 a 19:00', { exact: false })).toHaveCount(0)
 })
 
-test('una disciplina de membresía (Aparatos) muestra "Pase libre" en vez de un editor de horarios', async ({
+test('una disciplina de membresía (Aparatos) SIN franjas cargadas muestra el fallback "Pase libre"', async ({
   page,
 }) => {
   await loginComoAdmin(page, { tables: tablasBase() })
@@ -68,9 +68,37 @@ test('una disciplina de membresía (Aparatos) muestra "Pase libre" en vez de un 
   const tarjeta = page.getByTestId('disciplina-card-disc-aparatos')
   await expect(tarjeta).toBeVisible()
   await expect(tarjeta.getByText('Pase libre / Horario de gimnasio')).toBeVisible()
+})
 
+// Antes, "Editar Disciplina" bloqueaba por completo la carga de horarios
+// para kind=membership (mostraba un texto fijo explicando que no tiene
+// horarios) -- ahora usa el MISMO selector de franjas que créditos, y lo
+// que se cargue ahí es lo que la propia tarjeta del Admin Y la landing
+// ("Elegí tu ritmo") terminan mostrando en vez del fallback de Pase Libre.
+test('cargar franjas horarias reales en Aparatos (por vencimiento) ya no está bloqueado', async ({ page }) => {
+  await loginComoAdmin(page, { tables: tablasBase() })
+
+  await irADisciplinas(page)
+  const tarjeta = page.getByTestId('disciplina-card-disc-aparatos')
   await tarjeta.getByText('Editar', { exact: true }).click()
+
+  await expect(page.getByText('Editar Disciplina')).toBeVisible()
+  // El texto de bloqueo viejo ya no existe para ningún tipo de disciplina.
   await expect(
     page.getByText('Este tipo de disciplina es de acceso libre (pase por vencimiento) y no tiene horarios fijos.'),
-  ).toBeVisible()
+  ).toHaveCount(0)
+
+  await page.getByText('Agregar franja horaria', { exact: true }).click()
+  await page.getByRole('button', { name: 'L', exact: true }).click() // Lunes
+  await page.getByRole('button', { name: 'V', exact: true }).click() // Viernes
+  await page.getByLabel('Desde').fill('07:00')
+  await page.getByLabel('Hasta').fill('22:00')
+
+  await page.getByRole('button', { name: 'Guardar' }).click()
+  await expect(page.getByText('Disciplina actualizada')).toBeVisible()
+
+  // La tarjeta del propio Admin ya no muestra el fallback -- muestra el
+  // horario real recién cargado.
+  await expect(tarjeta.getByText('Lun, Vie — 07:00 a 22:00 hs')).toBeVisible()
+  await expect(tarjeta.getByText('Pase libre / Horario de gimnasio')).toHaveCount(0)
 })

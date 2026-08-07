@@ -31,6 +31,17 @@ export function tienePlanDeVencimiento(plan) {
   return normalizarPlanes(plan).some((p) => !PLANES_DE_CREDITOS.includes((p ?? '').toLowerCase()))
 }
 
+// Subconjunto de `plan` que son actividades por vencimiento (no de créditos)
+// -- "Pase Libre" y "Aparatos / Musculación" son las dos etiquetas posibles
+// hoy, y un socio podría (en teoría) tener las dos cargadas. Se usa para
+// sincronizar la fecha de vencimiento con la PWA resolviendo la disciplina
+// por NOMBRE (igual que planesDeCreditos con los créditos) en vez de
+// asumir "la única disciplina de tipo membership que exista" -- esa
+// asunción se rompe el día que se cargue una segunda disciplina de ese tipo.
+export function planesDeVencimiento(plan) {
+  return normalizarPlanes(plan).filter((p) => !PLANES_DE_CREDITOS.includes((p ?? '').toLowerCase()))
+}
+
 // "Pase Libre" SÍ es un plan real (membresía de acceso libre a Aparatos/
 // Musculación, sin créditos ni turnos) -- no hay que descartarlo: la
 // mayoría de los socios activos lo tienen como su membresía de verdad. Acá
