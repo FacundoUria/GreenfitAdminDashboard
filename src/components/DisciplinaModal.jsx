@@ -11,9 +11,10 @@ function formInicial(disciplina) {
       kind: disciplina.kind ?? 'credits',
       default_capacity: disciplina.default_capacity != null ? String(disciplina.default_capacity) : '',
       is_active: disciplina.is_active ?? true,
+      show_in_agenda: disciplina.show_in_agenda ?? true,
     }
   }
-  return { name: '', description: '', kind: 'credits', default_capacity: '', is_active: true }
+  return { name: '', description: '', kind: 'credits', default_capacity: '', is_active: true, show_in_agenda: true }
 }
 
 // Una franja horaria = una fila de `classes` (la MISMA tabla que ya usa
@@ -120,6 +121,7 @@ function DisciplinaModal({ disciplina, onClose, onSaved }) {
       description: form.description.trim() || null,
       default_capacity: form.default_capacity ? Number(form.default_capacity) : null,
       is_active: form.is_active,
+      show_in_agenda: form.show_in_agenda,
     }
     // `kind` define si la disciplina se maneja por créditos o por vencimiento
     // en TODO el resto del sistema (packs, user_credits, reservas) -- cambiarlo
@@ -276,6 +278,19 @@ function DisciplinaModal({ disciplina, onClose, onSaved }) {
             />
             <span className="text-sm text-gray-300">
               Activa <span className="text-gray-500">(visible para nuevas reservas y compra de créditos en la app)</span>
+            </span>
+          </label>
+
+          <label className="flex min-h-[44px] cursor-pointer items-center gap-2 sm:col-span-2">
+            <input
+              type="checkbox"
+              checked={form.show_in_agenda}
+              onChange={(e) => updateField('show_in_agenda', e.target.checked)}
+              className="h-4 w-4 accent-greenfit-primary"
+            />
+            <span className="text-sm text-gray-300">
+              Mostrar en la Agenda de reservas de la PWA{' '}
+              <span className="text-gray-500">(desactivar para pases libres como Aparatos)</span>
             </span>
           </label>
 

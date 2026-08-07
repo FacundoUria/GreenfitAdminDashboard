@@ -13,16 +13,26 @@ import { sincronizarCreditosPwa, sincronizarVencimientoPwa } from '../utils/cred
 import { normalizarTexto } from '../utils/coincidenciaSocios'
 import FichaSocioHistorial from './FichaSocioHistorial'
 
+// BUG CRÍTICO (2026-08-07): esta función arrancaba `planes` con
+// `[PLANES_DISPONIBLES[0]]` ('Pase Libre') YA TILDADO -- si el staff cargaba
+// un socio de Kickboxing/CrossFit sin darse cuenta de tocar/destildar ese
+// checkbox pre-marcado, el socio quedaba guardado con `plan: ['Pase Libre',
+// 'Kickboxing']`. Como 'Pase Libre' no tiene fila propia en `disciplines`
+// (es una etiqueta legado, ver planesDeVencimiento() en utils/planes.js),
+// cualquier sincronización de vencimiento para ese plan cae al fallback de
+// "la única disciplina kind=membership que exista" -- hoy, Aparatos -- y el
+// socio termina con un balance de Aparatos en la PWA que nunca pidió. Fix:
+// arrancar SIEMPRE sin nada tildado, así el staff elige a mano cada
+// actividad real y no queda ningún plan "de regalo" sin querer.
 function formInicial(socio) {
   if (socio) {
-    const planesActuales = normalizarPlanes(socio.plan)
     return {
       nombre: socio.nombre ?? '',
       apellido: socio.apellido ?? '',
       dni: socio.dni ?? '',
       email: socio.email ?? '',
       telefono: socio.telefono ?? '',
-      planes: planesActuales.length > 0 ? planesActuales : [PLANES_DISPONIBLES[0]],
+      planes: normalizarPlanes(socio.plan),
       fechaInicio: hoyISO(),
       // Edición directa del vencimiento -- no depende de pasar por
       // "Registrar Pago". Vacío si el socio no tiene fecha cargada todavía.
@@ -37,7 +47,7 @@ function formInicial(socio) {
     dni: '',
     email: '',
     telefono: '',
-    planes: [PLANES_DISPONIBLES[0]],
+    planes: [],
     fechaInicio: hoyISO(),
     creditosPorDisciplina: {},
   }

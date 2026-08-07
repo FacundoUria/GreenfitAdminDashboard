@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, Clock, Loader2, Pencil, Plus, Power, Tags, Trash2 } from 'lucide-react'
+import { CalendarOff, CheckCircle2, Clock, Loader2, Pencil, Plus, Power, Tags, Trash2 } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import DisciplinaModal from '../components/DisciplinaModal'
 import { agruparClasesPorBloqueHorario, formatearFranjaHoraria } from '../utils/horarios'
@@ -210,6 +210,12 @@ function Disciplinas() {
               {disciplina.description && <p className="text-xs text-gray-400">{disciplina.description}</p>}
               {disciplina.default_capacity != null && (
                 <p className="text-xs text-gray-500">Cupo predeterminado: {disciplina.default_capacity}</p>
+              )}
+              {disciplina.show_in_agenda === false && (
+                <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-medium text-amber-400">
+                  <CalendarOff className="h-3 w-3" />
+                  Oculta de la Agenda (pase libre)
+                </span>
               )}
 
               <div className="flex items-start gap-2 rounded-lg bg-white/[0.03] px-3 py-2.5 text-xs text-gray-300">
