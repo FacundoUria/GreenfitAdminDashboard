@@ -95,14 +95,23 @@ function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
     }
     setError(null)
     setGuardando(true)
-    await onConfirmar(socio, {
-      plan: planes,
-      ...(creditosPorDisciplina.length > 0 ? { creditosPorDisciplina } : {}),
-      ...(tieneVencimiento ? { vencimiento: { fechaInicio, fechaVencimiento } } : {}),
-      monto: monto ? Number(monto) : null,
-      metodoPago,
-    })
-    setGuardando(false)
+    // try/finally -- ante cualquier excepción inesperada que `onConfirmar`
+    // deje escapar (Socios.jsx ya la atrapa y avisa, pero esto es una
+    // segunda red de seguridad acá), `setGuardando(false)` tiene que correr
+    // sí o sí. Sin esto, un error no capturado dejaba el botón trabado en
+    // "Guardando..." para siempre -- Seba no podía ni reintentar ni cerrar
+    // el modal con el mouse (seguía activo, solo parecía colgado).
+    try {
+      await onConfirmar(socio, {
+        plan: planes,
+        ...(creditosPorDisciplina.length > 0 ? { creditosPorDisciplina } : {}),
+        ...(tieneVencimiento ? { vencimiento: { fechaInicio, fechaVencimiento } } : {}),
+        monto: monto ? Number(monto) : null,
+        metodoPago,
+      })
+    } finally {
+      setGuardando(false)
+    }
   }
 
   return (

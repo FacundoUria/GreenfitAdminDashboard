@@ -350,77 +350,97 @@ function Socios() {
       cambios.estado = 'Activo'
     }
 
-    const { data, error: updateError } = await supabase
-      .from('socios')
-      .update(cambios)
-      .eq('id', socio.id)
-      .select()
+    // Todo el flujo de cobro (socios + créditos/vencimiento + historial)
+    // queda envuelto en un único try/catch -- antes, cualquier excepción
+    // inesperada (no el `updateError` ya chequeado abajo, sino un fallo real
+    // de red/RLS en sincronizarCreditosPwa/sincronizarVencimientoPwa, que
+    // NO tienen su propio try/catch) se colaba sin capturar: la promesa que
+    // devuelve esta función quedaba rechazada, RegistrarPagoModal nunca
+    // llegaba a su `setGuardando(false)` y el modal quedaba trabado en
+    // "Guardando..." para siempre, sin ningún mensaje para Seba. Acá se
+    // loguea siempre el mensaje EXACTO que devuelve Supabase (nunca un
+    // genérico vacío) y se lo avisa.
+    try {
+      const { data, error: updateError } = await supabase
+        .from('socios')
+        .update(cambios)
+        .eq('id', socio.id)
+        .select()
 
-    // Supabase/RLS puede devolver 200/204 "exitoso" afectando 0 filas (sin `error`)
-    // si una policy bloquea el UPDATE. Sin este chequeo, el pago parecería
-    // registrarse y en realidad no se guardaría nada.
-    if (updateError || !data || data.length === 0) {
-      console.error(
-        'Error al registrar el pago en Supabase:',
-        updateError?.message ?? 'no se actualizó ninguna fila (revisá las políticas RLS)',
-      )
-      window.alert('No se pudo registrar el pago. Intentá nuevamente.')
-      return
-    }
+      // Supabase/RLS puede devolver 200/204 "exitoso" afectando 0 filas (sin
+      // `error`) si una policy bloquea el UPDATE. Sin este chequeo, el pago
+      // parecería registrarse y en realidad no se guardaría nada.
+      if (updateError || !data || data.length === 0) {
+        console.error(
+          'Error al registrar el pago en Supabase:',
+          updateError?.message ?? 'no se actualizó ninguna fila (revisá las políticas RLS)',
+        )
+        window.alert('No se pudo registrar el pago. Intentá nuevamente.')
+        return
+      }
 
-    let mensaje = 'Pago registrado correctamente'
-    if (payload.creditosPorDisciplina) {
-      for (const { disciplina, cantidad } of payload.creditosPorDisciplina) {
-        const resultado = await sincronizarCreditosPwa({ dni: socio.dni, disciplina, delta: cantidad })
-        if (!resultado.synced && resultado.reason !== 'sin_cuenta_pwa') {
-          mensaje = 'Pago registrado, pero no se pudo sincronizar con la app. Revisá la consola.'
+      let mensaje = 'Pago registrado correctamente'
+      if (payload.creditosPorDisciplina) {
+        for (const { disciplina, cantidad } of payload.creditosPorDisciplina) {
+          const resultado = await sincronizarCreditosPwa({ dni: socio.dni, disciplina, delta: cantidad })
+          if (!resultado.synced && resultado.reason !== 'sin_cuenta_pwa') {
+            mensaje = 'Pago registrado, pero no se pudo sincronizar con la app. Revisá la consola.'
+          }
         }
       }
-    }
-    if (payload.vencimiento) {
-      // Por nombre de plan (igual que los créditos arriba), no "la única
-      // disciplina kind=membership que exista" -- un socio podría tener más
-      // de una etiqueta de vencimiento a la vez (ej. Pase Libre + Aparatos).
-      for (const disciplina of planesDeVencimiento(payload.plan ?? socio.plan)) {
-        const resultado = await sincronizarVencimientoPwa({
-          dni: socio.dni,
-          disciplina,
-          fechaVencimiento: cambios.fecha_vencimiento,
-        })
-        if (!resultado.synced && resultado.reason !== 'sin_cuenta_pwa') {
-          mensaje = 'Pago registrado, pero no se pudo sincronizar con la app. Revisá la consola.'
+      if (payload.vencimiento) {
+        // Por nombre de plan (igual que los créditos arriba), no "la única
+        // disciplina kind=membership que exista" -- un socio podría tener más
+        // de una etiqueta de vencimiento a la vez (ej. Pase Libre + Aparatos).
+        for (const disciplina of planesDeVencimiento(payload.plan ?? socio.plan)) {
+          const resultado = await sincronizarVencimientoPwa({
+            dni: socio.dni,
+            disciplina,
+            fechaVencimiento: cambios.fecha_vencimiento,
+          })
+          if (!resultado.synced && resultado.reason !== 'sin_cuenta_pwa') {
+            mensaje = 'Pago registrado, pero no se pudo sincronizar con la app. Revisá la consola.'
+          }
         }
       }
-    }
 
-    // Historial de pagos (Ficha 360°) -- best-effort: si el socio todavía no
-    // tiene cuenta PWA, o pagos_socio no está desplegada, el pago YA se
-    // registró arriba (socios + créditos/vencimiento), así que no hay que
-    // cortar el flujo por esto, solo no queda un renglón en el historial.
-    const userId = await resolverUserIdPorDni(socio.dni)
-    if (userId) {
-      try {
-        await registrarPago({
-          userId,
-          paquete: formatearPlanes(payload.plan ?? socio.plan),
-          monto: payload.monto,
-          metodoPago: payload.metodoPago,
-          // Para planes con vencimiento el período es el que Seba eligió en el
-          // modal (puede no arrancar hoy); para planes de créditos no hay rango
-          // de fechas, así que el período queda simplemente en "hoy".
-          periodoDesde: cambios.fecha_inicio_cuota ?? hoy,
-          periodoHasta: cambios.fecha_vencimiento ?? null,
-          creadoPor: usuario?.id ?? null,
-        })
-      } catch (err) {
-        console.error('No se pudo guardar el pago en el historial (pagos_socio):', err.message)
+      // Historial de pagos (Ficha 360°) -- best-effort: si el socio todavía no
+      // tiene cuenta PWA, o pagos_socio no está desplegada, el pago YA se
+      // registró arriba (socios + créditos/vencimiento), así que no hay que
+      // cortar el flujo por esto, solo no queda un renglón en el historial.
+      // Antes este catch solo logueaba a consola -- si `pagos_socio` SÍ
+      // existe pero el insert falla por una razón real (nombre de campo mal,
+      // constraint, RLS), Seba veía igual "Pago registrado correctamente"
+      // sin ninguna pista de que el historial no se guardó.
+      const userId = await resolverUserIdPorDni(socio.dni)
+      if (userId) {
+        try {
+          await registrarPago({
+            userId,
+            paquete: formatearPlanes(payload.plan ?? socio.plan),
+            monto: payload.monto,
+            metodoPago: payload.metodoPago,
+            // Para planes con vencimiento el período es el que Seba eligió en el
+            // modal (puede no arrancar hoy); para planes de créditos no hay rango
+            // de fechas, así que el período queda simplemente en "hoy".
+            periodoDesde: cambios.fecha_inicio_cuota ?? hoy,
+            periodoHasta: cambios.fecha_vencimiento ?? null,
+            creadoPor: usuario?.id ?? null,
+          })
+        } catch (err) {
+          console.error('No se pudo guardar el pago en el historial (pagos_socio):', err.message)
+          mensaje = 'Pago registrado, pero no se pudo guardar en el historial (pagos_socio). Revisá la consola.'
+        }
       }
-    }
 
-    setSocioParaPago(null)
-    setToastMessage(mensaje)
-    setTimeout(() => setToastMessage(null), 2500)
-    fetchSocios()
+      setSocioParaPago(null)
+      setToastMessage(mensaje)
+      setTimeout(() => setToastMessage(null), 2500)
+      fetchSocios()
+    } catch (err) {
+      console.error('Error inesperado al registrar el pago:', err.message)
+      window.alert(`No se pudo registrar el pago: ${err.message}`)
+    }
   }
 
   const handleToggleSeleccionado = (id) => {
