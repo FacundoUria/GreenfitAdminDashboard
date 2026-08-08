@@ -361,11 +361,36 @@ function Socios() {
     // loguea siempre el mensaje EXACTO que devuelve Supabase (nunca un
     // genérico vacío) y se lo avisa.
     try {
-      const { data, error: updateError } = await supabase
+      let { data, error: updateError } = await supabase
         .from('socios')
         .update(cambios)
         .eq('id', socio.id)
         .select()
+
+      // `fecha_inicio_cuota` viene de supabase_migration_fecha_inicio_cuota.sql
+      // -- si ese script todavía no se corrió en este ambiente, Postgrest
+      // rechaza el UPDATE ENTERO (PGRST204, "Could not find the
+      // 'fecha_inicio_cuota' column ... in the schema cache"), no solo esa
+      // columna: el resto de los campos del mismo request -- fecha_vencimiento,
+      // dia_corte, estado, que SÍ existen -- también se perdía. Reintenta el
+      // mismo UPDATE sin esa columna para no tirar el cobro entero por una
+      // migración pendiente; en cuanto se corra ese script, este fallback deja
+      // de activarse solo (no hace falta tocar este código de nuevo).
+      let fechaInicioCuotaSinGuardar = false
+      if ('fecha_inicio_cuota' in cambios && updateError?.message?.includes("'fecha_inicio_cuota' column")) {
+        console.warn(
+          'La columna fecha_inicio_cuota no existe todavía en Supabase (correr supabase_migration_fecha_inicio_cuota.sql). ' +
+            'Reintentando el cobro sin esa columna para no perder el resto del pago.',
+        )
+        const cambiosSinFechaInicio = { ...cambios }
+        delete cambiosSinFechaInicio.fecha_inicio_cuota
+        fechaInicioCuotaSinGuardar = true
+        ;({ data, error: updateError } = await supabase
+          .from('socios')
+          .update(cambiosSinFechaInicio)
+          .eq('id', socio.id)
+          .select())
+      }
 
       // Supabase/RLS puede devolver 200/204 "exitoso" afectando 0 filas (sin
       // `error`) si una policy bloquea el UPDATE. Sin este chequeo, el pago
@@ -391,7 +416,9 @@ function Socios() {
         return
       }
 
-      let mensaje = 'Pago registrado correctamente'
+      let mensaje = fechaInicioCuotaSinGuardar
+        ? 'Pago registrado, pero la fecha de inicio personalizada no se guardó (falta correr una migración pendiente en Supabase). El resto del cobro se guardó bien.'
+        : 'Pago registrado correctamente'
       if (payload.creditosPorDisciplina) {
         for (const { disciplina, cantidad } of payload.creditosPorDisciplina) {
           const resultado = await sincronizarCreditosPwa({ dni: socio.dni, disciplina, delta: cantidad })

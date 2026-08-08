@@ -225,3 +225,92 @@ test('Registrar Pago: si el UPDATE de socios falla, el alert muestra el motivo r
   await expect(botonConfirmar).toBeEnabled()
   await expect(botonConfirmar).toHaveText('Confirmar')
 })
+
+// Regresión de producción real (2026-08-08): con el alert ya desenmascarado,
+// el motivo exacto resultó ser "Could not find the 'fecha_inicio_cuota'
+// column of 'socios' in the schema cache" -- la migración
+// supabase_migration_fecha_inicio_cuota.sql (ya existe en el repo) todavía
+// no se había corrido en ese ambiente. Postgrest rechaza el UPDATE ENTERO
+// por esa única columna faltante, no solo esa columna -- sin el fallback de
+// abajo, NINGÚN cobro de un socio con plan de vencimiento se guardaba (ni
+// fecha_vencimiento, ni dia_corte, ni estado, que sí son columnas reales).
+const SOCIO_PASE_LIBRE_MIGRACION_PENDIENTE = {
+  id: 'e2e-socio-pase-libre-migracion',
+  nombre: 'Rocío',
+  apellido: 'Funes',
+  dni: '27444555',
+  email: 'rocio@e2e.test',
+  telefono: '2610000003',
+  plan: ['Pase Libre'],
+  estado: 'Activo',
+  fecha_vencimiento: null,
+  dia_corte: null,
+  created_at: '2025-04-01T00:00:00.000Z',
+  ultimo_pago: '2026-07-01',
+  creditos: 0,
+  activo: true,
+}
+
+test('Registrar Pago: si falta la columna fecha_inicio_cuota (migración pendiente), el resto del cobro se guarda igual y no hay alert de error', async ({
+  page,
+}) => {
+  const tables = { ...tablasBase(), socios: [SOCIO_PASE_LIBRE_MIGRACION_PENDIENTE] }
+
+  let huboAlerta = false
+  page.on('dialog', async (dialog) => {
+    huboAlerta = true
+    await dialog.dismiss()
+  })
+
+  await loginComoAdmin(page, { tables })
+
+  // Cualquier UPDATE de `socios` que incluya `fecha_inicio_cuota` en el
+  // payload responde con el error real de producción; sin esa columna, deja
+  // pasar al mock compartido normalmente (simula que el resto de columnas sí
+  // existen en la tabla real).
+  await page.route('**/rest/v1/socios*', async (route) => {
+    const request = route.request()
+    if (request.method() !== 'PATCH') {
+      await route.fallback()
+      return
+    }
+    const payload = request.postDataJSON()
+    if (payload && 'fecha_inicio_cuota' in payload) {
+      await route.fulfill({
+        status: 400,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          code: 'PGRST204',
+          message: "Could not find the 'fecha_inicio_cuota' column of 'socios' in the schema cache",
+          details: null,
+          hint: null,
+        }),
+      })
+      return
+    }
+    await route.fallback()
+  })
+
+  await irASocios(page)
+  await expect(page.getByRole('table').getByText('Rocío Funes')).toBeVisible()
+  await page.locator('[title="Registrar Pago / Renovar Cuota"]:visible').click()
+  await expect(page.getByText('Registrar Pago / Renovar Cuota')).toBeVisible()
+  await expect(page.getByLabel('Fecha de inicio')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Confirmar' }).click()
+
+  await expect(
+    page.getByText('la fecha de inicio personalizada no se guardó', { exact: false }),
+  ).toBeVisible({ timeout: 10_000 })
+  expect(huboAlerta, 'el resto del cobro se guardó bien -- esto no debería mostrar un alert() de error').toBe(false)
+
+  // El resto del cobro (columnas que sí existen) quedó guardado igual.
+  const filaTabla = page.getByRole('table').getByRole('row', { name: /Rocío Funes/ })
+  await expect(filaTabla).toBeVisible()
+  expect(tables.socios[0].fecha_vencimiento).not.toBeNull()
+  expect(tables.socios[0].dia_corte).not.toBeNull()
+  expect(tables.socios[0].estado).toBe('Activo')
+  // La columna sin migrar nunca se mandó en el segundo intento -- no quedó
+  // ningún valor pisado en el mock.
+  expect(tables.socios[0].fecha_inicio_cuota).toBeUndefined()
+})
