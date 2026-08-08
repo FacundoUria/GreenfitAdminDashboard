@@ -93,6 +93,15 @@ function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
       setError('La fecha de vencimiento no puede ser anterior a la de inicio.')
       return
     }
+    // `Number(monto)` da NaN si se tipeó algo no numérico (ej. coma decimal
+    // en vez de punto, en algunos navegadores/locales el input numérico
+    // igual la deja pasar) -- un NaN viajando en el payload terminaba
+    // serializado como `null` en el body JSON de todos modos (silencioso,
+    // sin avisar), así que se lo normaliza acá explícitamente a `null` en
+    // vez de dejar que ocurra "por accidente".
+    const montoNumero = Number(monto)
+    const montoSanitizado = monto !== '' && Number.isFinite(montoNumero) ? montoNumero : null
+
     setError(null)
     setGuardando(true)
     // try/finally -- ante cualquier excepción inesperada que `onConfirmar`
@@ -106,7 +115,7 @@ function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
         plan: planes,
         ...(creditosPorDisciplina.length > 0 ? { creditosPorDisciplina } : {}),
         ...(tieneVencimiento ? { vencimiento: { fechaInicio, fechaVencimiento } } : {}),
-        monto: monto ? Number(monto) : null,
+        monto: montoSanitizado,
         metodoPago,
       })
     } finally {

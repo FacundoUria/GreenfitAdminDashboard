@@ -284,7 +284,9 @@ export async function registrarPago({ userId, paquete, monto, metodoPago, period
   const { error } = await supabase.from('pagos_socio').insert({
     user_id: userId,
     paquete,
-    monto: monto || null,
+    // `?? null` (no `||`) -- un cobro de $0 es un monto válido (ej. un pack
+    // promocional gratis), `monto || null` lo hubiera convertido en null.
+    monto: Number.isFinite(monto) ? monto : null,
     metodo_pago: metodoPago || null,
     periodo_desde: periodoDesde || null,
     periodo_hasta: periodoHasta || null,
@@ -292,7 +294,19 @@ export async function registrarPago({ userId, paquete, monto, metodoPago, period
     origen: 'manual',
     created_by: creadoPor || null,
   })
-  if (error && !esErrorDeRelacionFaltante(error)) throw new Error(error.message)
+  if (error && !esErrorDeRelacionFaltante(error)) {
+    console.error('ERROR pagos_socio INSERT SUPABASE:', {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code,
+    })
+    // Se relanza el PostgrestError original (ya es instanceof Error) en vez
+    // de envolverlo en `new Error(error.message)` -- así quien atrapa esto
+    // río arriba (Socios.jsx) también puede leer `.details`/`.hint`/`.code`,
+    // no solo el mensaje, para diagnosticar la causa exacta.
+    throw error
+  }
 }
 
 // ============================================================

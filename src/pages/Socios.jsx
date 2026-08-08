@@ -371,11 +371,23 @@ function Socios() {
       // `error`) si una policy bloquea el UPDATE. Sin este chequeo, el pago
       // parecería registrarse y en realidad no se guardaría nada.
       if (updateError || !data || data.length === 0) {
-        console.error(
-          'Error al registrar el pago en Supabase:',
-          updateError?.message ?? 'no se actualizó ninguna fila (revisá las políticas RLS)',
+        // Este era el motivo REAL por el que en producción seguía saliendo
+        // el alert genérico "No se pudo registrar el pago. Intentá
+        // nuevamente." sin ninguna pista -- este branch (a diferencia del
+        // catch general de más abajo) tenía su propio alert hardcodeado que
+        // nunca se tocó. `updateError` es un PostgrestError real cuando lo
+        // hay: loguea el objeto completo (message/details/hint/code, no
+        // solo .message) para poder diagnosticar la causa exacta (típico:
+        // RLS bloqueando el UPDATE porque el admin logueado no matchea
+        // `public.is_admin()`, o un constraint real de la tabla `socios`).
+        const motivo = updateError
+          ? { message: updateError.message, details: updateError.details, hint: updateError.hint, code: updateError.code }
+          : 'no se actualizó ninguna fila (revisá las políticas RLS: el admin logueado tiene que pasar public.is_admin())'
+        console.error('ERROR REGISTRAR PAGO SUPABASE:', motivo)
+        window.alert(
+          'No se pudo registrar el pago: ' +
+            (updateError?.message || (typeof motivo === 'string' ? motivo : null) || 'Error desconocido'),
         )
-        window.alert('No se pudo registrar el pago. Intentá nuevamente.')
         return
       }
 
@@ -428,7 +440,16 @@ function Socios() {
             creadoPor: usuario?.id ?? null,
           })
         } catch (err) {
-          console.error('No se pudo guardar el pago en el historial (pagos_socio):', err.message)
+          // registrarPago() ya loguea el objeto completo antes de relanzar
+          // (ver fichaSocioPwa.js) -- acá se repite por si `err` trae
+          // detalle extra que no se vio ahí (ej. un TypeError de red real,
+          // no un PostgrestError).
+          console.error('ERROR pagos_socio (historial) SUPABASE:', {
+            message: err.message,
+            details: err.details,
+            hint: err.hint,
+            code: err.code,
+          })
           mensaje = 'Pago registrado, pero no se pudo guardar en el historial (pagos_socio). Revisá la consola.'
         }
       }
@@ -438,8 +459,17 @@ function Socios() {
       setTimeout(() => setToastMessage(null), 2500)
       fetchSocios()
     } catch (err) {
-      console.error('Error inesperado al registrar el pago:', err.message)
-      window.alert(`No se pudo registrar el pago: ${err.message}`)
+      // Cualquier excepción inesperada del resto del flujo (créditos,
+      // vencimiento) que no se haya lanzado como PostgrestError todavía
+      // llega acá -- se loguea completo y se muestra el motivo real, nunca
+      // el genérico "Intentá nuevamente" sin más.
+      console.error('ERROR REGISTRAR PAGO SUPABASE (inesperado):', {
+        message: err.message,
+        details: err.details,
+        hint: err.hint,
+        code: err.code,
+      })
+      window.alert(`No se pudo registrar el pago: ${err.message || 'Error desconocido'}`)
     }
   }
 

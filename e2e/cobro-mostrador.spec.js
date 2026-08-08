@@ -171,3 +171,57 @@ test('Cobro mostrador: acreditar créditos a una disciplina se refleja en la tab
   // usando `esPlanDeCreditos`/`socios.creditos` como fallback en otras vistas.
   expect(tables.socios[0].creditos).toBe(10)
 })
+
+// Regresión: en producción, cuando el UPDATE de `socios` fallaba (típico:
+// RLS bloqueando la escritura porque el admin logueado no matchea
+// `public.is_admin()`), el alert que veía Seba era siempre el genérico "No
+// se pudo registrar el pago. Intentá nuevamente.", sin ninguna pista de la
+// causa real -- este branch tenía su propio alert hardcodeado, ajeno al
+// try/catch general que ya mostraba el motivo real para otras fallas del
+// mismo flujo. Este test fija ESE caso puntual.
+test('Registrar Pago: si el UPDATE de socios falla, el alert muestra el motivo real (no el genérico) y el botón no queda trabado', async ({
+  page,
+}) => {
+  const tables = tablasBase()
+
+  let mensajeDialogo = null
+  page.on('dialog', async (dialog) => {
+    mensajeDialogo = dialog.message()
+    await dialog.dismiss()
+  })
+
+  await loginComoAdmin(page, { tables })
+
+  // Simula el UPDATE de `socios` bloqueado (Postgrest real responde 200 con
+  // 0 filas cuando una policy RLS bloquea la escritura, sin `error`).
+  await page.route('**/rest/v1/socios*', async (route) => {
+    const request = route.request()
+    if (request.method() !== 'PATCH') {
+      await route.fallback()
+      return
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
+  })
+
+  await irASocios(page)
+  await expect(page.getByRole('table').getByText('Martina Ríos')).toBeVisible()
+  await page.locator('[title="Registrar Pago / Renovar Cuota"]:visible').click()
+  await expect(page.getByText('Registrar Pago / Renovar Cuota')).toBeVisible()
+
+  // CrossFit ya viene pre-tildado -- hace falta cargar algún crédito para
+  // pasar la validación local y llegar a onConfirmar().
+  await page.getByRole('button', { name: '+8' }).last().click()
+
+  const botonConfirmar = page.getByRole('button', { name: 'Confirmar' })
+  await botonConfirmar.click()
+
+  await expect.poll(() => mensajeDialogo, { timeout: 10_000 }).not.toBeNull()
+  expect(mensajeDialogo).not.toBe('No se pudo registrar el pago. Intentá nuevamente.')
+  expect(mensajeDialogo.startsWith('No se pudo registrar el pago:')).toBe(true)
+  expect(mensajeDialogo.length).toBeGreaterThan('No se pudo registrar el pago:'.length)
+
+  // El modal sigue abierto y el botón volvió a habilitarse -- no quedó
+  // trabado en "Guardando...".
+  await expect(botonConfirmar).toBeEnabled()
+  await expect(botonConfirmar).toHaveText('Confirmar')
+})

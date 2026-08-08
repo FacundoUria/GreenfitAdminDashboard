@@ -53,7 +53,12 @@ export async function sincronizarCreditosPwa({ dni, disciplina, delta }) {
   })
 
   if (error) {
-    console.error('No se pudo sincronizar créditos con la PWA:', error.message)
+    console.error('ERROR user_credits INSERT SUPABASE (créditos):', {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code,
+    })
     return { synced: false, reason: 'error_supabase' }
   }
   return { synced: true }
@@ -104,7 +109,12 @@ export async function sincronizarVencimientoPwa({ dni, disciplina, fechaVencimie
   })
 
   if (error) {
-    console.error('No se pudo sincronizar el vencimiento con la PWA:', error.message)
+    console.error('ERROR user_credits INSERT SUPABASE (vencimiento):', {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code,
+    })
     return { synced: false, reason: 'error_supabase' }
   }
   return { synced: true }
@@ -120,7 +130,12 @@ export async function sincronizarEstadoCuentaPwa({ dni, activo }) {
 
   const { error } = await supabase.from('profiles').update({ active: activo }).eq('id', userId)
   if (error) {
-    console.error('No se pudo sincronizar el estado de la cuenta con la PWA:', error.message)
+    console.error('ERROR profiles UPDATE SUPABASE (baja/reactivación):', {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code,
+    })
     return { synced: false, reason: 'error_supabase' }
   }
   return { synced: true }
