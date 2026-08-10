@@ -121,6 +121,14 @@ function Socios() {
   const [seleccionados, setSeleccionados] = useState(new Set())
   const [whatsappDestinatarios, setWhatsappDestinatarios] = useState(null)
   const [whatsappPreset, setWhatsappPreset] = useState(null)
+  // Catálogo real de disciplinas activas -- se lo pasa a RegistrarPagoModal
+  // para que "Actividad / Plan de este pago" deje de ser una lista fija
+  // hardcodeada (PLANES_DISPONIBLES) y sume cualquier disciplina nueva que
+  // se cargue desde el catálogo (Disciplinas.jsx) sin tocar código. También
+  // trae `kind` (créditos vs. vencimiento) y `default_capacity` (reusado
+  // como "días de vigencia" para las de vencimiento, ver DisciplinaModal.jsx)
+  // para poder sugerir la fecha de vencimiento sola al tildar una actividad.
+  const [disciplinasActivas, setDisciplinasActivas] = useState([])
 
   const fetchSocios = async () => {
     setLoading(true)
@@ -147,6 +155,24 @@ function Socios() {
     // experimental set-state-in-effect no distingue este caso del anti-patrón que persigue.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchSocios()
+  }, [])
+
+  // Best-effort, aparte del fetch principal de socios -- si falla, el modal
+  // de cobro simplemente cae a la lista fija legacy (PLANES_DISPONIBLES) en
+  // vez de romper toda la pantalla.
+  useEffect(() => {
+    supabase
+      .from('disciplines')
+      .select('id, name, kind, default_capacity')
+      .eq('is_active', true)
+      .order('name')
+      .then(({ data, error: fetchError }) => {
+        if (fetchError) {
+          console.error('No se pudieron cargar las disciplinas activas para Registrar Pago:', fetchError.message)
+          return
+        }
+        setDisciplinasActivas(data ?? [])
+      })
   }, [])
 
   // Aparte del fetch de `socios` -- si falla o tarda no debe bloquear la
@@ -687,6 +713,7 @@ function Socios() {
         <RegistrarPagoModal
           key={socioParaPago.id}
           socio={socioParaPago}
+          disciplinasActivas={disciplinasActivas}
           onClose={() => setSocioParaPago(null)}
           onConfirmar={handleConfirmarPago}
         />

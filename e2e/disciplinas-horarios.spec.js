@@ -102,3 +102,41 @@ test('cargar franjas horarias reales en Aparatos (por vencimiento) ya no está b
   await expect(tarjeta.getByText('Lun, Vie — 07:00 a 22:00 hs')).toBeVisible()
   await expect(tarjeta.getByText('Pase libre / Horario de gimnasio')).toHaveCount(0)
 })
+
+// Regresión de producción: crear una disciplina "Por vencimiento" desde cero
+// (no editar una ya existente) sin cargar NINGUNA franja horaria -- las
+// franjas son 100% opcionales para cualquier `kind`, así que el alta tiene
+// que insertar la fila en `disciplines` sin más, sin tocar `classes` para
+// nada. El campo "Días de vigencia" (30) reutiliza `default_capacity` --
+// mismo campo que usa "Cupo predeterminado" para créditos, sin migración
+// nueva -- para que "Registrar Pago" pueda sugerir el vencimiento solo.
+test('crear una disciplina "Por vencimiento" (Gimnasio, 30 días) sin franjas horarias se guarda sin errores', async ({
+  page,
+}) => {
+  const tables = tablasBase()
+  await loginComoAdmin(page, { tables })
+
+  await irADisciplinas(page)
+  await page.getByRole('button', { name: 'Nueva Disciplina' }).click()
+  await expect(page.getByRole('heading', { name: 'Nueva Disciplina' })).toBeVisible()
+
+  await page.getByLabel('Nombre').fill('Gimnasio')
+  await page.getByLabel('Tipo').selectOption('membership')
+  await expect(page.getByLabel('Días de vigencia (sugerido en Registrar Pago)')).toBeVisible()
+  await page.getByLabel('Días de vigencia (sugerido en Registrar Pago)').fill('30')
+
+  // Sin franjas: no se toca "Agregar franja horaria" para nada.
+  await page.getByRole('button', { name: 'Guardar' }).click()
+
+  await expect(page.getByText('Disciplina creada')).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByText('No se pudo crear la disciplina', { exact: false })).toHaveCount(0)
+
+  const nueva = tables.disciplines.find((d) => d.name === 'Gimnasio')
+  expect(nueva).toBeTruthy()
+  expect(nueva.kind).toBe('membership')
+  expect(nueva.default_capacity).toBe(30)
+  // Ninguna franja se insertó en `classes` para esta disciplina.
+  expect(tables.classes.filter((c) => c.discipline_id === nueva.id)).toHaveLength(0)
+
+  await expect(page.getByTestId(`disciplina-card-${nueva.id}`)).toBeVisible()
+})

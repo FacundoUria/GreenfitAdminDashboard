@@ -314,3 +314,95 @@ test('Registrar Pago: si falta la columna fecha_inicio_cuota (migración pendien
   // ningún valor pisado en el mock.
   expect(tables.socios[0].fecha_inicio_cuota).toBeUndefined()
 })
+
+// Mismo criterio UTC que registrar-pago-fechas.spec.js -- evita que un test
+// corrido cerca de medianoche en un huso detrás de UTC calcule "hoy" distinto
+// de lo que calcula el browser.
+function isoUTC(date) {
+  return date.toISOString().slice(0, 10)
+}
+function sumarDiasUTC(iso, dias) {
+  const fecha = new Date(`${iso}T00:00:00.000Z`)
+  fecha.setUTCDate(fecha.getUTCDate() + dias)
+  return isoUTC(fecha)
+}
+
+// "Actividad / Plan de este pago" ya no es la lista fija PLANES_DISPONIBLES:
+// sale de `disciplines` (is_active=true). Una disciplina nueva ("Yoga
+// Terapéutico", creada acá vía fixture -- el alta real ya la cubre
+// disciplinas-horarios.spec.js) tiene que aparecer sola en el modal, y si es
+// "por vencimiento" con días configurados, tildarla sugiere la fecha de
+// vencimiento automáticamente sin que el admin tenga que calcularla a mano.
+const DISCIPLINA_YOGA = { id: 'disc-yoga', name: 'Yoga Terapéutico', kind: 'membership', default_capacity: 45, is_active: true }
+
+const SOCIO_CROSSFIT_SIN_YOGA = {
+  id: 'e2e-socio-crossfit-yoga',
+  nombre: 'Nadia',
+  apellido: 'Solari',
+  dni: '25666777',
+  email: 'nadia@e2e.test',
+  telefono: '2610000004',
+  plan: ['CrossFit'],
+  estado: 'Activo',
+  fecha_vencimiento: null,
+  dia_corte: null,
+  created_at: '2025-05-01T00:00:00.000Z',
+  ultimo_pago: '2026-07-01',
+  creditos: 0,
+  activo: true,
+}
+
+test('Registrar Pago: una disciplina nueva (por vencimiento, con días configurados) aparece en la lista y sugiere el vencimiento sola', async ({
+  page,
+}) => {
+  const tables = {
+    ...tablasBase(),
+    disciplines: [...tablasBase().disciplines, DISCIPLINA_YOGA],
+    socios: [SOCIO_CROSSFIT_SIN_YOGA],
+  }
+
+  let huboAlerta = false
+  page.on('dialog', async (dialog) => {
+    huboAlerta = true
+    await dialog.dismiss()
+  })
+
+  await loginComoAdmin(page, { tables })
+
+  await irASocios(page)
+  await expect(page.getByRole('table').getByText('Nadia Solari')).toBeVisible()
+  await page.locator('[title="Registrar Pago / Renovar Cuota"]:visible').click()
+  await expect(page.getByText('Registrar Pago / Renovar Cuota')).toBeVisible()
+
+  // Nadia solo tiene CrossFit (créditos) -- todavía no aparecen los
+  // datepickers de vencimiento.
+  await expect(page.getByLabel('Fecha de inicio')).toHaveCount(0)
+
+  // La disciplina nueva figura en la lista de actividades -- sin tocar
+  // código, sale de `disciplines`.
+  await expect(page.getByText('Yoga Terapéutico', { exact: true })).toBeVisible()
+
+  const hoy = isoUTC(new Date())
+  const vencimientoEsperado = sumarDiasUTC(hoy, 45)
+
+  await page.getByText('Yoga Terapéutico', { exact: true }).click()
+
+  // Al tildarla, aparecen los datepickers Y la fecha de vencimiento sugerida
+  // ya viene calculada (hoy + 45 días, sin que el admin tenga que tocar nada).
+  await expect(page.getByLabel('Fecha de inicio')).toHaveValue(hoy)
+  await expect(page.getByLabel('Fecha de vencimiento')).toHaveValue(vencimientoEsperado)
+
+  // CrossFit sigue tildado (créditos) -- hace falta cargar algo para pasar
+  // la validación local.
+  await page.getByRole('button', { name: '+8' }).last().click()
+
+  await page.getByRole('button', { name: 'Confirmar' }).click()
+
+  await expect(page.getByText('Pago registrado correctamente')).toBeVisible({ timeout: 10_000 })
+  expect(huboAlerta).toBe(false)
+
+  // Impactó de verdad en la ficha del socio.
+  expect(tables.socios[0].fecha_vencimiento).toBe(vencimientoEsperado)
+  expect(tables.socios[0].plan).toContain('Yoga Terapéutico')
+  expect(tables.socios[0].plan).toContain('CrossFit')
+})

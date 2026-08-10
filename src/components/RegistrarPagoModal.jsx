@@ -1,14 +1,7 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { CreditCard, RefreshCw, X } from 'lucide-react'
-import {
-  esPlanDeCreditos,
-  formatearPlanes,
-  normalizarPlanes,
-  planesDeCreditos,
-  PLANES_DISPONIBLES,
-  tienePlanDeVencimiento,
-} from '../utils/planes'
-import { formatFecha, hoyISO, proximoVencimiento, toISODate } from '../utils/fecha'
+import { esPlanDeCreditos, formatearPlanes, normalizarPlanes, PLANES_DISPONIBLES } from '../utils/planes'
+import { formatFecha, hoyISO, proximoVencimiento, sumarDias, toISODate } from '../utils/fecha'
 
 const PACKS_RENOVACION = [4, 8, 12, 20]
 
@@ -23,18 +16,48 @@ function iniciales(nombre, apellido) {
   return `${(nombre ?? '?').charAt(0)}${(apellido ?? '').charAt(0)}`.toUpperCase()
 }
 
-function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
+// `disciplinasActivas` viene de `disciplines` (is_active = true, ver
+// Socios.jsx) -- catálogo REAL en vez de la lista fija PLANES_DISPONIBLES
+// de utils/planes.js. Cualquier disciplina nueva que Seba cargue desde
+// Disciplinas.jsx aparece acá sola, sin deploy. Se arranca igual de la
+// lista legacy (backward-compatible con "Pase Libre", que no tiene fila
+// propia en `disciplines`) y se le suman las que falten.
+function armarPlanesParaElegir(disciplinasActivas) {
+  const nombres = new Set(PLANES_DISPONIBLES)
+  for (const d of disciplinasActivas) {
+    if (d.name) nombres.add(d.name)
+  }
+  return Array.from(nombres)
+}
+
+function RegistrarPagoModal({ socio, disciplinasActivas = [], onClose, onConfirmar }) {
   const [planes, setPlanes] = useState(() => normalizarPlanes(socio.plan))
   const [error, setError] = useState(null)
-  const tieneCredito = esPlanDeCreditos(planes)
-  const tieneVencimiento = tienePlanDeVencimiento(planes)
-  const planesCredito = planesDeCreditos(planes)
+
+  const disciplinaPorNombre = useMemo(
+    () => new Map(disciplinasActivas.map((d) => [(d.name ?? '').trim().toLowerCase(), d])),
+    [disciplinasActivas],
+  )
+  const planesParaElegir = useMemo(() => armarPlanesParaElegir(disciplinasActivas), [disciplinasActivas])
+  // `disciplines.kind` (catálogo real) manda sobre la heurística legacy de
+  // utils/planes.js cuando la disciplina existe ahí -- más preciso para
+  // cualquier disciplina nueva que esa lista hardcodeada todavía no conoce.
+  // "Pase Libre" (sin fila propia en `disciplines`) sigue cayendo al
+  // fallback de siempre.
+  const esCredito = (plan) => {
+    const disciplina = disciplinaPorNombre.get(plan.trim().toLowerCase())
+    return disciplina ? disciplina.kind === 'credits' : esPlanDeCreditos([plan])
+  }
+
+  const tieneCredito = planes.some(esCredito)
+  const tieneVencimiento = planes.some((p) => !esCredito(p))
+  const planesCredito = planes.filter(esCredito)
   // Una cantidad de créditos por cada actividad de créditos que tenga el
   // socio (ej: CrossFit y Boxeo por separado) -- así una renovación
   // multi-disciplina se carga en un solo envío en vez de repetir la acción
   // una vez por actividad.
   const [cantidades, setCantidades] = useState(() =>
-    Object.fromEntries(planesDeCreditos(normalizarPlanes(socio.plan)).map((p) => [p, ''])),
+    Object.fromEntries(normalizarPlanes(socio.plan).filter(esCredito).map((p) => [p, ''])),
   )
   // Monto/Método de pago: quedan en el historial de pagos (pagos_socio) --
   // ninguno es obligatorio, Seba puede seguir registrando un pago sin
@@ -57,10 +80,22 @@ function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
 
   const handleTogglePlan = (plan) => {
     setError(null)
-    setPlanes((prev) => {
-      const siguiente = prev.includes(plan) ? prev.filter((p) => p !== plan) : [...prev, plan]
-      return siguiente
-    })
+    const activando = !planes.includes(plan)
+    setPlanes(activando ? [...planes, plan] : planes.filter((p) => p !== plan))
+
+    // Al tildar una disciplina "por vencimiento" que tiene días de vigencia
+    // configurados (default_capacity reutilizado como "días" para kind=
+    // membership, ver DisciplinaModal.jsx), sugiere la fecha de vencimiento
+    // sola -- el admin la puede seguir editando a mano después, esto solo
+    // cambia el valor SUGERIDO por defecto, nunca se la pisa si ya la había
+    // tocado a propósito y después destilda/vuelve a tildar otra cosa.
+    if (activando) {
+      const disciplina = disciplinaPorNombre.get(plan.trim().toLowerCase())
+      const dias = Number(disciplina?.default_capacity)
+      if (disciplina?.kind === 'membership' && Number.isFinite(dias) && dias > 0) {
+        setFechaVencimiento(toISODate(sumarDias(fechaInicio, dias)))
+      }
+    }
   }
 
   const handleChangeCantidad = (disciplina) => (event) => {
@@ -77,7 +112,8 @@ function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
       setError('Elegí al menos una actividad/plan.')
       return
     }
-    const creditosPorDisciplina = planesDeCreditos(planes)
+    const creditosPorDisciplina = planes
+      .filter(esCredito)
       .map((disciplina) => ({ disciplina, cantidad: Number(cantidades[disciplina]) || 0 }))
       .filter((item) => item.cantidad > 0)
 
@@ -153,7 +189,7 @@ function RegistrarPagoModal({ socio, onClose, onConfirmar }) {
         <div className="mb-5 flex flex-col gap-2">
           <span className="text-xs font-medium text-gray-400">Actividad / Plan de este pago</span>
           <div className="flex flex-wrap gap-2">
-            {PLANES_DISPONIBLES.map((plan) => (
+            {planesParaElegir.map((plan) => (
               <label
                 key={plan}
                 className={`flex min-h-[44px] cursor-pointer items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${

@@ -134,12 +134,26 @@ function DisciplinaModal({ disciplina, onClose, onSaved }) {
       : await supabase.from('disciplines').insert(payload).select()
 
     if (resultado.error || !resultado.data || resultado.data.length === 0) {
-      console.error(
-        `Error al ${esEdicion ? 'actualizar' : 'crear'} la disciplina en Supabase:`,
-        resultado.error?.message ?? 'no se guardó ninguna fila (revisá las políticas RLS)',
-      )
+      // Loguea el objeto de error completo (no solo .message) para poder
+      // diagnosticar la causa real en producción -- y el mensaje en pantalla
+      // ya no es el genérico "Intentá nuevamente" sin más: muestra el motivo
+      // exacto que devuelve Supabase (constraint real, RLS, columna
+      // inexistente, etc.), o la explicación de "0 filas" cuando no hay
+      // `error` (típico de un UPDATE bloqueado por RLS).
+      const motivo = resultado.error
+        ? {
+            message: resultado.error.message,
+            details: resultado.error.details,
+            hint: resultado.error.hint,
+            code: resultado.error.code,
+          }
+        : 'no se guardó ninguna fila (revisá las políticas RLS)'
+      console.error(`ERROR ${esEdicion ? 'ACTUALIZAR' : 'CREAR'} DISCIPLINA SUPABASE:`, motivo)
       setGuardando(false)
-      setError(`No se pudo ${esEdicion ? 'actualizar' : 'crear'} la disciplina. Intentá nuevamente.`)
+      setError(
+        `No se pudo ${esEdicion ? 'actualizar' : 'crear'} la disciplina: ` +
+          (resultado.error?.message || (typeof motivo === 'string' ? motivo : null) || 'Error desconocido'),
+      )
       return
     }
 
@@ -242,17 +256,23 @@ function DisciplinaModal({ disciplina, onClose, onSaved }) {
 
           <div className="flex flex-col gap-1.5">
             <label htmlFor="cupoDisciplina" className="text-xs font-medium text-gray-400">
-              Cupo predeterminado
+              {form.kind === 'membership' ? 'Días de vigencia (sugerido en Registrar Pago)' : 'Cupo predeterminado'}
             </label>
             <input
               id="cupoDisciplina"
               type="number"
               min="1"
-              placeholder="Ej: 20"
+              placeholder={form.kind === 'membership' ? 'Ej: 30' : 'Ej: 20'}
               value={form.default_capacity}
               onChange={(e) => updateField('default_capacity', e.target.value)}
               className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
             />
+            {form.kind === 'membership' && (
+              <p className="text-xs text-gray-500">
+                Opcional -- si lo cargás (ej. 30), "Registrar Pago" va a sugerir la fecha de vencimiento sola al
+                tildar esta disciplina. Dejalo vacío si preferís cargar la fecha a mano cada vez.
+              </p>
+            )}
           </div>
 
           <div className="flex flex-col gap-1.5 sm:col-span-2">

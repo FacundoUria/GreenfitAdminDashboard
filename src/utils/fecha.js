@@ -24,6 +24,18 @@ export function esDelMesActual(valor) {
   return fecha.getMonth() === hoy.getMonth() && fecha.getFullYear() === hoy.getFullYear()
 }
 
+// Suma `dias` días de calendario a `fechaBase` (string YYYY-MM-DD o Date).
+// Usado para sugerir un vencimiento a partir de los "días de vigencia" de
+// una disciplina por vencimiento (ver RegistrarPagoModal.jsx) -- a
+// diferencia de `proximoVencimiento`, esto no ancla a un día de mes fijo,
+// simplemente cuenta N días desde la fecha de inicio elegida.
+export function sumarDias(fechaBase, dias) {
+  const base = fechaBase instanceof Date ? fechaBase : new Date(`${fechaBase}T00:00:00`)
+  const resultado = new Date(base)
+  resultado.setDate(resultado.getDate() + dias)
+  return resultado
+}
+
 export function toISODate(valor) {
   const fecha = valor instanceof Date ? valor : new Date(`${valor}T00:00:00`)
   const anio = fecha.getFullYear()
