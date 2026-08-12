@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Loader2 } from 'lucide-react'
-import { fetchDisciplinasGrupalesAdmin, fetchRankingAdmin } from '../../utils/comunidadAdmin'
+import { AlertTriangle, Loader2, RotateCcw } from 'lucide-react'
+import { fetchDisciplinasGrupalesAdmin, fetchRankingAdmin, resetearRankingAdmin } from '../../utils/comunidadAdmin'
+import { useConfiguracion } from '../../context/useConfiguracion'
+import { formatFecha, hoyISO } from '../../utils/fecha'
 
 function iniciales(nombre) {
   const partes = (nombre ?? '?').trim().split(/\s+/)
@@ -39,16 +41,84 @@ function AvatarRanking({ nombre, avatarUrl, size = 40 }) {
 
 const MEDALLAS = ['🥇', '🥈', '🥉']
 
+// Modal de confirmación ESTRICTO para el reseteo de ranking -- acción
+// destructiva-sensible que afecta a TODOS los socios a la vez (más grave que
+// borrar una sola disciplina/pack, donde el resto del panel usa
+// window.confirm), por eso un modal propio en vez del confirm nativo del
+// navegador: mismo lenguaje visual (overlay + card) que el resto de los
+// modales de esta app, con más superficie para dejar clarísimo lo que va a
+// pasar antes de que el admin pueda confirmar.
+function ResetearRankingModal({ onClose, onConfirmado }) {
+  const [confirmando, setConfirmando] = useState(false)
+  const [error, setError] = useState(null)
+
+  const handleConfirmar = async () => {
+    setConfirmando(true)
+    setError(null)
+    try {
+      const afectados = await resetearRankingAdmin()
+      onConfirmado(afectados)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo resetear el ranking.')
+      setConfirmando(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-md rounded-xl bg-greenfit-card p-6 shadow-xl">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-red-500/15">
+            <AlertTriangle className="h-5 w-5 text-red-400" />
+          </div>
+          <h2 className="text-lg font-semibold text-white">Resetear Ranking</h2>
+        </div>
+
+        <p className="text-sm text-gray-300">
+          ¿Estás seguro de que querés reiniciar el ranking? Todos los socios volverán a 0 XP. Esta acción no se
+          puede deshacer.
+        </p>
+
+        {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
+
+        <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={confirmando}
+            className="flex min-h-[44px] items-center justify-center rounded-lg border border-white/10 px-4 text-sm font-medium text-gray-300 transition-colors hover:bg-white/5 hover:text-white disabled:opacity-60"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={handleConfirmar}
+            disabled={confirmando}
+            className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-red-500 px-4 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+          >
+            {confirmando && <Loader2 className="h-4 w-4 animate-spin" />}
+            {confirmando ? 'Reseteando...' : 'Sí, resetear a 0 XP'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // Ranking/leaderboard general de XP -- misma jerarquía visual que la PWA
 // (podio de los primeros 3 + lista para el resto), con el mismo filtro por
-// disciplina grupal. Solo lectura: acá no hay "tocar una fila para chatear"
-// (eso es exclusivo de la PWA, y el Admin no tiene mensajería 1 a 1).
+// disciplina grupal. Solo lectura salvo el reseteo: acá no hay "tocar una
+// fila para chatear" (eso es exclusivo de la PWA, y el Admin no tiene
+// mensajería 1 a 1).
 function RankingAdmin() {
+  const { configuracion } = useConfiguracion()
   const [ranking, setRanking] = useState([])
   const [disciplinas, setDisciplinas] = useState([])
   const [disciplinaId, setDisciplinaId] = useState(null)
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState(null)
+  const [mostrarModalReset, setMostrarModalReset] = useState(false)
+  const [avisoReset, setAvisoReset] = useState(null)
 
   useEffect(() => {
     let activo = true
@@ -86,6 +156,20 @@ function RankingAdmin() {
     }
   }
 
+  // El RPC ya dejó a todos en 0 XP -- se refresca la vista actual (respeta el
+  // filtro de disciplina que el admin tenía puesto) en vez de solo vaciar el
+  // estado a mano, para que quede reflejado tal cual lo va a ver la próxima
+  // vez que entre a esta pantalla.
+  const handleResetConfirmado = async (afectados) => {
+    setMostrarModalReset(false)
+    setAvisoReset(
+      afectados > 0
+        ? `Listo: se reseteó el ranking, ${afectados} socio${afectados === 1 ? '' : 's'} volvieron a 0 XP.`
+        : 'Listo: el ranking ya estaba en 0 XP para todos, no había nada para resetear.'
+    )
+    await handleFiltrar(disciplinaId)
+  }
+
   if (error) {
     return (
       <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-6 text-center text-sm text-red-400">
@@ -96,9 +180,39 @@ function RankingAdmin() {
 
   const podio = ranking.slice(0, 3)
   const resto = ranking.slice(3)
+  const proximoReseteo = configuracion?.proximo_reseteo_ranking ?? null
+  const reseteoVencido = Boolean(proximoReseteo && proximoReseteo <= hoyISO())
 
   return (
     <div className="flex flex-col gap-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-white">Ranking de Comunidad</h2>
+          {proximoReseteo && (
+            <p className={`mt-1 text-xs ${reseteoVencido ? 'font-medium text-amber-400' : 'text-gray-400'}`}>
+              ⏰ Reseteo programado para el {formatFecha(proximoReseteo)}
+              {reseteoVencido
+                ? ' -- ya llegó la fecha. No se hace solo: tocá "Resetear Ranking".'
+                : ' (recordatorio visual, hay que tocar "Resetear Ranking" ese día).'}
+            </p>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => setMostrarModalReset(true)}
+          className="flex min-h-[40px] shrink-0 items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 text-xs font-semibold text-red-400 transition-colors hover:bg-red-500/20"
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+          Resetear Ranking
+        </button>
+      </div>
+
+      {avisoReset && (
+        <div className="rounded-lg border border-greenfit-primary/30 bg-greenfit-primary/10 px-4 py-2.5 text-sm text-greenfit-primary">
+          {avisoReset}
+        </div>
+      )}
+
       {disciplinas.length > 0 && (
         <div className="flex flex-wrap gap-2">
           <button
@@ -170,6 +284,10 @@ function RankingAdmin() {
             ))}
           </ul>
         </>
+      )}
+
+      {mostrarModalReset && (
+        <ResetearRankingModal onClose={() => setMostrarModalReset(false)} onConfirmado={handleResetConfirmado} />
       )}
     </div>
   )

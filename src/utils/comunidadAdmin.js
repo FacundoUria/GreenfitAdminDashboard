@@ -129,3 +129,20 @@ export async function fetchRankingAdmin(disciplineId = null) {
     xp: r.total_xp,
   }))
 }
+
+// Resetea el Ranking de Comunidad a 0 XP para TODOS los socios -- NO borra
+// `xp_events` (auditoría completa): por cada socio con XP positivo, el RPC
+// inserta una fila de compensación NEGATIVA que neutraliza su suma actual
+// (mismo criterio que "revertir" un evento puntual desde la Actividad
+// Reciente, ver supabase_migration_resetear_ranking.sql). Devuelve la
+// cantidad de socios afectados, para poder confirmarlo en el toast.
+export async function resetearRankingAdmin() {
+  const { data, error } = await supabase.rpc('admin_resetear_ranking')
+  if (error) {
+    if (esErrorDeRelacionFaltante(error)) {
+      throw new Error('Todavía no se corrió la migración de reseteo de ranking (supabase_migration_resetear_ranking.sql).')
+    }
+    throw new Error(error.message)
+  }
+  return data ?? 0
+}

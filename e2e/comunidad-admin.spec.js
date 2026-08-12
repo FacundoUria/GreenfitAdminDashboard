@@ -131,3 +131,95 @@ test('el Ranking muestra podio + lista y el filtro por disciplina funciona', asy
   await expect(page.getByText('700 XP', { exact: true })).toBeVisible()
   await expect(page.getByText('Diego Fernández')).toHaveCount(0)
 })
+
+// Reseteo de Ranking: acción exclusiva del Admin, destructiva para TODOS los
+// socios a la vez -- por eso el checklist pide un modal de confirmación
+// ESTRICTO (texto exacto) antes de tocar nada, y que "Cancelar" no dispare
+// el RPC bajo ningún punto.
+test('el botón "Resetear Ranking" pide confirmación estricta -- cancelar no llama al RPC ni cambia nada', async ({
+  page,
+}) => {
+  let llamadasReset = 0
+  await loginComoAdmin(page, {
+    tables: { ...tablasBase(), disciplines: [DISC_CROSSFIT, DISC_BOXEO] },
+    rpc: {
+      community_ranking_xp: mockRankingXp,
+      admin_resetear_ranking: () => {
+        llamadasReset += 1
+        return RANKING_GLOBAL.length
+      },
+    },
+  })
+
+  await irAComunidad(page)
+  await page.getByRole('button', { name: 'Ranking', exact: true }).click()
+  await expect(page.getByText('Diego Fernández', { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Resetear Ranking', exact: true }).click()
+  await expect(
+    page.getByText(
+      '¿Estás seguro de que querés reiniciar el ranking? Todos los socios volverán a 0 XP. Esta acción no se puede deshacer.',
+    ),
+  ).toBeVisible()
+
+  await page.getByRole('button', { name: 'Cancelar', exact: true }).click()
+  expect(llamadasReset).toBe(0)
+  // El modal se cerró y el ranking sigue intacto -- nada se tocó.
+  await expect(page.getByText('¿Estás seguro de que querés reiniciar el ranking?', { exact: false })).toHaveCount(0)
+  await expect(page.getByText('Diego Fernández', { exact: true })).toBeVisible()
+  await expect(page.getByText('2300 XP', { exact: true })).toBeVisible()
+})
+
+test('confirmar el reseteo llama a admin_resetear_ranking, avisa cuántos socios volvieron a 0 XP y refresca el ranking', async ({
+  page,
+}) => {
+  let reseteado = false
+  await loginComoAdmin(page, {
+    tables: { ...tablasBase(), disciplines: [DISC_CROSSFIT, DISC_BOXEO] },
+    rpc: {
+      // Estafeta simple en memoria: antes del reseteo, el RPC de ranking
+      // devuelve el global de siempre; apenas se confirma el reseteo, el
+      // próximo fetch (el refresh automático post-reseteo) ya da vacío --
+      // mismo comportamiento que produciría el RPC real de Supabase, que
+      // insertó eventos de reversión que neutralizan la suma de cada socio.
+      community_ranking_xp: () => (reseteado ? [] : RANKING_GLOBAL),
+      admin_resetear_ranking: () => {
+        reseteado = true
+        return RANKING_GLOBAL.length
+      },
+    },
+  })
+
+  await irAComunidad(page)
+  await page.getByRole('button', { name: 'Ranking', exact: true }).click()
+  await expect(page.getByText('Diego Fernández', { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Resetear Ranking', exact: true }).click()
+  await page.getByRole('button', { name: 'Sí, resetear a 0 XP', exact: true }).click()
+
+  await expect(page.getByText(`${RANKING_GLOBAL.length} socios volvieron a 0 XP`, { exact: false })).toBeVisible()
+  // El modal se cierra solo y la lista queda reflejando el reseteo real.
+  await expect(page.getByText('¿Estás seguro de que querés reiniciar el ranking?', { exact: false })).toHaveCount(0)
+  await expect(page.getByText('Diego Fernández')).toHaveCount(0)
+  await expect(page.getByText('Todavía no hay XP registrado.')).toBeVisible()
+})
+
+test('el recordatorio visual de reseteo programado aparece en Ranking cuando hay una fecha guardada en Configuración', async ({
+  page,
+}) => {
+  await loginComoAdmin(page, {
+    tables: {
+      ...tablasBase(),
+      configuracion: [{ ...tablasBase().configuracion[0], proximo_reseteo_ranking: '2020-01-01' }],
+    },
+    rpc: { community_ranking_xp: () => [] },
+  })
+
+  await irAComunidad(page)
+  await page.getByRole('button', { name: 'Ranking', exact: true }).click()
+
+  // Es solo un aviso visual (no dispara nada solo) -- una fecha ya pasada
+  // avisa que hay que tocar el botón manual, sin resetear nada por sí sola.
+  await expect(page.getByText('Reseteo programado para el', { exact: false })).toBeVisible()
+  await expect(page.getByText('ya llegó la fecha', { exact: false })).toBeVisible()
+})

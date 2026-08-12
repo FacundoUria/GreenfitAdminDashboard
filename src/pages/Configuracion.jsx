@@ -24,6 +24,10 @@ function mapConfigToForm(config) {
     alertaAppMensaje: config.alerta_app_mensaje ?? '',
     whatsappNumero: config.whatsapp_numero ?? '',
     instagramUsuario: config.instagram_usuario ?? '',
+    // Solo un recordatorio visual (ver RankingAdmin.jsx) -- no dispara
+    // ningún reseteo automático por sí sola, el botón manual sigue siendo
+    // la única forma real de resetear.
+    proximoReseteoRanking: config.proximo_reseteo_ranking ?? '',
   }
 }
 
@@ -122,6 +126,7 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
       alerta_app_mensaje: form.alertaAppMensaje.trim(),
       whatsapp_numero: form.whatsappNumero.trim(),
       instagram_usuario: form.instagramUsuario.trim(),
+      proximo_reseteo_ranking: form.proximoReseteoRanking || null,
     }
 
     // Resiliencia -- mismo patrón que el fallback de `fecha_inicio_cuota` en
@@ -336,6 +341,23 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
             onChange={(value) => updateField('instagramUsuario', value)}
             placeholder="Ej: green_fitargentina"
           />
+        </ConfigCard>
+
+        <ConfigCard title="🏆 Ranking de Comunidad">
+          <p className="-mt-2 text-xs text-gray-500">
+            El botón real para resetear el ranking está en Comunidad → Ranking. Esto es solo un recordatorio
+            visual (no dispara nada solo): guardá una fecha y va a aparecer como aviso ahí hasta que resetees
+            a mano.
+          </p>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-gray-400">Próximo reseteo programado (opcional)</label>
+            <input
+              type="date"
+              value={form.proximoReseteoRanking}
+              onChange={(event) => updateField('proximoReseteoRanking', event.target.value)}
+              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2 text-sm text-white outline-none focus:border-greenfit-primary"
+            />
+          </div>
         </ConfigCard>
 
         <PlanesPacksCard />
