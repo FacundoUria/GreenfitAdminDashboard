@@ -73,3 +73,72 @@ describe('RegistrarPagoModal -- fechas de inicio/vencimiento personalizables', (
     expect(onConfirmar).not.toHaveBeenCalled()
   })
 })
+
+describe('RegistrarPagoModal -- sugerencia inteligente de fechas (EXCLUSIVA de este modal)', () => {
+  function sumarDiasStr(iso, dias) {
+    const fecha = new Date(`${iso}T00:00:00`)
+    fecha.setDate(fecha.getDate() + dias)
+    const anio = fecha.getFullYear()
+    const mes = String(fecha.getMonth() + 1).padStart(2, '0')
+    const dia = String(fecha.getDate()).padStart(2, '0')
+    return `${anio}-${mes}-${dia}`
+  }
+
+  // Caso 1: socio VENCIDO -- la fecha de inicio sugerida tiene que ser HOY
+  // (no la fecha de vencimiento vieja, ya pasada), y el vencimiento sugerido
+  // HOY + 1 mes.
+  it('socio vencido: sugiere fecha de inicio = HOY (no la fecha vencida vieja) y vencimiento = HOY + 1 mes', () => {
+    const hoy = new Date().toISOString().slice(0, 10)
+    const socioVencido = {
+      id: 's3',
+      nombre: 'Bruno',
+      apellido: 'Álvarez',
+      dni: '30444555',
+      plan: ['Pase Libre'],
+      fechaVencimiento: sumarDiasStr(hoy, -10), // venció hace 10 días
+      diaCorte: 5, // día de corte del ciclo VIEJO -- no debe usarse acá
+      creditos: 0,
+    }
+
+    render(<RegistrarPagoModal socio={socioVencido} onClose={vi.fn()} onConfirmar={vi.fn()} />)
+
+    expect(screen.getByLabelText('Fecha de inicio')).toHaveValue(hoy)
+
+    // `T00:00:00` explícito -- un ISO date-only ("YYYY-MM-DD") sin hora se
+    // parsea como medianoche UTC, no local; en husos detrás de UTC (ej.
+    // Argentina) eso corre la fecha un día para atrás antes de sumar el mes.
+    const vencimientoEsperado = new Date(`${hoy}T00:00:00`)
+    vencimientoEsperado.setMonth(vencimientoEsperado.getMonth() + 1)
+    const vencimientoEsperadoIso = toISODateLocal(vencimientoEsperado)
+    expect(screen.getByLabelText('Fecha de vencimiento')).toHaveValue(vencimientoEsperadoIso)
+  })
+
+  // Caso 2: socio ACTIVO (vencimiento futuro) -- se mantiene la sugerencia
+  // de siempre, anclada al vencimiento vigente (no a hoy).
+  it('socio activo (vencimiento futuro): mantiene la sugerencia original -- inicio = vencimiento actual', () => {
+    const hoy = new Date().toISOString().slice(0, 10)
+    const vencimientoFuturo = sumarDiasStr(hoy, 15)
+    const socioActivo = {
+      id: 's4',
+      nombre: 'Carla',
+      apellido: 'Núñez',
+      dni: '30555666',
+      plan: ['Pase Libre'],
+      fechaVencimiento: vencimientoFuturo,
+      diaCorte: new Date(`${vencimientoFuturo}T00:00:00`).getDate(),
+      creditos: 0,
+    }
+
+    render(<RegistrarPagoModal socio={socioActivo} onClose={vi.fn()} onConfirmar={vi.fn()} />)
+
+    expect(screen.getByLabelText('Fecha de inicio')).toHaveValue(vencimientoFuturo)
+    expect(screen.getByLabelText('Fecha de vencimiento').value > vencimientoFuturo).toBe(true)
+  })
+})
+
+function toISODateLocal(fecha) {
+  const anio = fecha.getFullYear()
+  const mes = String(fecha.getMonth() + 1).padStart(2, '0')
+  const dia = String(fecha.getDate()).padStart(2, '0')
+  return `${anio}-${mes}-${dia}`
+}

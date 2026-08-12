@@ -121,11 +121,19 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
 
     // Un UPDATE bloqueado por RLS puede volver sin `error` pero sin filas afectadas.
     if (updateError || !data || data.length === 0) {
-      console.error(
-        'Error al guardar la configuración en Supabase:',
-        updateError?.message ?? 'no se guardó ninguna fila (revisá las políticas RLS)',
+      // Loguea el objeto completo (message/details/hint/code, no solo
+      // .message) y muestra el motivo REAL en pantalla -- antes acá siempre
+      // salía el genérico "No se pudo guardar la configuración", sin
+      // ninguna pista de si era un constraint real, un tipo de dato mal
+      // mandado o un bloqueo de RLS (típico: 0 filas afectadas sin `error`).
+      const motivo = updateError
+        ? { message: updateError.message, details: updateError.details, hint: updateError.hint, code: updateError.code }
+        : 'no se actualizó ninguna fila (revisá las políticas RLS)'
+      console.error('ERROR GUARDAR CONFIGURACIÓN SUPABASE:', motivo)
+      setError(
+        'No se pudo guardar la configuración: ' +
+          (updateError?.message || (typeof motivo === 'string' ? motivo : null) || 'Error desconocido'),
       )
-      setError('No se pudo guardar la configuración. Intentá nuevamente.')
       setGuardando(false)
       return
     }
