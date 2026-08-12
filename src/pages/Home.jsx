@@ -58,9 +58,12 @@ function Home() {
 
     const [sociosResult, clasesResult, bookingsResult] = await Promise.all([
       supabase.from('socios').select('*'),
+      // disciplines(show_in_agenda) -- mismo criterio que Clases.jsx: excluye
+      // horarios meramente informativos (ej. Aparatos/Pase Libre, sin cupo
+      // que reservar) de este widget de "Próximas Clases de Hoy".
       supabase
         .from('classes')
-        .select('*')
+        .select('*, disciplines(show_in_agenda)')
         .contains('days_of_week', [diaHoy])
         .order('start_time', { ascending: true }),
       supabase.from('bookings').select('id, user_id, class_id, attended, profiles(full_name, dni)').eq('booking_date', fechaHoy),
@@ -80,8 +83,13 @@ function Home() {
       console.error('Error al cargar inscriptos en Home:', bookingsResult.error.message)
     }
 
+    const clasesReservables = (clasesResult.data ?? []).filter((row) => {
+      const disciplina = Array.isArray(row.disciplines) ? row.disciplines[0] : row.disciplines
+      return disciplina?.show_in_agenda !== false
+    })
+
     setSocios(sociosResult.data ?? [])
-    setClasesHoy(mapearClasesDesdeBookings(clasesResult.data ?? [], bookingsResult.data ?? []))
+    setClasesHoy(mapearClasesDesdeBookings(clasesReservables, bookingsResult.data ?? []))
     setLoading(false)
   }
 

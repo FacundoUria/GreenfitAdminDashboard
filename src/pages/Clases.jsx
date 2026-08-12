@@ -28,7 +28,19 @@ function Clases() {
   const esHoy = fechaSeleccionadaStr === formatDateOnly(new Date())
 
   const fetchClasesBase = useCallback(async () => {
-    const { data, error: fetchError } = await supabase.from('classes').select('*').order('start_time', { ascending: true })
+    // Embed de `disciplines(show_in_agenda)` -- mismo flag que ya usa
+    // loadClassesForDate() en la PWA (greenfit-app/src/lib/classesApi.ts)
+    // para decidir qué es "una clase para reservar" y qué es horario
+    // meramente informativo (ej. Aparatos/Pase Libre: acceso libre, sin
+    // cupo que reservar). Antes acá se listaba TODO lo que hubiera en
+    // `classes` sin este filtro -- una franja real cargada para Aparatos
+    // (para que la landing/Disciplinas.jsx muestren su horario) aparecía
+    // también acá como si fuera una clase reservable más, generando ruido
+    // y contradiciendo lo que el socio ve en su propia Agenda.
+    const { data, error: fetchError } = await supabase
+      .from('classes')
+      .select('*, disciplines(show_in_agenda)')
+      .order('start_time', { ascending: true })
     if (fetchError) {
       console.error('Error al cargar clases desde Supabase:', fetchError.message)
       setError('No se pudieron cargar las clases. Verificá la conexión con Supabase.')
@@ -36,7 +48,11 @@ function Clases() {
       return
     }
     setError(null)
-    setClasesBase(data ?? [])
+    const reservables = (data ?? []).filter((row) => {
+      const disciplina = Array.isArray(row.disciplines) ? row.disciplines[0] : row.disciplines
+      return disciplina?.show_in_agenda !== false
+    })
+    setClasesBase(reservables)
   }, [])
 
   // Los inscriptos son por ocurrencia puntual (class_id + booking_date), así

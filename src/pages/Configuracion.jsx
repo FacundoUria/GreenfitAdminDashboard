@@ -82,11 +82,20 @@ function Toast({ message }) {
   )
 }
 
+// Postgrest devuelve este mensaje EXACTO cuando una columna que se intenta
+// escribir todavía no existe en su cache de schema (migración pendiente sin
+// correr) -- mismo patrón ya usado para `fecha_inicio_cuota` en Socios.jsx.
+function extraerColumnaFaltante(error) {
+  const match = error?.message?.match(/Could not find the '([^']+)' column/)
+  return match ? match[1] : null
+}
+
 function ConfiguracionForm({ configuracionInicial, onGuardado }) {
   const [form, setForm] = useState(() => mapConfigToForm(configuracionInicial))
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState(null)
   const [toastVisible, setToastVisible] = useState(false)
+  const [toastMessage, setToastMessage] = useState('Cambios guardados correctamente')
 
   const updateField = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }))
@@ -96,28 +105,53 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
     setGuardando(true)
     setError(null)
 
-    const { data, error: updateError } = await supabase
-      .from('configuracion')
-      .update({
-        dias_tolerancia: Number(form.diasTolerancia) || 0,
-        limite_cancelacion_minutos: Number(form.limiteCancelacionMinutos) || 0,
-        alias_cvu: form.aliasCvu,
-        titular_cuenta: form.titularCuenta,
-        notif_vencimiento_activo: form.notifVencimientoActivo,
-        notif_vencimiento_dias_antes: Number(form.notifVencimientoDiasAntes) || 0,
-        notif_clase_activo: form.notifClaseActivo,
-        notif_clase_horas_antes: Number(form.notifClaseHorasAntes) || 0,
-        banner_activo: form.bannerActivo,
-        banner_mensaje: form.bannerMensaje.trim(),
-        banner_link_text: form.bannerLinkText.trim() || null,
-        banner_link_url: form.bannerLinkUrl.trim() || null,
-        alerta_app_activa: form.alertaAppActiva,
-        alerta_app_mensaje: form.alertaAppMensaje.trim(),
-        whatsapp_numero: form.whatsappNumero.trim(),
-        instagram_usuario: form.instagramUsuario.trim(),
-      })
-      .eq('id', 1)
-      .select()
+    let payload = {
+      dias_tolerancia: Number(form.diasTolerancia) || 0,
+      limite_cancelacion_minutos: Number(form.limiteCancelacionMinutos) || 0,
+      alias_cvu: form.aliasCvu,
+      titular_cuenta: form.titularCuenta,
+      notif_vencimiento_activo: form.notifVencimientoActivo,
+      notif_vencimiento_dias_antes: Number(form.notifVencimientoDiasAntes) || 0,
+      notif_clase_activo: form.notifClaseActivo,
+      notif_clase_horas_antes: Number(form.notifClaseHorasAntes) || 0,
+      banner_activo: form.bannerActivo,
+      banner_mensaje: form.bannerMensaje.trim(),
+      banner_link_text: form.bannerLinkText.trim() || null,
+      banner_link_url: form.bannerLinkUrl.trim() || null,
+      alerta_app_activa: form.alertaAppActiva,
+      alerta_app_mensaje: form.alertaAppMensaje.trim(),
+      whatsapp_numero: form.whatsappNumero.trim(),
+      instagram_usuario: form.instagramUsuario.trim(),
+    }
+
+    // Resiliencia -- mismo patrón que el fallback de `fecha_inicio_cuota` en
+    // Socios.jsx: Postgrest rechaza el UPDATE ENTERO por UNA sola columna
+    // que no existe todavía (migración pendiente sin correr), no solo esa
+    // columna -- sin esto, ni siquiera datos vitales como titular_cuenta/
+    // alias_cvu se guardaban. Reintenta quitando la columna problemática del
+    // payload, hasta una vez por cada campo (cubre que la misma migración
+    // sin correr deje más de una columna faltante a la vez, ej.
+    // alerta_app_activa Y alerta_app_mensaje del mismo script).
+    const columnasOmitidas = []
+    let data
+    let updateError
+    const maxIntentos = Object.keys(payload).length + 1
+    for (let intento = 0; intento < maxIntentos; intento += 1) {
+      ;({ data, error: updateError } = await supabase.from('configuracion').update(payload).eq('id', 1).select())
+
+      const columnaFaltante = extraerColumnaFaltante(updateError)
+      if (columnaFaltante && columnaFaltante in payload) {
+        console.warn(
+          `La columna "${columnaFaltante}" no existe todavía en Supabase (correr la migración pendiente). ` +
+            'Reintentando el guardado sin ese campo para no perder el resto de la configuración.',
+        )
+        payload = { ...payload }
+        delete payload[columnaFaltante]
+        columnasOmitidas.push(columnaFaltante)
+        continue
+      }
+      break
+    }
 
     // Un UPDATE bloqueado por RLS puede volver sin `error` pero sin filas afectadas.
     if (updateError || !data || data.length === 0) {
@@ -140,8 +174,13 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
 
     setGuardando(false)
     await onGuardado()
+    setToastMessage(
+      columnasOmitidas.length > 0
+        ? `Datos guardados, pero se omitieron campos por una migración pendiente (${columnasOmitidas.join(', ')}). Revisá la consola.`
+        : 'Cambios guardados correctamente',
+    )
     setToastVisible(true)
-    setTimeout(() => setToastVisible(false), 2500)
+    setTimeout(() => setToastVisible(false), columnasOmitidas.length > 0 ? 5000 : 2500)
   }
 
   return (
@@ -303,7 +342,7 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
         <DiasCerradosCard />
       </div>
 
-      {toastVisible && <Toast message="Cambios guardados correctamente" />}
+      {toastVisible && <Toast message={toastMessage} />}
     </div>
   )
 }
