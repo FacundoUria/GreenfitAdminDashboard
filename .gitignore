@@ -21,6 +21,12 @@ playwright/.cache/
 # Credenciales guardadas a mano localmente -- nunca deben terminar en el repo
 credenciales*.txt
 
+# Export de Crossfy (PII real de socios: nombres, emails, DNIs) y el script
+# de sincronización generado a partir de él -- nunca deben commitearse.
+listadoDeUsuarios1.csv
+listadoDeUsuarios1.xls
+sincronizacion_crossfy.sql
+
 # Estado local del CLI de Supabase (supabase link) -- cache/config de esta
 # máquina, no del proyecto
 supabase/
