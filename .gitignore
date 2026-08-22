@@ -23,8 +23,13 @@ credenciales*.txt
 
 # Export de Crossfy (PII real de socios: nombres, emails, DNIs) y el script
 # de sincronización generado a partir de él -- nunca deben commitearse.
-listadoDeUsuarios1.csv
-listadoDeUsuarios1.xls
+# Patrón amplio (no un nombre exacto): cada exportación nueva llega con un
+# nombre ligeramente distinto (ej. "listadoDeUsuarios1.csv" la primera vez,
+# "listadoDeUsuarios v1.xls" la siguiente) -- un match exacto se queda
+# corto apenas cambia el nombre del archivo.
+listadoDeUsuarios*.csv
+listadoDeUsuarios*.xls
+listadoDeUsuarios*.xlsx
 sincronizacion_crossfy.sql
 
 # Estado local del CLI de Supabase (supabase link) -- cache/config de esta
