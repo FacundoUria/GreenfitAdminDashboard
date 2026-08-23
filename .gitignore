@@ -21,16 +21,21 @@ playwright/.cache/
 # Credenciales guardadas a mano localmente -- nunca deben terminar en el repo
 credenciales*.txt
 
-# Export de Crossfy (PII real de socios: nombres, emails, DNIs) y el script
-# de sincronización generado a partir de él -- nunca deben commitearse.
-# Patrón amplio (no un nombre exacto): cada exportación nueva llega con un
-# nombre ligeramente distinto (ej. "listadoDeUsuarios1.csv" la primera vez,
-# "listadoDeUsuarios v1.xls" la siguiente) -- un match exacto se queda
-# corto apenas cambia el nombre del archivo.
+# Exports de Crossfy (PII real de socios: nombres, emails, DNIs) y los
+# scripts de sincronización generados a partir de ellos -- nunca deben
+# commitearse. Patrones amplios (no nombres exactos): cada exportación
+# nueva llega con un nombre ligeramente distinto (ej. "listadoDeUsuarios1.csv"
+# la primera vez, "listadoDeUsuarios v1.xls" después, "listadoDeUsuariosv2.xls"
+# después de eso) -- un match exacto se queda corto apenas cambia el nombre
+# del archivo. sincronizacion_crossfy*.sql cubre tanto el original como
+# cualquier _v2/_v3/etc. que se genere más adelante.
 listadoDeUsuarios*.csv
 listadoDeUsuarios*.xls
 listadoDeUsuarios*.xlsx
-sincronizacion_crossfy.sql
+usuariosgreenfit*.csv
+usuariosgreenfit*.xls
+usuariosgreenfit*.xlsx
+sincronizacion_crossfy*.sql
 
 # Estado local del CLI de Supabase (supabase link) -- cache/config de esta
 # máquina, no del proyecto
