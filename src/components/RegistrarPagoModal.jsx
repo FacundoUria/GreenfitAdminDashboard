@@ -66,7 +66,15 @@ function RegistrarPagoModal({ socio, disciplinasActivas = [], onClose, onConfirm
   }
 
   const tieneCredito = planes.some(esCredito)
-  const tieneVencimiento = planes.some((p) => !esCredito(p))
+  // Bug reportado: antes solo era `true` si había alguna disciplina de
+  // vencimiento (Aparatos/Pase Libre) seleccionada -- un socio que hace
+  // EXCLUSIVAMENTE CrossFit o Boxeo nunca veía el calendario, sin forma de
+  // asignarle/renovarle una fecha de vencimiento a esos packs. Ahora
+  // aparece con cualquier plan tildado, sea de crédito o no -- las fechas
+  // ya vienen pre-cargadas con una sugerencia por defecto (ver
+  // fechaInicioSugerida más abajo), así que esto no agrega ningún campo
+  // vacío nuevo que llenar a la fuerza.
+  const tieneVencimiento = planes.length > 0
   const planesCredito = planes.filter(esCredito)
   // Una cantidad de créditos por cada actividad de créditos que tenga el
   // socio (ej: CrossFit y Boxeo por separado) -- así una renovación

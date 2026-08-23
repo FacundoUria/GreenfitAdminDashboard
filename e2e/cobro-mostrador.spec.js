@@ -158,7 +158,13 @@ test('Cobro mostrador: acreditar créditos a una disciplina se refleja en la tab
   expect(pago.metodo_pago).toBe('efectivo')
   expect(pago.estado).toBe('pagado')
   expect(pago.origen).toBe('manual')
-  expect(pago.periodo_hasta).toBeNull()
+  // Antes null para un cobro 100% de créditos (el modal ni mostraba el
+  // calendario) -- ahora el vencimiento ya no es exclusivo de Aparatos, así
+  // que este pago también lleva un período real (la fecha sugerida por
+  // defecto, que el admin no tocó). No se fija el valor exacto acá (eso ya
+  // lo cubre el describe de "sugerencia inteligente de fechas" en
+  // RegistrarPagoModal.test.jsx), solo que dejó de ser null.
+  expect(pago.periodo_hasta).not.toBeNull()
   expect(pago.created_by).toBe(ADMIN_DEMO.id)
 
   // Acreditación directa en user_credits -- la fila nueva (ledger append-only,
@@ -374,9 +380,11 @@ test('Registrar Pago: una disciplina nueva (por vencimiento, con días configura
   await page.locator('[title="Registrar Pago / Renovar Cuota"]:visible').click()
   await expect(page.getByText('Registrar Pago / Renovar Cuota')).toBeVisible()
 
-  // Nadia solo tiene CrossFit (créditos) -- todavía no aparecen los
-  // datepickers de vencimiento.
-  await expect(page.getByLabel('Fecha de inicio')).toHaveCount(0)
+  // Nadia solo tiene CrossFit (créditos) -- el calendario de vencimiento
+  // ya no es exclusivo de Aparatos, así que aparece igual (bug corregido:
+  // antes el admin no tenía forma de asignarle un vencimiento a un socio
+  // 100% de créditos).
+  await expect(page.getByLabel('Fecha de inicio')).toBeVisible()
 
   // La disciplina nueva figura en la lista de actividades -- sin tocar
   // código, sale de `disciplines`.

@@ -28,10 +28,34 @@ const SOCIO_CREDITOS = {
 }
 
 describe('RegistrarPagoModal -- fechas de inicio/vencimiento personalizables', () => {
-  it('no muestra los datepickers para un socio de plan de créditos (sin vencimiento)', () => {
+  // Bug real: antes el calendario de vencimiento solo aparecía si el socio
+  // tenía Aparatos/Pase Libre -- un socio EXCLUSIVAMENTE de CrossFit (u
+  // otra disciplina de créditos) no tenía forma de que el Admin le
+  // asigne/renueve un vencimiento. Ahora aparece con cualquier plan
+  // tildado, sea de créditos o no.
+  it('muestra los datepickers también para un socio de plan de créditos puro (CrossFit)', () => {
     render(<RegistrarPagoModal socio={SOCIO_CREDITOS} onClose={vi.fn()} onConfirmar={vi.fn()} />)
-    expect(screen.queryByLabelText('Fecha de inicio')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Fecha de vencimiento')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Fecha de inicio')).toBeInTheDocument()
+    expect(screen.getByLabelText('Fecha de vencimiento')).toBeInTheDocument()
+  })
+
+  it('un cobro de créditos puro manda igual el payload de vencimiento si el admin no lo destildó', async () => {
+    const onConfirmar = vi.fn().mockResolvedValue(undefined)
+    render(<RegistrarPagoModal socio={SOCIO_CREDITOS} onClose={vi.fn()} onConfirmar={onConfirmar} />)
+
+    // Necesita al menos 1 crédito cargado para poder confirmar (regla ya
+    // existente, sin relación con el bug de vencimiento) -- el pack rápido
+    // "+4" carga la cantidad, sin depender de un label accesible que el
+    // input de cantidad no tiene.
+    fireEvent.click(screen.getByRole('button', { name: '+4' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+    expect(onConfirmar).toHaveBeenCalledWith(
+      SOCIO_CREDITOS,
+      expect.objectContaining({
+        vencimiento: expect.objectContaining({ fechaInicio: expect.any(String), fechaVencimiento: expect.any(String) }),
+      }),
+    )
   })
 
   it('precarga fecha de inicio = hoy y vencimiento = +1 mes cuando el socio nunca pagó', () => {

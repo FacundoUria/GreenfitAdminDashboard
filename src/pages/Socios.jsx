@@ -16,7 +16,12 @@ import { esDelMesActual, formatFecha, hoyISO } from '../utils/fecha'
 import { estadoOperativoSocio, getSocioMetrics } from '../utils/socioMetrics'
 import { formatearPlanes, planesDeCreditos, planesDeVencimiento, PLANES_DISPONIBLES } from '../utils/planes'
 import { buscarCoincidenciaPorNombre } from '../utils/coincidenciaSocios'
-import { sincronizarCreditosPwa, sincronizarVencimientoPwa, sincronizarEstadoCuentaPwa } from '../utils/creditosPwa'
+import {
+  sincronizarCreditosPwa,
+  sincronizarVencimientoPwa,
+  sincronizarVencimientoCreditoPwa,
+  sincronizarEstadoCuentaPwa,
+} from '../utils/creditosPwa'
 import { fetchAvataresYNiveles, fetchCreditosPorDisciplina, resolverUserIdPorDni, registrarPago } from '../utils/fichaSocioPwa'
 import SociosTabla from '../components/SociosTabla'
 import NuevoSocioModal from '../components/NuevoSocioModal'
@@ -283,35 +288,62 @@ function Socios() {
   }
 
   const handleAjustarCredito = async (socio, delta, disciplina) => {
-    const nuevoValor = Math.max(0, (socio.creditos ?? 0) + delta)
-
-    const { data, error: updateError } = await supabase
-      .from('socios')
-      .update({ creditos: nuevoValor })
-      .eq('id', socio.id)
-      .select()
-
-    if (updateError || !data || data.length === 0) {
-      console.error(
-        'Error al ajustar créditos en Supabase:',
-        updateError?.message ?? 'no se actualizó ninguna fila (revisá las políticas RLS)',
+    // Bug reportado: un socio importado sin DNI cargado no tenía forma real
+    // de resolverse contra su cuenta PWA (resolverUserId dependía SOLO del
+    // DNI) -- operar sobre "un balance que nunca se inicializó" es lo que
+    // terminaba rompiendo el flujo. Se bloquea acá ANTES de tocar nada, con
+    // el mismo criterio de "avisar y no hacer nada" que el resto del panel,
+    // en vez de dejar que la acción siga a medias.
+    if (!socio.dni || !String(socio.dni).trim()) {
+      window.alert(
+        'No se pueden editar créditos: Este socio no tiene el DNI cargado. Por favor, edite el perfil y agregue el DNI primero.',
       )
-      window.alert('No se pudo actualizar los créditos. Intentá nuevamente.')
       return
     }
 
-    // `disciplina` viene del selector de CreditosCell cuando el socio tiene
-    // más de una actividad de créditos -- con una sola no hace falta elegir.
-    const disciplinaDestino = disciplina ?? planesDeCreditos(socio.plan)[0]
-    if (disciplinaDestino) {
-      const resultado = await sincronizarCreditosPwa({ dni: socio.dni, disciplina: disciplinaDestino, delta })
-      if (!resultado.synced && resultado.reason !== 'sin_cuenta_pwa') {
-        setToastMessage(`Créditos del panel actualizados, pero no se pudo sincronizar ${disciplinaDestino} con la app.`)
-        setTimeout(() => setToastMessage(null), 4000)
-      }
-    }
+    const nuevoValor = Math.max(0, (socio.creditos ?? 0) + delta)
 
-    fetchSocios()
+    try {
+      const { data, error: updateError } = await supabase
+        .from('socios')
+        .update({ creditos: nuevoValor })
+        .eq('id', socio.id)
+        .select()
+
+      if (updateError || !data || data.length === 0) {
+        console.error(
+          'Error al ajustar créditos en Supabase:',
+          updateError?.message ?? 'no se actualizó ninguna fila (revisá las políticas RLS)',
+        )
+        window.alert('No se pudo actualizar los créditos. Intentá nuevamente.')
+        return
+      }
+
+      // `disciplina` viene del selector de CreditosCell cuando el socio tiene
+      // más de una actividad de créditos -- con una sola no hace falta elegir.
+      const disciplinaDestino = disciplina ?? planesDeCreditos(socio.plan)[0]
+      if (disciplinaDestino) {
+        const resultado = await sincronizarCreditosPwa({
+          dni: socio.dni,
+          email: socio.email,
+          disciplina: disciplinaDestino,
+          delta,
+        })
+        if (!resultado.synced && resultado.reason !== 'sin_cuenta_pwa') {
+          setToastMessage(`Créditos del panel actualizados, pero no se pudo sincronizar ${disciplinaDestino} con la app.`)
+          setTimeout(() => setToastMessage(null), 4000)
+        }
+      }
+
+      fetchSocios()
+    } catch (err) {
+      // Robustez: cualquier excepción inesperada (red caída, respuesta
+      // rara de Supabase) se atrapa acá en vez de escalar sin control --
+      // antes esto podía tirar la pantalla entera si algo fallaba a mitad
+      // de camino.
+      console.error('ERROR inesperado ajustando créditos:', err)
+      window.alert('No se pudo actualizar los créditos. Intentá nuevamente.')
+    }
   }
 
   const handleCambiarBaja = async (socio) => {
@@ -334,7 +366,7 @@ function Socios() {
       return
     }
 
-    const resultado = await sincronizarEstadoCuentaPwa({ dni: socio.dni, activo: nuevoActivo })
+    const resultado = await sincronizarEstadoCuentaPwa({ dni: socio.dni, email: socio.email, activo: nuevoActivo })
     let mensaje = nuevoActivo ? 'Socio reactivado' : 'Socio dado de baja'
     if (!resultado.synced && resultado.reason !== 'sin_cuenta_pwa') {
       mensaje += ' (no se pudo sincronizar el acceso en la app -- revisá la consola)'
@@ -445,9 +477,23 @@ function Socios() {
       let mensaje = fechaInicioCuotaSinGuardar
         ? 'Pago registrado, pero la fecha de inicio personalizada no se guardó (falta correr una migración pendiente en Supabase). El resto del cobro se guardó bien.'
         : 'Pago registrado correctamente'
+      // Disciplinas de crédito que ya reciben su propio insert acá abajo --
+      // el loop de vencimiento-de-créditos más adelante las salta a
+      // propósito: si el mismo pago carga créditos Y vencimiento para la
+      // MISMA disciplina, hacerlo en dos inserts separados competía por
+      // cuál quedaba como "la fila más reciente" (ver la nota larga en
+      // sincronizarCreditosPwa) -- un solo insert con los dos datos juntos
+      // (fechaVencimiento pasada acá abajo) lo resuelve de raíz.
+      const disciplinasConCreditosCargados = new Set((payload.creditosPorDisciplina ?? []).map((c) => c.disciplina))
       if (payload.creditosPorDisciplina) {
         for (const { disciplina, cantidad } of payload.creditosPorDisciplina) {
-          const resultado = await sincronizarCreditosPwa({ dni: socio.dni, disciplina, delta: cantidad })
+          const resultado = await sincronizarCreditosPwa({
+            dni: socio.dni,
+            email: socio.email,
+            disciplina,
+            delta: cantidad,
+            fechaVencimiento: payload.vencimiento ? cambios.fecha_vencimiento : undefined,
+          })
           if (!resultado.synced && resultado.reason !== 'sin_cuenta_pwa') {
             mensaje = 'Pago registrado, pero no se pudo sincronizar con la app. Revisá la consola.'
           }
@@ -460,6 +506,27 @@ function Socios() {
         for (const disciplina of planesDeVencimiento(payload.plan ?? socio.plan)) {
           const resultado = await sincronizarVencimientoPwa({
             dni: socio.dni,
+            email: socio.email,
+            disciplina,
+            fechaVencimiento: cambios.fecha_vencimiento,
+          })
+          if (!resultado.synced && resultado.reason !== 'sin_cuenta_pwa') {
+            mensaje = 'Pago registrado, pero no se pudo sincronizar con la app. Revisá la consola.'
+          }
+        }
+        // El calendario de vencimiento ya no está atado exclusivamente a
+        // Aparatos (bug reportado) -- si el cobro es de una disciplina de
+        // CRÉDITOS (CrossFit, Boxeo...) que NO recibió créditos en este
+        // mismo pago, la fecha elegida se sincroniza acá, preservando el
+        // balance real de créditos (sincronizarVencimientoCreditoPwa no pisa
+        // remaining_credits con null como sí hace sincronizarVencimientoPwa
+        // para membresías). Las que SÍ recibieron créditos ya quedaron
+        // cubiertas arriba, en el mismo insert.
+        for (const disciplina of planesDeCreditos(payload.plan ?? socio.plan)) {
+          if (disciplinasConCreditosCargados.has(disciplina)) continue
+          const resultado = await sincronizarVencimientoCreditoPwa({
+            dni: socio.dni,
+            email: socio.email,
             disciplina,
             fechaVencimiento: cambios.fecha_vencimiento,
           })

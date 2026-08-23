@@ -9,7 +9,7 @@ import {
   planesDeVencimiento,
   tienePlanDeVencimiento,
 } from '../utils/planes'
-import { sincronizarCreditosPwa, sincronizarVencimientoPwa } from '../utils/creditosPwa'
+import { sincronizarCreditosPwa, sincronizarVencimientoPwa, sincronizarVencimientoCreditoPwa } from '../utils/creditosPwa'
 import { normalizarTexto } from '../utils/coincidenciaSocios'
 import FichaSocioHistorial from './FichaSocioHistorial'
 
@@ -179,11 +179,11 @@ function NuevoSocioModal({
     // pasar por "Registrar Pago". `dia_corte` se recalcula del día-del-mes
     // de la fecha nueva para que un futuro pago en modo "sugerido" (+1 mes)
     // siga anclado a lo último que se cargó a mano acá.
+    // Bug reportado: antes solo se detectaba una edición de vencimiento si
+    // había algún plan de Aparatos/Pase Libre tildado -- un socio de
+    // CrossFit/Boxeo puro nunca podía cargar/renovar su vencimiento acá.
     const vencimientoEditado =
-      esEdicion &&
-      tienePlanDeVencimiento(form.planes) &&
-      !!form.fechaVencimiento &&
-      form.fechaVencimiento !== (socio?.fechaVencimiento ?? '')
+      esEdicion && form.planes.length > 0 && !!form.fechaVencimiento && form.fechaVencimiento !== (socio?.fechaVencimiento ?? '')
 
     if (esEdicion) {
       const cambios = {
@@ -286,7 +286,7 @@ function NuevoSocioModal({
           for (const disciplina of disciplinasCredito) {
             const cantidad = Number(form.creditosPorDisciplina[disciplina]) || 0
             if (cantidad <= 0) continue
-            const resultadoSync = await sincronizarCreditosPwa({ dni: form.dni, disciplina, delta: cantidad })
+            const resultadoSync = await sincronizarCreditosPwa({ dni: form.dni, email: form.email, disciplina, delta: cantidad })
             if (!resultadoSync.synced) avisos.push(`No se pudieron cargar los créditos de ${disciplina} en la app.`)
           }
 
@@ -294,6 +294,7 @@ function NuevoSocioModal({
             for (const disciplina of planesDeVencimiento(form.planes)) {
               const resultadoSync = await sincronizarVencimientoPwa({
                 dni: form.dni,
+                email: form.email,
                 disciplina,
                 fechaVencimiento: fechaVencimientoNueva,
               })
@@ -317,6 +318,24 @@ function NuevoSocioModal({
       for (const disciplina of planesDeVencimiento(form.planes)) {
         const resultadoSync = await sincronizarVencimientoPwa({
           dni: form.dni,
+          email: form.email,
+          disciplina,
+          fechaVencimiento: form.fechaVencimiento,
+        })
+        if (!resultadoSync.synced && resultadoSync.reason !== 'sin_cuenta_pwa') {
+          avisos.push(`No se pudo sincronizar el vencimiento de ${disciplina} con la app.`)
+        }
+      }
+      // Bug reportado: el calendario de vencimiento ya no está atado
+      // exclusivamente a Aparatos -- si el socio también tiene (o solo
+      // tiene) disciplinas de CRÉDITOS, la fecha también se sincroniza ahí,
+      // preservando el balance real de créditos (sincronizarVencimientoCreditoPwa
+      // no pisa remaining_credits con null como sí hace la de arriba, que es
+      // correcta para membresías pero no para créditos).
+      for (const disciplina of planesDeCreditos(form.planes)) {
+        const resultadoSync = await sincronizarVencimientoCreditoPwa({
+          dni: form.dni,
+          email: form.email,
           disciplina,
           fechaVencimiento: form.fechaVencimiento,
         })
@@ -447,7 +466,7 @@ function NuevoSocioModal({
             </div>
           </div>
 
-          {esEdicion && tienePlanDeVencimiento(form.planes) && (
+          {esEdicion && form.planes.length > 0 && (
             <div className="flex flex-col gap-1.5 sm:col-span-2">
               <label htmlFor="fechaVencimientoEdicion" className="text-xs font-medium text-gray-400">
                 Fecha de vencimiento

@@ -3,12 +3,25 @@ import { supabase } from '../lib/supabaseClient'
 const DIAS_VIGENCIA_CREDITOS = 30
 
 // La cuenta de la app de socios se auto-provisiona por DNI (trigger
-// on_socio_dni_upsert). Si el socio no tiene DNI o esa cuenta todavía no
-// se creó, no hay a quién sincronizarle los créditos.
-async function resolverUserId(dni) {
-  if (!dni) return null
-  const { data } = await supabase.from('profiles').select('id').eq('dni', dni).maybeSingle()
-  return data?.id ?? null
+// on_socio_dni_upsert) -- ese es el puente de siempre. Pero el import
+// masivo de Crossfy (scripts/importar_socios.js) trajo ~750 socios SIN DNI
+// cargado (matcheados solo por email en ese script) -- para esos, buscar
+// por DNI nunca va a encontrar nada, y antes de este cambio quedaban para
+// siempre sin poder sincronizar créditos/vencimiento con la PWA (bug
+// reportado: los botones de crédito no tenían ningún balance real sobre el
+// que operar). Ahora, si no hay DNI (o no matchea), se intenta por EMAIL
+// como respaldo -- mismo criterio que ya usa
+// sincronizacion_crossfy_v2.sql para el mismo problema.
+async function resolverUserId({ dni, email } = {}) {
+  if (dni) {
+    const { data } = await supabase.from('profiles').select('id').eq('dni', dni).maybeSingle()
+    if (data?.id) return data.id
+  }
+  if (email) {
+    const { data } = await supabase.from('profiles').select('id').ilike('email', email.trim()).maybeSingle()
+    if (data?.id) return data.id
+  }
+  return null
 }
 
 // ilike a propósito: `plan` es texto libre cargado por el staff y no
@@ -27,41 +40,69 @@ async function resolverDisciplinaId(nombrePlan) {
 // reservando clases desde la última vez que se cargó un pago acá, así que el
 // balance real de la PWA puede no coincidir con `socios.creditos` -- sumar
 // el delta sobre el balance actual de la PWA es lo único que no pisa ese uso.
-export async function sincronizarCreditosPwa({ dni, disciplina, delta }) {
-  const userId = await resolverUserId(dni)
-  if (!userId) return { synced: false, reason: 'sin_cuenta_pwa' }
+//
+// `email` es opcional -- respaldo para socios sin DNI cargado (ver
+// resolverUserId de arriba). Nunca crashea si algo sale mal: cualquier
+// error de red/Supabase se atrapa y se devuelve como `{ synced: false,
+// reason: 'error_supabase' }` en vez de dejar una excepción sin capturar.
+//
+// `fechaVencimiento` es opcional -- si el mismo pago ADEMÁS carga una fecha
+// de vencimiento para esta disciplina (TAREA 3: ya no es exclusivo de
+// Aparatos), se usa esa fecha en vez del rolling de 30 días de siempre, EN
+// EL MISMO insert. A propósito: hacer un segundo insert aparte (vía
+// sincronizarVencimientoCreditoPwa) para la misma disciplina en el mismo
+// pago competía por ser "la fila más reciente" contra este insert -- dos
+// escrituras separadas casi simultáneas, cualquiera de las dos podía ganar
+// y pisar a la otra. Un solo insert con los dos datos juntos elimina esa
+// carrera de raíz.
+export async function sincronizarCreditosPwa({ dni, email, disciplina, delta, fechaVencimiento }) {
+  try {
+    const userId = await resolverUserId({ dni, email })
+    if (!userId) return { synced: false, reason: 'sin_cuenta_pwa' }
 
-  const disciplineId = await resolverDisciplinaId(disciplina)
-  if (!disciplineId) return { synced: false, reason: 'disciplina_no_encontrada' }
+    const disciplineId = await resolverDisciplinaId(disciplina)
+    if (!disciplineId) return { synced: false, reason: 'disciplina_no_encontrada' }
 
-  const { data: actual } = await supabase
-    .from('user_credits')
-    .select('remaining_credits')
-    .eq('user_id', userId)
-    .eq('discipline_id', disciplineId)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+    const { data: actual } = await supabase
+      .from('user_credits')
+      .select('remaining_credits')
+      .eq('user_id', userId)
+      .eq('discipline_id', disciplineId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
 
-  const nuevoBalance = Math.max(0, (actual?.remaining_credits ?? 0) + delta)
+    const nuevoBalance = Math.max(0, (actual?.remaining_credits ?? 0) + delta)
+    const expiresAt = fechaVencimiento
+      ? new Date(`${fechaVencimiento}T12:00:00`).toISOString()
+      : new Date(Date.now() + DIAS_VIGENCIA_CREDITOS * 86_400_000).toISOString()
 
-  const { error } = await supabase.from('user_credits').insert({
-    user_id: userId,
-    discipline_id: disciplineId,
-    remaining_credits: nuevoBalance,
-    expires_at: new Date(Date.now() + DIAS_VIGENCIA_CREDITOS * 86_400_000).toISOString(),
-  })
-
-  if (error) {
-    console.error('ERROR user_credits INSERT SUPABASE (créditos):', {
-      message: error.message,
-      details: error.details,
-      hint: error.hint,
-      code: error.code,
+    const { error } = await supabase.from('user_credits').insert({
+      user_id: userId,
+      discipline_id: disciplineId,
+      remaining_credits: nuevoBalance,
+      expires_at: expiresAt,
+      // Explícito (no depender del default now() de la columna) -- todo el
+      // resto del código lee "la fila más reciente por created_at" para
+      // saber cuál es el balance vigente, así que esto es parte del
+      // contrato real de la función, no un detalle de infraestructura.
+      created_at: new Date().toISOString(),
     })
+
+    if (error) {
+      console.error('ERROR user_credits INSERT SUPABASE (créditos):', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+      })
+      return { synced: false, reason: 'error_supabase' }
+    }
+    return { synced: true }
+  } catch (err) {
+    console.error('ERROR inesperado sincronizando créditos con la PWA:', err)
     return { synced: false, reason: 'error_supabase' }
   }
-  return { synced: true }
 }
 
 // El pase de Aparatos / Musculación (y "Pase Libre", que es el mismo acceso
@@ -80,63 +121,125 @@ export async function sincronizarCreditosPwa({ dni, disciplina, delta }) {
 // nombre no matchea ninguna fila (ej. "Pase Libre" es una etiqueta legado
 // que nunca tuvo su propia fila en `disciplines`), cae al fallback viejo
 // -- sigue funcionando igual que antes para ese caso, no se pierde nada.
-export async function sincronizarVencimientoPwa({ dni, disciplina, fechaVencimiento }) {
-  const userId = await resolverUserId(dni)
-  if (!userId) return { synced: false, reason: 'sin_cuenta_pwa' }
+export async function sincronizarVencimientoPwa({ dni, email, disciplina, fechaVencimiento }) {
+  try {
+    const userId = await resolverUserId({ dni, email })
+    if (!userId) return { synced: false, reason: 'sin_cuenta_pwa' }
 
-  let disciplineId = await resolverDisciplinaId(disciplina)
-  if (!disciplineId) {
-    const { data: fallback } = await supabase
-      .from('disciplines')
-      .select('id')
-      .eq('kind', 'membership')
-      .limit(1)
-      .maybeSingle()
-    disciplineId = fallback?.id ?? null
-  }
-  if (!disciplineId) return { synced: false, reason: 'disciplina_no_encontrada' }
+    let disciplineId = await resolverDisciplinaId(disciplina)
+    if (!disciplineId) {
+      const { data: fallback } = await supabase
+        .from('disciplines')
+        .select('id')
+        .eq('kind', 'membership')
+        .limit(1)
+        .maybeSingle()
+      disciplineId = fallback?.id ?? null
+    }
+    if (!disciplineId) return { synced: false, reason: 'disciplina_no_encontrada' }
 
-  // Mediodía local en vez de medianoche: evita que la conversión a UTC que
-  // hace timestamptz corra la fecha un día para atrás/adelante según el
-  // huso horario del navegador que ejecuta esto.
-  const expiresAt = new Date(`${fechaVencimiento}T12:00:00`).toISOString()
+    // Mediodía local en vez de medianoche: evita que la conversión a UTC que
+    // hace timestamptz corra la fecha un día para atrás/adelante según el
+    // huso horario del navegador que ejecuta esto.
+    const expiresAt = new Date(`${fechaVencimiento}T12:00:00`).toISOString()
 
-  const { error } = await supabase.from('user_credits').insert({
-    user_id: userId,
-    discipline_id: disciplineId,
-    remaining_credits: null,
-    expires_at: expiresAt,
-  })
-
-  if (error) {
-    console.error('ERROR user_credits INSERT SUPABASE (vencimiento):', {
-      message: error.message,
-      details: error.details,
-      hint: error.hint,
-      code: error.code,
+    const { error } = await supabase.from('user_credits').insert({
+      user_id: userId,
+      discipline_id: disciplineId,
+      remaining_credits: null,
+      expires_at: expiresAt,
+      created_at: new Date().toISOString(),
     })
+
+    if (error) {
+      console.error('ERROR user_credits INSERT SUPABASE (vencimiento):', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+      })
+      return { synced: false, reason: 'error_supabase' }
+    }
+    return { synced: true }
+  } catch (err) {
+    console.error('ERROR inesperado sincronizando vencimiento con la PWA:', err)
     return { synced: false, reason: 'error_supabase' }
   }
-  return { synced: true }
+}
+
+// Vencimiento para una disciplina de CRÉDITOS (CrossFit, Boxeo, Kickboxing)
+// -- distinto de sincronizarVencimientoPwa (que es para Aparatos/Pase
+// Libre) porque ESA función pisa `remaining_credits` con null a propósito
+// (correcto para una membresía, que no tiene créditos). Para una
+// disciplina de créditos eso sería un bug real: pisaría el balance real
+// del socio con null la próxima vez que fetchUserBalances() lea "la fila
+// más reciente" -- así que acá se lee el remaining_credits ACTUAL primero
+// y se lo preserva en la fila nueva, solo cambiando expires_at.
+export async function sincronizarVencimientoCreditoPwa({ dni, email, disciplina, fechaVencimiento }) {
+  try {
+    const userId = await resolverUserId({ dni, email })
+    if (!userId) return { synced: false, reason: 'sin_cuenta_pwa' }
+
+    const disciplineId = await resolverDisciplinaId(disciplina)
+    if (!disciplineId) return { synced: false, reason: 'disciplina_no_encontrada' }
+
+    const { data: actual } = await supabase
+      .from('user_credits')
+      .select('remaining_credits')
+      .eq('user_id', userId)
+      .eq('discipline_id', disciplineId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    const expiresAt = new Date(`${fechaVencimiento}T12:00:00`).toISOString()
+
+    const { error } = await supabase.from('user_credits').insert({
+      user_id: userId,
+      discipline_id: disciplineId,
+      remaining_credits: actual?.remaining_credits ?? 0,
+      expires_at: expiresAt,
+      created_at: new Date().toISOString(),
+    })
+
+    if (error) {
+      console.error('ERROR user_credits INSERT SUPABASE (vencimiento de disciplina de créditos):', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+      })
+      return { synced: false, reason: 'error_supabase' }
+    }
+    return { synced: true }
+  } catch (err) {
+    console.error('ERROR inesperado sincronizando vencimiento de disciplina de créditos con la PWA:', err)
+    return { synced: false, reason: 'error_supabase' }
+  }
 }
 
 // Baja lógica: `profiles.active` es lo que de verdad bloquea el login y las
 // reservas (AuthContext y el RPC book_class lo chequean del lado servidor);
 // `socios.activo` es solo el reflejo de esto en el panel admin. Sin este
 // puente, dar de baja a alguien acá no le impediría seguir usando la PWA.
-export async function sincronizarEstadoCuentaPwa({ dni, activo }) {
-  const userId = await resolverUserId(dni)
-  if (!userId) return { synced: false, reason: 'sin_cuenta_pwa' }
+export async function sincronizarEstadoCuentaPwa({ dni, email, activo }) {
+  try {
+    const userId = await resolverUserId({ dni, email })
+    if (!userId) return { synced: false, reason: 'sin_cuenta_pwa' }
 
-  const { error } = await supabase.from('profiles').update({ active: activo }).eq('id', userId)
-  if (error) {
-    console.error('ERROR profiles UPDATE SUPABASE (baja/reactivación):', {
-      message: error.message,
-      details: error.details,
-      hint: error.hint,
-      code: error.code,
-    })
+    const { error } = await supabase.from('profiles').update({ active: activo }).eq('id', userId)
+    if (error) {
+      console.error('ERROR profiles UPDATE SUPABASE (baja/reactivación):', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+      })
+      return { synced: false, reason: 'error_supabase' }
+    }
+    return { synced: true }
+  } catch (err) {
+    console.error('ERROR inesperado sincronizando estado de cuenta con la PWA:', err)
     return { synced: false, reason: 'error_supabase' }
   }
-  return { synced: true }
 }
