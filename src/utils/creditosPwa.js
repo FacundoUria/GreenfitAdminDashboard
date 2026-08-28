@@ -2,6 +2,33 @@ import { supabase } from '../lib/supabaseClient'
 
 const DIAS_VIGENCIA_CREDITOS = 30
 
+// Log robusto para cualquier error de Supabase de este archivo -- antes cada
+// función armaba a mano `{ message: error.message, details: error.details,
+// ... }`, que revienta en un `TypeError` (o imprime valores vacíos sin
+// avisar) si `error` llega null/undefined/con una forma rara, dejando en la
+// consola justo el síntoma reportado ("Error updating user credits: null")
+// en vez del detalle real que hacía falta para depurar. Acá se valida antes
+// de desarmarlo Y se loguea el objeto crudo aparte (JSON.stringify, con
+// Object.getOwnPropertyNames porque PostgrestError no siempre trae sus
+// campos como enumerables propios de forma consistente entre versiones).
+function logErrorSupabase(contexto, error) {
+  if (!error) {
+    console.error(`[creditosPwa] ${contexto}: la llamada falló pero Supabase no devolvió ningún objeto de error (revisá RLS -- una fila que no matchea ninguna policy puede volver "sin error" con 0 filas afectadas).`)
+    return
+  }
+  console.error(`[creditosPwa] ${contexto}:`, {
+    message: error.message ?? '(sin message)',
+    details: error.details ?? '(sin details)',
+    hint: error.hint ?? '(sin hint)',
+    code: error.code ?? '(sin code)',
+  })
+  try {
+    console.error(`[creditosPwa] ${contexto} (crudo):`, JSON.stringify(error, Object.getOwnPropertyNames(error)))
+  } catch {
+    // Si ni siquiera esto serializa, ya se logueó lo de arriba -- no hay más para hacer.
+  }
+}
+
 // La cuenta de la app de socios se auto-provisiona por DNI (trigger
 // on_socio_dni_upsert) -- ese es el puente de siempre. Pero el import
 // masivo de Crossfy (scripts/importar_socios.js) trajo ~750 socios SIN DNI
@@ -14,13 +41,22 @@ const DIAS_VIGENCIA_CREDITOS = 30
 // sincronizacion_crossfy_v2.sql para el mismo problema.
 async function resolverUserId({ dni, email } = {}) {
   if (dni) {
-    const { data } = await supabase.from('profiles').select('id').eq('dni', dni).maybeSingle()
+    const { data, error } = await supabase.from('profiles').select('id').eq('dni', dni).maybeSingle()
+    if (error) logErrorSupabase(`resolverUserId (por DNI ${dni})`, error)
     if (data?.id) return data.id
   }
   if (email) {
-    const { data } = await supabase.from('profiles').select('id').ilike('email', email.trim()).maybeSingle()
+    const { data, error } = await supabase.from('profiles').select('id').ilike('email', email.trim()).maybeSingle()
+    if (error) logErrorSupabase(`resolverUserId (por email ${email})`, error)
     if (data?.id) return data.id
   }
+  // Ni el DNI ni el email matchean ninguna fila en `profiles` -- el socio
+  // (ej. Aixa) todavía no tiene una cuenta creada en la app (no se registró
+  // o el admin todavía no le generó el acceso). Esto NO es un error de
+  // Supabase -- es un estado real y esperable, distinto de una falla
+  // técnica, por eso el llamador lo trata con su propio mensaje ('Guardado
+  // en el panel, pero el socio todavía no está registrado en la app') en
+  // vez del genérico de "no se pudo sincronizar".
   return null
 }
 
@@ -63,13 +99,23 @@ async function resolverDisciplinaId(nombrePlan) {
 // dependía en silencio de que esa fila previa existiera.
 export async function sincronizarCreditosPwa({ dni, email, disciplina, delta, fechaVencimiento }) {
   try {
+    // Paso 1: ¿el socio tiene una cuenta PWA resuelta? Se corta ACÁ, antes
+    // de tocar `disciplines`/`user_credits` para nada -- ver resolverUserId.
     const userId = await resolverUserId({ dni, email })
-    if (!userId) return { synced: false, reason: 'sin_cuenta_pwa' }
+    if (!userId) {
+      console.warn(`[creditosPwa] sincronizarCreditosPwa: sin cuenta PWA para dni=${dni ?? '(vacío)'} email=${email ?? '(vacío)'} -- no hay user_id que resolver, se corta acá.`)
+      return { synced: false, reason: 'sin_cuenta_pwa' }
+    }
 
+    // Paso 2: ¿existe esa disciplina en el catálogo real (`disciplines`)?
     const disciplineId = await resolverDisciplinaId(disciplina)
-    if (!disciplineId) return { synced: false, reason: 'disciplina_no_encontrada' }
+    if (!disciplineId) {
+      console.warn(`[creditosPwa] sincronizarCreditosPwa: la disciplina "${disciplina}" no matchea ninguna fila de disciplines (userId=${userId}) -- se corta acá.`)
+      return { synced: false, reason: 'disciplina_no_encontrada' }
+    }
 
-    const { data: filaActual } = await supabase
+    // Paso 3: UPSERT estricto -- ¿ya existe una fila para este socio+disciplina?
+    const { data: filaActual, error: errorLectura } = await supabase
       .from('user_credits')
       .select('id, remaining_credits')
       .eq('user_id', userId)
@@ -78,41 +124,75 @@ export async function sincronizarCreditosPwa({ dni, email, disciplina, delta, fe
       .limit(1)
       .maybeSingle()
 
+    if (errorLectura) {
+      // No cortamos acá a propósito (mismo criterio de siempre: mejor
+      // intentar el insert que dejar al socio sin nada), pero SÍ queda
+      // logueado -- si esto falla por RLS, el insert de abajo probablemente
+      // también va a fallar, y este log ayuda a distinguir "no pude leer" de
+      // "no pude escribir".
+      logErrorSupabase(`sincronizarCreditosPwa: lectura previa de user_credits (userId=${userId}, disciplineId=${disciplineId})`, errorLectura)
+    }
+
     const nuevoBalance = Math.max(0, (filaActual?.remaining_credits ?? 0) + delta)
     const expiresAt = fechaVencimiento
       ? new Date(`${fechaVencimiento}T12:00:00`).toISOString()
       : new Date(Date.now() + DIAS_VIGENCIA_CREDITOS * 86_400_000).toISOString()
 
-    const { error } = filaActual
-      ? await supabase
-          .from('user_credits')
-          .update({ remaining_credits: nuevoBalance, expires_at: expiresAt })
-          .eq('id', filaActual.id)
-      : await supabase.from('user_credits').insert({
-          user_id: userId,
-          discipline_id: disciplineId,
-          remaining_credits: nuevoBalance,
-          expires_at: expiresAt,
-          // Explícito (no depender del default now() de la columna) -- todo
-          // el resto del código lee "la fila más reciente por created_at"
-          // para saber cuál es el balance vigente, así que esto es parte
-          // del contrato real de la función, no un detalle de
-          // infraestructura.
-          created_at: new Date().toISOString(),
-        })
+    if (filaActual) {
+      // UPDATE en el lugar -- con .select() para poder distinguir "se
+      // actualizó de verdad" de "RLS la filtró en silencio" (un UPDATE que
+      // no matchea NINGUNA fila visible para esta sesión no es un error de
+      // Supabase, `error` queda null igual -- sin este chequeo, esto se
+      // reportaba como éxito sin haber tocado nada en absoluto).
+      const { data: filasActualizadas, error } = await supabase
+        .from('user_credits')
+        .update({ remaining_credits: nuevoBalance, expires_at: expiresAt })
+        .eq('id', filaActual.id)
+        .select('id')
+
+      if (error) {
+        logErrorSupabase(`sincronizarCreditosPwa: UPDATE de user_credits (id=${filaActual.id}, userId=${userId}, disciplineId=${disciplineId})`, error)
+        return { synced: false, reason: 'error_supabase' }
+      }
+      if (!filasActualizadas || filasActualizadas.length === 0) {
+        console.error(
+          `[creditosPwa] sincronizarCreditosPwa: el UPDATE de user_credits (id=${filaActual.id}) no afectó ninguna fila -- probablemente una policy de RLS la está bloqueando en silencio para esta sesión. Revisá supabase_migration_user_credits_rls_admin.sql.`,
+        )
+        return { synced: false, reason: 'rls_bloqueo_escritura' }
+      }
+      return { synced: true }
+    }
+
+    // INSERT -- primera vez que este socio tiene créditos en esta disciplina.
+    const { data: filaInsertada, error } = await supabase
+      .from('user_credits')
+      .insert({
+        user_id: userId,
+        discipline_id: disciplineId,
+        remaining_credits: nuevoBalance,
+        expires_at: expiresAt,
+        // Explícito (no depender del default now() de la columna) -- todo
+        // el resto del código lee "la fila más reciente por created_at"
+        // para saber cuál es el balance vigente, así que esto es parte
+        // del contrato real de la función, no un detalle de
+        // infraestructura.
+        created_at: new Date().toISOString(),
+      })
+      .select('id')
 
     if (error) {
-      console.error('ERROR user_credits UPSERT SUPABASE (créditos):', {
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-        code: error.code,
-      })
+      logErrorSupabase(`sincronizarCreditosPwa: INSERT de user_credits (userId=${userId}, disciplineId=${disciplineId}, primera vez en esta disciplina)`, error)
       return { synced: false, reason: 'error_supabase' }
+    }
+    if (!filaInsertada || filaInsertada.length === 0) {
+      console.error(
+        `[creditosPwa] sincronizarCreditosPwa: el INSERT de user_credits no devolvió ninguna fila -- probablemente RLS bloqueó la escritura en silencio. Revisá supabase_migration_user_credits_rls_admin.sql.`,
+      )
+      return { synced: false, reason: 'rls_bloqueo_escritura' }
     }
     return { synced: true }
   } catch (err) {
-    console.error('ERROR inesperado sincronizando créditos con la PWA:', err)
+    console.error('[creditosPwa] ERROR inesperado sincronizando créditos con la PWA:', err)
     return { synced: false, reason: 'error_supabase' }
   }
 }
@@ -164,17 +244,12 @@ export async function sincronizarVencimientoPwa({ dni, email, disciplina, fechaV
     })
 
     if (error) {
-      console.error('ERROR user_credits INSERT SUPABASE (vencimiento):', {
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-        code: error.code,
-      })
+      logErrorSupabase(`sincronizarVencimientoPwa: INSERT de user_credits (userId=${userId}, disciplineId=${disciplineId})`, error)
       return { synced: false, reason: 'error_supabase' }
     }
     return { synced: true }
   } catch (err) {
-    console.error('ERROR inesperado sincronizando vencimiento con la PWA:', err)
+    console.error('[creditosPwa] ERROR inesperado sincronizando vencimiento con la PWA:', err)
     return { synced: false, reason: 'error_supabase' }
   }
 }
@@ -215,17 +290,12 @@ export async function sincronizarVencimientoCreditoPwa({ dni, email, disciplina,
     })
 
     if (error) {
-      console.error('ERROR user_credits INSERT SUPABASE (vencimiento de disciplina de créditos):', {
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-        code: error.code,
-      })
+      logErrorSupabase(`sincronizarVencimientoCreditoPwa: INSERT de user_credits (userId=${userId}, disciplineId=${disciplineId})`, error)
       return { synced: false, reason: 'error_supabase' }
     }
     return { synced: true }
   } catch (err) {
-    console.error('ERROR inesperado sincronizando vencimiento de disciplina de créditos con la PWA:', err)
+    console.error('[creditosPwa] ERROR inesperado sincronizando vencimiento de disciplina de créditos con la PWA:', err)
     return { synced: false, reason: 'error_supabase' }
   }
 }
@@ -241,17 +311,12 @@ export async function sincronizarEstadoCuentaPwa({ dni, email, activo }) {
 
     const { error } = await supabase.from('profiles').update({ active: activo }).eq('id', userId)
     if (error) {
-      console.error('ERROR profiles UPDATE SUPABASE (baja/reactivación):', {
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-        code: error.code,
-      })
+      logErrorSupabase(`sincronizarEstadoCuentaPwa: UPDATE de profiles (userId=${userId})`, error)
       return { synced: false, reason: 'error_supabase' }
     }
     return { synced: true }
   } catch (err) {
-    console.error('ERROR inesperado sincronizando estado de cuenta con la PWA:', err)
+    console.error('[creditosPwa] ERROR inesperado sincronizando estado de cuenta con la PWA:', err)
     return { synced: false, reason: 'error_supabase' }
   }
 }

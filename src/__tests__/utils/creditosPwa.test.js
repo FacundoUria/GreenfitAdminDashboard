@@ -147,7 +147,20 @@ describe('resolución de cuenta PWA con fallback a email (sin DNI cargado)', () 
         return makeChain(llamadasProfiles === 1 ? { data: null, error: null } : { data: { id: 'user-2' }, error: null })
       }
       if (table === 'disciplines') return makeChain({ data: { id: 'disc-crossfit' }, error: null })
-      if (table === 'user_credits') return makeChain({ data: null, error: null })
+      if (table === 'user_credits') {
+        // Sin fila previa (.maybeSingle() -> null) -> toma la rama INSERT,
+        // que encadena .select() después -- necesita un chain de verdad, no
+        // el objeto plano que basta cuando solo se lee.
+        const chain = makeChain({ error: null })
+        chain.select = vi.fn(() => chain)
+        chain.eq = vi.fn(() => chain)
+        chain.order = vi.fn(() => chain)
+        chain.limit = vi.fn(() => chain)
+        chain.maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null })
+        chain.insert = vi.fn(() => chain)
+        chain.then = (resolve, reject) => Promise.resolve({ data: [{ id: 'uc-nueva' }], error: null }).then(resolve, reject)
+        return chain
+      }
       throw new Error(`tabla inesperada en el test: ${table}`)
     })
 
@@ -199,7 +212,10 @@ describe('sincronizarCreditosPwa (UPSERT estricto: UPDATE si la fila ya existe, 
       if (table === 'profiles') return makeChain({ data: { id: 'user-1' }, error: null })
       if (table === 'disciplines') return makeChain({ data: { id: 'disc-crossfit' }, error: null })
       if (table === 'user_credits') {
-        const chain = makeChain({ error: null })
+        // Base con data en forma de ARRAY (no un objeto suelto) -- el
+        // UPDATE real encadena .select('id') al final para poder distinguir
+        // "se actualizó de verdad" de "RLS la filtró en silencio, 0 filas".
+        const chain = makeChain({ data: [{ id: 'uc-crossfit-1' }], error: null })
         chain.select = vi.fn(() => chain)
         chain.eq = vi.fn((columna, valor) => {
           if (columna === 'id') idActualizado = valor
@@ -214,7 +230,7 @@ describe('sincronizarCreditosPwa (UPSERT estricto: UPDATE si la fila ya existe, 
         })
         chain.insert = vi.fn(() => {
           seInsertoAlgo = true
-          return { error: null }
+          return chain
         })
         return chain
       }
@@ -236,7 +252,9 @@ describe('sincronizarCreditosPwa (UPSERT estricto: UPDATE si la fila ya existe, 
       if (table === 'profiles') return makeChain({ data: { id: 'user-aixa' }, error: null })
       if (table === 'disciplines') return makeChain({ data: { id: 'disc-kickboxing' }, error: null })
       if (table === 'user_credits') {
-        const chain = makeChain({ error: null })
+        // Base con data en forma de ARRAY -- el INSERT real encadena
+        // .select('id') al final para confirmar que la fila se creó.
+        const chain = makeChain({ data: [{ id: 'uc-kickboxing-nueva' }], error: null })
         chain.select = vi.fn(() => chain)
         chain.eq = vi.fn(() => chain)
         chain.order = vi.fn(() => chain)
@@ -249,7 +267,7 @@ describe('sincronizarCreditosPwa (UPSERT estricto: UPDATE si la fila ya existe, 
         })
         chain.insert = vi.fn((payload) => {
           payloadInsertado = payload
-          return { error: null }
+          return chain
         })
         return chain
       }
@@ -287,6 +305,55 @@ describe('sincronizarCreditosPwa (UPSERT estricto: UPDATE si la fila ya existe, 
 
     const resultado = await sincronizarCreditosPwa({ dni: '30111222', disciplina: 'CrossFit', delta: 1 })
     expect(resultado).toEqual({ synced: false, reason: 'error_supabase' })
+  })
+
+  // Depuración del caso Aixa (segunda vuelta): un UPDATE/INSERT que no
+  // matchea ninguna policy de RLS no devuelve ningún error en Supabase --
+  // simplemente no afecta ninguna fila, y sin chequear esto explícitamente
+  // el código anterior lo reportaba como éxito sin haber sincronizado nada.
+  it('UPDATE que RLS bloquea en silencio (0 filas, sin error): se reporta como fallo, no como éxito', async () => {
+    mockedFrom.mockImplementation((table) => {
+      if (table === 'profiles') return makeChain({ data: { id: 'user-1' }, error: null })
+      if (table === 'disciplines') return makeChain({ data: { id: 'disc-crossfit' }, error: null })
+      if (table === 'user_credits') {
+        // .select('id') final resuelve un array VACÍO -- 0 filas afectadas,
+        // pero sin error: exactamente lo que hace RLS cuando bloquea en
+        // silencio (no un fallo técnico, "el permiso no dejó pasar nada").
+        const chain = makeChain({ data: [], error: null })
+        chain.select = vi.fn(() => chain)
+        chain.eq = vi.fn(() => chain)
+        chain.order = vi.fn(() => chain)
+        chain.limit = vi.fn(() => chain)
+        chain.maybeSingle = vi.fn().mockResolvedValue({ data: { id: 'uc-1', remaining_credits: 5 }, error: null })
+        chain.update = vi.fn(() => chain)
+        return chain
+      }
+      throw new Error(`tabla inesperada en el test: ${table}`)
+    })
+
+    const resultado = await sincronizarCreditosPwa({ dni: '30111222', disciplina: 'CrossFit', delta: 1 })
+    expect(resultado).toEqual({ synced: false, reason: 'rls_bloqueo_escritura' })
+  })
+
+  it('INSERT que RLS bloquea en silencio (0 filas, sin error): se reporta como fallo, no como éxito', async () => {
+    mockedFrom.mockImplementation((table) => {
+      if (table === 'profiles') return makeChain({ data: { id: 'user-aixa' }, error: null })
+      if (table === 'disciplines') return makeChain({ data: { id: 'disc-kickboxing' }, error: null })
+      if (table === 'user_credits') {
+        const chain = makeChain({ data: [], error: null })
+        chain.select = vi.fn(() => chain)
+        chain.eq = vi.fn(() => chain)
+        chain.order = vi.fn(() => chain)
+        chain.limit = vi.fn(() => chain)
+        chain.maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null })
+        chain.insert = vi.fn(() => chain)
+        return chain
+      }
+      throw new Error(`tabla inesperada en el test: ${table}`)
+    })
+
+    const resultado = await sincronizarCreditosPwa({ dni: '40222333', disciplina: 'Kickboxing', delta: 6 })
+    expect(resultado).toEqual({ synced: false, reason: 'rls_bloqueo_escritura' })
   })
 })
 
