@@ -15,7 +15,7 @@ describe('planesDeVencimiento (subconjunto de plan que es "por vencimiento", no 
   })
 
   it('nunca se superpone con planesDeCreditos para el mismo plan', () => {
-    const plan = ['Aparatos / Musculación', 'Boxeo', 'CrossFit', 'Kickboxing', 'Pase Libre']
+    const plan = ['Aparatos / Musculación', 'Boxeo', 'CrossFit', 'Kickstrike', 'Pase Libre']
     const vencimiento = planesDeVencimiento(plan)
     const creditos = planesDeCreditos(plan)
     expect(vencimiento.some((p) => creditos.includes(p))).toBe(false)

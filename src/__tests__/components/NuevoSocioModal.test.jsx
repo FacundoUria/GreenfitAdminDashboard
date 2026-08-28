@@ -9,7 +9,7 @@ import NuevoSocioModal from '../../components/NuevoSocioModal'
 
 // BUG CRÍTICO (2026-08-07): el formulario de "Nuevo Socio" arrancaba con
 // 'Pase Libre' YA TILDADO (PLANES_DISPONIBLES[0]) -- si el staff cargaba un
-// socio de Kickboxing/CrossFit sin destildarlo a mano, el socio quedaba con
+// socio de Kickstrike/CrossFit sin destildarlo a mano, el socio quedaba con
 // un plan extra que nunca pidió ('Pase Libre'), que además termina
 // sincronizando un balance de Aparatos en la PWA (ver el comentario de
 // formInicial() en NuevoSocioModal.jsx). Ninguna disciplina debe empezar
@@ -23,25 +23,25 @@ describe('NuevoSocioModal -- ningún plan arranca pre-tildado (fix del bug de di
   })
 
   it('editar un socio: solo quedan tildados los planes que el socio realmente tiene, ninguno de más', () => {
-    const socioKickboxing = {
+    const socioKickstrike = {
       id: 's1',
       nombre: 'Bruno',
       apellido: 'Álvarez',
       dni: '30999888',
       email: 'bruno@mail.com',
       telefono: '',
-      plan: ['Kickboxing'],
+      plan: ['Kickstrike'],
       fechaVencimiento: null,
     }
-    render(<NuevoSocioModal socio={socioKickboxing} onClose={vi.fn()} onSaved={vi.fn()} />)
+    render(<NuevoSocioModal socio={socioKickstrike} onClose={vi.fn()} onSaved={vi.fn()} />)
 
-    const checkboxKickboxing = screen.getByRole('checkbox', { name: 'Kickboxing' })
-    expect(checkboxKickboxing.checked).toBe(true)
+    const checkboxKickstrike = screen.getByRole('checkbox', { name: 'Kickstrike' })
+    expect(checkboxKickstrike.checked).toBe(true)
 
     // Ninguna otra actividad -- en particular, "Aparatos / Musculación" y
     // "Pase Libre" (las dos etiquetas de vencimiento) tienen que quedar
-    // SIN tildar para un socio que solo tiene Kickboxing.
-    const otrosCheckboxes = screen.getAllByRole('checkbox').filter((cb) => cb !== checkboxKickboxing)
+    // SIN tildar para un socio que solo tiene Kickstrike.
+    const otrosCheckboxes = screen.getAllByRole('checkbox').filter((cb) => cb !== checkboxKickstrike)
     expect(otrosCheckboxes.every((cb) => !cb.checked)).toBe(true)
   })
 

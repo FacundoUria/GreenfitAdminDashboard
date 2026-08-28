@@ -15,9 +15,9 @@ import FichaSocioHistorial from './FichaSocioHistorial'
 
 // BUG CRÍTICO (2026-08-07): esta función arrancaba `planes` con
 // `[PLANES_DISPONIBLES[0]]` ('Pase Libre') YA TILDADO -- si el staff cargaba
-// un socio de Kickboxing/CrossFit sin darse cuenta de tocar/destildar ese
+// un socio de Kickstrike/CrossFit sin darse cuenta de tocar/destildar ese
 // checkbox pre-marcado, el socio quedaba guardado con `plan: ['Pase Libre',
-// 'Kickboxing']`. Como 'Pase Libre' no tiene fila propia en `disciplines`
+// 'Kickstrike']`. Como 'Pase Libre' no tiene fila propia en `disciplines`
 // (es una etiqueta legado, ver planesDeVencimiento() en utils/planes.js),
 // cualquier sincronización de vencimiento para ese plan cae al fallback de
 // "la única disciplina kind=membership que exista" -- hoy, Aparatos -- y el

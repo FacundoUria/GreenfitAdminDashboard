@@ -129,15 +129,15 @@ test('sumar créditos en la fila de Boxeo NUNCA impacta a CrossFit -- cada fila 
   expect(tables.user_credits.find((f) => f.id === 'uc-1').remaining_credits).toBe(6)
 })
 
-// Caso real reportado: Aixa en Kickboxing. La migración inicial solo sembró
+// Caso real reportado: Aixa en Kickstrike. La migración inicial solo sembró
 // filas de user_credits para CrossFit -- un socio que además tiene
-// Kickboxing en su plan pero NUNCA tuvo créditos cargados ahí no tenía
+// Kickstrike en su plan pero NUNCA tuvo créditos cargados ahí no tenía
 // ninguna fila en user_credits para esa disciplina puntual. Antes, sumarle
 // créditos rompía la sincronización con la app ("Crédito al plan
-// actualizado pero no se pudo sincronizar Kickboxing con la app"). Ahora
+// actualizado pero no se pudo sincronizar Kickstrike con la app"). Ahora
 // sincronizarCreditosPwa hace un UPSERT estricto: si no hay fila previa,
 // inicializa una nueva en vez de fallar.
-const DISCIPLINA_KICKBOXING = { id: 'disc-kickboxing', name: 'Kickboxing', kind: 'credits' }
+const DISCIPLINA_KICKSTRIKE = { id: 'disc-kickstrike', name: 'Kickstrike', kind: 'credits' }
 
 const SOCIO_AIXA = {
   id: 'e2e-socio-aixa',
@@ -146,7 +146,7 @@ const SOCIO_AIXA = {
   dni: '40222333',
   email: 'aixa@e2e.test',
   telefono: null,
-  plan: ['Kickboxing'],
+  plan: ['Kickstrike'],
   estado: 'Activo',
   fecha_vencimiento: null,
   dia_corte: null,
@@ -170,7 +170,7 @@ test('caso Aixa: sumar créditos en una disciplina que el socio NUNCA tuvo inici
 }) => {
   const tables = {
     ...tablasBase(),
-    disciplines: [...tablasBase().disciplines, DISCIPLINA_KICKBOXING],
+    disciplines: [...tablasBase().disciplines, DISCIPLINA_KICKSTRIKE],
     socios: [SOCIO_AIXA],
     profiles: [PROFILE_AIXA],
     user_credits: [], // Ninguna fila todavía para Aixa -- ni siquiera de CrossFit.
@@ -180,17 +180,17 @@ test('caso Aixa: sumar créditos en una disciplina que el socio NUNCA tuvo inici
   await irASocios(page)
   const filaTabla = page.getByRole('table').getByRole('row', { name: /Aixa Gómez/ })
 
-  await filaTabla.getByTitle('Sumar 1 crédito a Kickboxing').click()
+  await filaTabla.getByTitle('Sumar 1 crédito a Kickstrike').click()
 
   // Antes de este fix, esto disparaba el toast de "no se pudo sincronizar"
   // -- ahora tiene que sincronizar bien y no mostrar ningún aviso de error.
   await expect.poll(() => tables.user_credits.length).toBe(1)
 
   const filaNueva = tables.user_credits[0]
-  expect(filaNueva.discipline_id).toBe('disc-kickboxing')
+  expect(filaNueva.discipline_id).toBe('disc-kickstrike')
   expect(filaNueva.remaining_credits).toBe(1)
   expect(filaNueva.user_id).toBe(PROFILE_AIXA.id)
 
   // Y el toast de "no se pudo sincronizar" NUNCA aparece.
-  await expect(page.getByText(/no se pudo sincronizar Kickboxing con la app/)).toHaveCount(0)
+  await expect(page.getByText(/no se pudo sincronizar Kickstrike con la app/)).toHaveCount(0)
 })

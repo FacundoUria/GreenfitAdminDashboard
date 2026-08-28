@@ -4,7 +4,7 @@ import { tablasBase } from './support/fixtures.js'
 import { irASocios } from './support/nav.js'
 
 // Flujo completo de "Cobro Mostrador": Seba selecciona un socio, toca
-// "Cobrar", le asigna créditos a una disciplina puntual (ej. Kickboxing) y
+// "Cobrar", le asigna créditos a una disciplina puntual (ej. Kickstrike) y
 // confirma. Cubre de punta a punta:
 //   1) El pago se registra sin ningún alert() de error ni mensaje genérico.
 //   2) Los créditos se acreditan DIRECTO en `user_credits` (fuente de verdad
@@ -13,7 +13,7 @@ import { irASocios } from './support/nav.js'
 //      que espera la tabla real (supabase_migration_ficha360.sql).
 //   4) La tabla de Socios refleja el saldo nuevo sin recargar la página.
 
-const DISCIPLINA_KICKBOXING = { id: 'disc-kickboxing', name: 'Kickboxing', kind: 'credits' }
+const DISCIPLINA_KICKSTRIKE = { id: 'disc-kickstrike', name: 'Kickstrike', kind: 'credits' }
 
 const SOCIO_KICK = {
   id: 'e2e-socio-kick',
@@ -22,7 +22,7 @@ const SOCIO_KICK = {
   dni: '20555666',
   email: 'braian@e2e.test',
   telefono: '2610000002',
-  plan: ['Kickboxing'],
+  plan: ['Kickstrike'],
   estado: 'Activo',
   fecha_vencimiento: null,
   dia_corte: null,
@@ -46,7 +46,7 @@ function userCreditsIniciales() {
     {
       id: 'uc-kick-1',
       user_id: PROFILE_KICK.id,
-      discipline_id: DISCIPLINA_KICKBOXING.id,
+      discipline_id: DISCIPLINA_KICKSTRIKE.id,
       remaining_credits: 2,
       created_at: '2026-08-01T00:00:00.000Z',
     },
@@ -102,7 +102,7 @@ test('Cobro mostrador: acreditar créditos a una disciplina se refleja en la tab
 }) => {
   const tables = {
     ...tablasBase(),
-    disciplines: [...tablasBase().disciplines, DISCIPLINA_KICKBOXING],
+    disciplines: [...tablasBase().disciplines, DISCIPLINA_KICKSTRIKE],
     socios: [SOCIO_KICK],
     profiles: [PROFILE_KICK],
     user_credits: userCreditsIniciales(),
@@ -125,12 +125,12 @@ test('Cobro mostrador: acreditar créditos a una disciplina se refleja en la tab
 
   // Saldo real ANTES del cobro (viene de la fixture) -- confirma que la
   // lectura ya funciona antes de tocar nada.
-  await expect(filaTabla.getByTitle('Créditos reales de Kickboxing en la app')).toHaveText('2')
+  await expect(filaTabla.getByTitle('Créditos reales de Kickstrike en la app')).toHaveText('2')
 
   await filaTabla.locator('[title="Registrar Pago / Renovar Cuota"]').click()
   await expect(page.getByText('Registrar Pago / Renovar Cuota')).toBeVisible()
 
-  // Kickboxing ya viene pre-tildado (es el único plan de Braian). Se le
+  // Kickstrike ya viene pre-tildado (es el único plan de Braian). Se le
   // asignan 8 créditos con el pack rápido -- último "+8" en el DOM: el modal
   // se monta después de SociosTabla (mobile card + desktop table coexisten).
   await page.getByRole('button', { name: '+8' }).last().click()
@@ -144,7 +144,7 @@ test('Cobro mostrador: acreditar créditos a una disciplina se refleja en la tab
   // La tabla muestra el saldo REAL actualizado (2 + 8 = 10) sin recargar la
   // página -- fetchSocios() dispara el refetch de créditos por disciplina
   // automáticamente apenas se confirma el pago.
-  await expect(filaTabla.getByTitle('Créditos reales de Kickboxing en la app')).toHaveText('10', {
+  await expect(filaTabla.getByTitle('Créditos reales de Kickstrike en la app')).toHaveText('10', {
     timeout: 10_000,
   })
 
@@ -153,7 +153,7 @@ test('Cobro mostrador: acreditar créditos a una disciplina se refleja en la tab
   expect(tables.pagos_socio).toHaveLength(1)
   const pago = tables.pagos_socio[0]
   expect(pago.user_id).toBe(PROFILE_KICK.id)
-  expect(pago.paquete).toBe('Kickboxing')
+  expect(pago.paquete).toBe('Kickstrike')
   expect(pago.monto).toBe(12000)
   expect(pago.metodo_pago).toBe('efectivo')
   expect(pago.estado).toBe('pagado')
@@ -168,12 +168,12 @@ test('Cobro mostrador: acreditar créditos a una disciplina se refleja en la tab
   expect(pago.created_by).toBe(ADMIN_DEMO.id)
 
   // Acreditación directa en user_credits -- UPSERT estricto (ver
-  // sincronizarCreditosPwa): como Braian YA tenía una fila de Kickboxing
+  // sincronizarCreditosPwa): como Braian YA tenía una fila de Kickstrike
   // (uc-kick-1), se actualiza EN EL LUGAR en vez de insertar una nueva.
-  const filasKickboxing = tables.user_credits.filter((f) => f.discipline_id === DISCIPLINA_KICKBOXING.id)
-  expect(filasKickboxing).toHaveLength(1)
-  expect(filasKickboxing[0].id).toBe('uc-kick-1')
-  expect(filasKickboxing[0].remaining_credits).toBe(10)
+  const filasKickstrike = tables.user_credits.filter((f) => f.discipline_id === DISCIPLINA_KICKSTRIKE.id)
+  expect(filasKickstrike).toHaveLength(1)
+  expect(filasKickstrike[0].id).toBe('uc-kick-1')
+  expect(filasKickstrike[0].remaining_credits).toBe(10)
 
   // El pozo global legacy (socios.creditos) también queda al día -- lo sigue
   // usando `esPlanDeCreditos`/`socios.creditos` como fallback en otras vistas.

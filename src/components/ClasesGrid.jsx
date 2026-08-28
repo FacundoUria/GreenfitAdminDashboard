@@ -4,7 +4,7 @@ import { colorOcupacion } from '../utils/ocupacion'
 const COLORES_DISCIPLINA = {
   crossfit: { header: 'from-orange-600 to-orange-500', dot: 'bg-orange-400' },
   boxeo: { header: 'from-red-600 to-red-500', dot: 'bg-red-400' },
-  kickboxing: { header: 'from-rose-600 to-rose-500', dot: 'bg-rose-400' },
+  kickstrike: { header: 'from-rose-600 to-rose-500', dot: 'bg-rose-400' },
   musculación: { header: 'from-sky-600 to-sky-500', dot: 'bg-sky-400' },
   aparatos: { header: 'from-sky-600 to-sky-500', dot: 'bg-sky-400' },
   yoga: { header: 'from-purple-600 to-purple-500', dot: 'bg-purple-400' },

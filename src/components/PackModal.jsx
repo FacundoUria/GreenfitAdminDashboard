@@ -42,7 +42,7 @@ function PackModal({ pack, disciplinas, onClose, onSaved }) {
 
   // Aparatos (kind='membership') se maneja con el switch de abajo, no como
   // una fila de créditos más -- el selector de "Agregar Disciplina" solo
-  // ofrece disciplinas de crédito real (CrossFit, Boxeo, Kickboxing, etc.).
+  // ofrece disciplinas de crédito real (CrossFit, Boxeo, Kickstrike, etc.).
   const disciplinasDeCredito = disciplinas.filter((d) => d.kind !== 'membership')
 
   const updateField = (field, value) => setForm((prev) => ({ ...prev, [field]: value }))

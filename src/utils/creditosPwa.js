@@ -86,7 +86,7 @@ async function resolverDisciplinaId(nombrePlan) {
 // de vencimiento para esta disciplina (TAREA 3: ya no es exclusivo de
 // Aparatos), se usa esa fecha en vez del rolling de 30 días de siempre.
 //
-// UPSERT estricto (bug real: Aixa en Kickboxing -- la migración inicial
+// UPSERT estricto (bug real: Aixa en Kickstrike -- la migración inicial
 // solo sembró filas en user_credits para CrossFit; cualquier disciplina que
 // un socio nunca tocó antes no tenía NINGUNA fila, y sumarle créditos
 // rompía la sincronización). Si ya existe una fila para este socio+
@@ -254,7 +254,7 @@ export async function sincronizarVencimientoPwa({ dni, email, disciplina, fechaV
   }
 }
 
-// Vencimiento para una disciplina de CRÉDITOS (CrossFit, Boxeo, Kickboxing)
+// Vencimiento para una disciplina de CRÉDITOS (CrossFit, Boxeo, Kickstrike)
 // -- distinto de sincronizarVencimientoPwa (que es para Aparatos/Pase
 // Libre) porque ESA función pisa `remaining_credits` con null a propósito
 // (correcto para una membresía, que no tiene créditos). Para una

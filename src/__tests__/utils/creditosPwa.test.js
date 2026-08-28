@@ -194,11 +194,11 @@ describe('resolución de cuenta PWA con fallback a email (sin DNI cargado)', () 
   })
 })
 
-// Caso real: Aixa en Kickboxing. La migración inicial solo sembró filas de
+// Caso real: Aixa en Kickstrike. La migración inicial solo sembró filas de
 // user_credits para CrossFit -- cualquier socio que nunca tuvo créditos
 // cargados en OTRA disciplina no tenía ninguna fila ahí, y sumarle créditos
 // rompía la sincronización con la PWA ("Crédito al plan actualizado pero no
-// se pudo sincronizar Kickboxing con la app"). Ahora es un UPSERT estricto:
+// se pudo sincronizar Kickstrike con la app"). Ahora es un UPSERT estricto:
 // UPDATE en el lugar si ya existe una fila para ese socio+disciplina,
 // INSERT (arrancando desde 0) si es la primera vez.
 describe('sincronizarCreditosPwa (UPSERT estricto: UPDATE si la fila ya existe, INSERT si nunca se inicializó)', () => {
@@ -245,21 +245,21 @@ describe('sincronizarCreditosPwa (UPSERT estricto: UPDATE si la fila ya existe, 
     expect(payloadUpdate.remaining_credits).toBe(8) // 5 + 3
   })
 
-  it('caso Aixa: sin ninguna fila previa en Kickboxing, inicializa con un INSERT en vez de fallar', async () => {
+  it('caso Aixa: sin ninguna fila previa en Kickstrike, inicializa con un INSERT en vez de fallar', async () => {
     let payloadInsertado = null
     let seActualizoAlgo = false
     mockedFrom.mockImplementation((table) => {
       if (table === 'profiles') return makeChain({ data: { id: 'user-aixa' }, error: null })
-      if (table === 'disciplines') return makeChain({ data: { id: 'disc-kickboxing' }, error: null })
+      if (table === 'disciplines') return makeChain({ data: { id: 'disc-kickstrike' }, error: null })
       if (table === 'user_credits') {
         // Base con data en forma de ARRAY -- el INSERT real encadena
         // .select('id') al final para confirmar que la fila se creó.
-        const chain = makeChain({ data: [{ id: 'uc-kickboxing-nueva' }], error: null })
+        const chain = makeChain({ data: [{ id: 'uc-kickstrike-nueva' }], error: null })
         chain.select = vi.fn(() => chain)
         chain.eq = vi.fn(() => chain)
         chain.order = vi.fn(() => chain)
         chain.limit = vi.fn(() => chain)
-        // Nunca tuvo una fila en Kickboxing -- 0 filas, no un error.
+        // Nunca tuvo una fila en Kickstrike -- 0 filas, no un error.
         chain.maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null })
         chain.update = vi.fn(() => {
           seActualizoAlgo = true
@@ -274,12 +274,12 @@ describe('sincronizarCreditosPwa (UPSERT estricto: UPDATE si la fila ya existe, 
       throw new Error(`tabla inesperada en el test: ${table}`)
     })
 
-    const resultado = await sincronizarCreditosPwa({ dni: '40222333', disciplina: 'Kickboxing', delta: 6 })
+    const resultado = await sincronizarCreditosPwa({ dni: '40222333', disciplina: 'Kickstrike', delta: 6 })
 
     expect(resultado).toEqual({ synced: true })
     expect(seActualizoAlgo).toBe(false)
     expect(payloadInsertado).toEqual(
-      expect.objectContaining({ user_id: 'user-aixa', discipline_id: 'disc-kickboxing', remaining_credits: 6 }),
+      expect.objectContaining({ user_id: 'user-aixa', discipline_id: 'disc-kickstrike', remaining_credits: 6 }),
     )
   })
 
@@ -338,7 +338,7 @@ describe('sincronizarCreditosPwa (UPSERT estricto: UPDATE si la fila ya existe, 
   it('INSERT que RLS bloquea en silencio (0 filas, sin error): se reporta como fallo, no como éxito', async () => {
     mockedFrom.mockImplementation((table) => {
       if (table === 'profiles') return makeChain({ data: { id: 'user-aixa' }, error: null })
-      if (table === 'disciplines') return makeChain({ data: { id: 'disc-kickboxing' }, error: null })
+      if (table === 'disciplines') return makeChain({ data: { id: 'disc-kickstrike' }, error: null })
       if (table === 'user_credits') {
         const chain = makeChain({ data: [], error: null })
         chain.select = vi.fn(() => chain)
@@ -352,7 +352,7 @@ describe('sincronizarCreditosPwa (UPSERT estricto: UPDATE si la fila ya existe, 
       throw new Error(`tabla inesperada en el test: ${table}`)
     })
 
-    const resultado = await sincronizarCreditosPwa({ dni: '40222333', disciplina: 'Kickboxing', delta: 6 })
+    const resultado = await sincronizarCreditosPwa({ dni: '40222333', disciplina: 'Kickstrike', delta: 6 })
     expect(resultado).toEqual({ synced: false, reason: 'rls_bloqueo_escritura' })
   })
 })
