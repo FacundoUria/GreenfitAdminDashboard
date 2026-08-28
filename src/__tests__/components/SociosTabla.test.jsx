@@ -111,6 +111,23 @@ describe('CreditosCell -- ajuste de créditos SIN AMBIGÜEDAD de disciplina (fix
     expect(seises.every((el) => el.textContent === '6')).toBe(true)
   })
 
+  // Caso real reportado: la grilla mostraba 0 créditos de Kickstrike aunque
+  // la PWA sí tuviera un balance real -- socios.plan decía "Kickstrike"
+  // pero disciplineName (que sale de disciplines.name, el catálogo real)
+  // podía diferir solo en mayúsculas ("kickstrike") por una fila duplicada
+  // de catálogo. Antes el Map de balances usaba la clave EXACTA -- ese
+  // desfase de tipeo alcanzaba para que nunca matcheara.
+  it('el balance real matchea aunque disciplineName difiera en mayúsculas/minúsculas de socios.plan', () => {
+    const socioKickstrike = {
+      ...SOCIO_MULTI_DISCIPLINA,
+      plan: ['Kickstrike'],
+      creditosPwaPorDisciplina: [{ disciplineId: 'd-kickstrike', disciplineName: 'kickstrike', remainingCredits: 11 }],
+    }
+    render(<SociosTabla socios={[socioKickstrike]} {...HANDLERS} />)
+    const celdas = screen.getAllByTitle('Créditos reales de Kickstrike en la app')
+    expect(celdas.every((el) => el.textContent === '11')).toBe(true)
+  })
+
   it('tocar "+4" en la fila de Boxeo llama a onAjustarCredito con la disciplina Boxeo -- NUNCA CrossFit por default', () => {
     render(<SociosTabla socios={[SOCIO_MULTI_DISCIPLINA]} {...HANDLERS} />)
     const botonesBoxeo = screen.getAllByTitle('Asignar pack de 4 créditos a Boxeo')

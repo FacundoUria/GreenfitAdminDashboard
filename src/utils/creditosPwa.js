@@ -62,10 +62,39 @@ async function resolverUserId({ dni, email } = {}) {
 
 // ilike a propósito: `plan` es texto libre cargado por el staff y no
 // siempre calza en mayúsculas/minúsculas con `disciplines.name`.
+//
+// Antes esto usaba .maybeSingle(), que ERRORA (silenciosamente -- el
+// error nunca se chequeaba) si el ilike matchea MÁS de una fila. Como la
+// unique constraint de disciplines.name es case-sensitive, dos filas que
+// difieren solo en mayúsculas (ej. "Kickstrike" y "kickstrike", el mismo
+// tipo de incongruencia de nomenclatura que motivó el rename Kickboxing ->
+// Kickstrike) son perfectamente "únicas" para Postgres pero ambiguas para
+// ilike -- .maybeSingle() nunca elegía ninguna, y sincronizarCreditosPwa
+// terminaba devolviendo 'disciplina_no_encontrada' aunque la disciplina sí
+// existiera. Ahora se trae TODO lo que matchea y se elige a mano: primero
+// la que calza EXACTO (case-sensitive) contra el nombre que vino de
+// socios.plan; si ninguna calza exacto, la más antigua (la fila "real",
+// con historial real detrás, no un duplicado reciente por error de tipeo).
 async function resolverDisciplinaId(nombrePlan) {
   if (!nombrePlan) return null
-  const { data } = await supabase.from('disciplines').select('id').ilike('name', nombrePlan).maybeSingle()
-  return data?.id ?? null
+  const nombreTrim = nombrePlan.trim()
+  const { data, error } = await supabase.from('disciplines').select('id, name, created_at').ilike('name', nombreTrim)
+  if (error) {
+    logErrorSupabase(`resolverDisciplinaId (nombre "${nombrePlan}")`, error)
+    return null
+  }
+  if (!data || data.length === 0) return null
+  if (data.length === 1) return data[0].id
+
+  const exacta = data.find((d) => d.name === nombreTrim)
+  const elegida = exacta ?? [...data].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))[0]
+  console.warn(
+    `[creditosPwa] resolverDisciplinaId: "${nombrePlan}" matchea ${data.length} filas en disciplines (${data
+      .map((d) => `"${d.name}" id=${d.id}`)
+      .join(', ')}) -- usando ${exacta ? 'la que calza EXACTO' : 'la más antigua'} (id=${elegida.id}). Esto es un ` +
+      'problema de datos (probablemente una fila duplicada por mayúsculas/minúsculas en el catálogo de Disciplinas) -- conviene consolidarlas.',
+  )
+  return elegida.id
 }
 
 // La app de socios (PWA) consulta su propia tabla `user_credits` para saber

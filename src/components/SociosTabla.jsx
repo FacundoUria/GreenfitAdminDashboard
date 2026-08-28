@@ -76,8 +76,17 @@ function CreditosCell({ socio, onAjustarCredito }) {
     return <span className="text-gray-600">—</span>
   }
 
+  // Clave normalizada (minúsculas + trim) -- mismo criterio que
+  // planesDeCreditos/esPlanDeCreditos en utils/planes.js. `socio.plan`
+  // (texto libre cargado por el staff) y `disciplines.name` (el catálogo
+  // real, de donde sale disciplineName acá) pueden diferir en mayúsculas
+  // sin ser "el mismo error" -- una unique constraint case-sensitive deja
+  // convivir "Kickstrike" y "kickstrike" como filas DISTINTAS del
+  // catálogo. Con una clave exacta, esa diferencia de tipeo alcanzaba para
+  // que el balance real nunca matcheara y la grilla mostrara 0 siempre,
+  // aunque la PWA sí tuviera créditos de verdad.
   const realPorDisciplina = new Map(
-    (socio.creditosPwaPorDisciplina ?? []).map((c) => [c.disciplineName, c.remainingCredits]),
+    (socio.creditosPwaPorDisciplina ?? []).map((c) => [(c.disciplineName ?? '').trim().toLowerCase(), c.remainingCredits]),
   )
 
   return (
@@ -100,7 +109,7 @@ function CreditosCell({ socio, onAjustarCredito }) {
               className="w-6 text-center text-sm font-semibold text-white"
               title={`Créditos reales de ${disciplina} en la app`}
             >
-              {realPorDisciplina.get(disciplina) ?? 0}
+              {realPorDisciplina.get(disciplina.trim().toLowerCase()) ?? 0}
             </span>
             <button
               type="button"

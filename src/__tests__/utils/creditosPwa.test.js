@@ -36,7 +36,7 @@ describe('sincronizarVencimientoPwa (resolución por nombre de plan, no "cualqui
   it('resuelve la disciplina por el NOMBRE del plan cuando existe una fila que matchea', async () => {
     mockedFrom.mockImplementation((table) => {
       if (table === 'profiles') return makeChain({ data: { id: 'user-1' }, error: null })
-      if (table === 'disciplines') return makeChain({ data: { id: 'disc-aparatos' }, error: null })
+      if (table === 'disciplines') return makeChain({ data: [{ id: 'disc-aparatos' }], error: null })
       if (table === 'user_credits') return makeChain({ error: null })
       throw new Error(`tabla inesperada en el test: ${table}`)
     })
@@ -120,7 +120,7 @@ describe('resolución de cuenta PWA con fallback a email (sin DNI cargado)', () 
     mockedFrom.mockImplementation((table) => {
       llamadas.push(table)
       if (table === 'profiles') return makeChain({ data: { id: 'user-1' }, error: null })
-      if (table === 'disciplines') return makeChain({ data: { id: 'disc-crossfit' }, error: null })
+      if (table === 'disciplines') return makeChain({ data: [{ id: 'disc-crossfit' }], error: null })
       if (table === 'user_credits') return makeChain({ data: { id: 'uc-existente', remaining_credits: 3 }, error: null })
       throw new Error(`tabla inesperada en el test: ${table}`)
     })
@@ -146,7 +146,7 @@ describe('resolución de cuenta PWA con fallback a email (sin DNI cargado)', () 
         // 1ra llamada = por dni (no matchea). 2da = por email (sí matchea).
         return makeChain(llamadasProfiles === 1 ? { data: null, error: null } : { data: { id: 'user-2' }, error: null })
       }
-      if (table === 'disciplines') return makeChain({ data: { id: 'disc-crossfit' }, error: null })
+      if (table === 'disciplines') return makeChain({ data: [{ id: 'disc-crossfit' }], error: null })
       if (table === 'user_credits') {
         // Sin fila previa (.maybeSingle() -> null) -> toma la rama INSERT,
         // que encadena .select() después -- necesita un chain de verdad, no
@@ -210,7 +210,7 @@ describe('sincronizarCreditosPwa (UPSERT estricto: UPDATE si la fila ya existe, 
     let seInsertoAlgo = false
     mockedFrom.mockImplementation((table) => {
       if (table === 'profiles') return makeChain({ data: { id: 'user-1' }, error: null })
-      if (table === 'disciplines') return makeChain({ data: { id: 'disc-crossfit' }, error: null })
+      if (table === 'disciplines') return makeChain({ data: [{ id: 'disc-crossfit' }], error: null })
       if (table === 'user_credits') {
         // Base con data en forma de ARRAY (no un objeto suelto) -- el
         // UPDATE real encadena .select('id') al final para poder distinguir
@@ -250,7 +250,7 @@ describe('sincronizarCreditosPwa (UPSERT estricto: UPDATE si la fila ya existe, 
     let seActualizoAlgo = false
     mockedFrom.mockImplementation((table) => {
       if (table === 'profiles') return makeChain({ data: { id: 'user-aixa' }, error: null })
-      if (table === 'disciplines') return makeChain({ data: { id: 'disc-kickstrike' }, error: null })
+      if (table === 'disciplines') return makeChain({ data: [{ id: 'disc-kickstrike' }], error: null })
       if (table === 'user_credits') {
         // Base con data en forma de ARRAY -- el INSERT real encadena
         // .select('id') al final para confirmar que la fila se creó.
@@ -286,7 +286,7 @@ describe('sincronizarCreditosPwa (UPSERT estricto: UPDATE si la fila ya existe, 
   it('si el UPDATE de la fila existente falla en Supabase, propaga el error (no lo confunde con éxito)', async () => {
     mockedFrom.mockImplementation((table) => {
       if (table === 'profiles') return makeChain({ data: { id: 'user-1' }, error: null })
-      if (table === 'disciplines') return makeChain({ data: { id: 'disc-crossfit' }, error: null })
+      if (table === 'disciplines') return makeChain({ data: [{ id: 'disc-crossfit' }], error: null })
       if (table === 'user_credits') {
         // .update({...}).eq('id', ...) encadena sobre el MISMO chain (no
         // pasa por .maybeSingle()) -- por eso acá el resultado base
@@ -314,7 +314,7 @@ describe('sincronizarCreditosPwa (UPSERT estricto: UPDATE si la fila ya existe, 
   it('UPDATE que RLS bloquea en silencio (0 filas, sin error): se reporta como fallo, no como éxito', async () => {
     mockedFrom.mockImplementation((table) => {
       if (table === 'profiles') return makeChain({ data: { id: 'user-1' }, error: null })
-      if (table === 'disciplines') return makeChain({ data: { id: 'disc-crossfit' }, error: null })
+      if (table === 'disciplines') return makeChain({ data: [{ id: 'disc-crossfit' }], error: null })
       if (table === 'user_credits') {
         // .select('id') final resuelve un array VACÍO -- 0 filas afectadas,
         // pero sin error: exactamente lo que hace RLS cuando bloquea en
@@ -338,7 +338,7 @@ describe('sincronizarCreditosPwa (UPSERT estricto: UPDATE si la fila ya existe, 
   it('INSERT que RLS bloquea en silencio (0 filas, sin error): se reporta como fallo, no como éxito', async () => {
     mockedFrom.mockImplementation((table) => {
       if (table === 'profiles') return makeChain({ data: { id: 'user-aixa' }, error: null })
-      if (table === 'disciplines') return makeChain({ data: { id: 'disc-kickstrike' }, error: null })
+      if (table === 'disciplines') return makeChain({ data: [{ id: 'disc-kickstrike' }], error: null })
       if (table === 'user_credits') {
         const chain = makeChain({ data: [], error: null })
         chain.select = vi.fn(() => chain)
@@ -357,6 +357,90 @@ describe('sincronizarCreditosPwa (UPSERT estricto: UPDATE si la fila ya existe, 
   })
 })
 
+// Caso real reportado (segunda vuelta, post-rename Kickboxing -> Kickstrike):
+// la grilla del Admin mostraba 0 créditos y sumar/restar tiraba "disciplina
+// no encontrada" pese a que la PWA sincronizaba bien. Causa real: la unique
+// constraint de disciplines.name es CASE-SENSITIVE -- "Kickstrike" y
+// "kickstrike" conviven como filas DISTINTAS y perfectamente "únicas" para
+// Postgres, pero ilike (usado para resolver por nombre) las matchea a las
+// dos, y antes .maybeSingle() ante 2+ filas devolvía null en silencio (el
+// error ni se chequeaba). Ahora se resuelve la ambigüedad a mano.
+describe('resolverDisciplinaId (a través de sincronizarCreditosPwa) -- ambigüedad por mayúsculas/minúsculas en disciplines.name', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('dos filas matchean por ilike ("Kickstrike" y "kickstrike") -- se queda con la que calza EXACTO contra el nombre de socios.plan', async () => {
+    mockedFrom.mockImplementation((table) => {
+      if (table === 'profiles') return makeChain({ data: { id: 'user-aixa' }, error: null })
+      if (table === 'disciplines') {
+        return makeChain({
+          data: [
+            { id: 'disc-duplicada-vieja', name: 'kickstrike', created_at: '2025-01-01T00:00:00.000Z' },
+            { id: 'disc-real', name: 'Kickstrike', created_at: '2026-08-01T00:00:00.000Z' },
+          ],
+          error: null,
+        })
+      }
+      if (table === 'user_credits') {
+        const chain = makeChain({ data: [{ id: 'uc-1' }], error: null })
+        chain.select = vi.fn(() => chain)
+        chain.eq = vi.fn((columna, valor) => {
+          // El segundo .eq(...) de la lectura previa es sobre discipline_id
+          // -- confirma que se usó el id que calza EXACTO, no el otro.
+          if (columna === 'discipline_id') expect(valor).toBe('disc-real')
+          return chain
+        })
+        chain.order = vi.fn(() => chain)
+        chain.limit = vi.fn(() => chain)
+        chain.maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null })
+        chain.insert = vi.fn((payload) => {
+          expect(payload.discipline_id).toBe('disc-real')
+          return chain
+        })
+        return chain
+      }
+      throw new Error(`tabla inesperada en el test: ${table}`)
+    })
+
+    const resultado = await sincronizarCreditosPwa({ dni: '40222333', disciplina: 'Kickstrike', delta: 1 })
+    expect(resultado).toEqual({ synced: true })
+  })
+
+  it('ninguna de las filas ambiguas calza exacto -- usa la más antigua en vez de fallar', async () => {
+    mockedFrom.mockImplementation((table) => {
+      if (table === 'profiles') return makeChain({ data: { id: 'user-1' }, error: null })
+      if (table === 'disciplines') {
+        return makeChain({
+          data: [
+            { id: 'disc-vieja', name: 'CROSSFIT', created_at: '2025-01-01T00:00:00.000Z' },
+            { id: 'disc-nueva', name: 'crossfit ', created_at: '2026-08-01T00:00:00.000Z' },
+          ],
+          error: null,
+        })
+      }
+      if (table === 'user_credits') {
+        const chain = makeChain({ data: [{ id: 'uc-1' }], error: null })
+        chain.select = vi.fn(() => chain)
+        chain.eq = vi.fn((columna, valor) => {
+          if (columna === 'discipline_id') expect(valor).toBe('disc-vieja')
+          return chain
+        })
+        chain.order = vi.fn(() => chain)
+        chain.limit = vi.fn(() => chain)
+        chain.maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null })
+        chain.insert = vi.fn((payload) => {
+          expect(payload.discipline_id).toBe('disc-vieja')
+          return chain
+        })
+        return chain
+      }
+      throw new Error(`tabla inesperada en el test: ${table}`)
+    })
+
+    const resultado = await sincronizarCreditosPwa({ dni: '30111222', disciplina: 'CrossFit', delta: 1 })
+    expect(resultado).toEqual({ synced: true })
+  })
+})
+
 // TAREA 3: el vencimiento ya no es exclusivo de Aparatos -- para una
 // disciplina de CRÉDITOS, sincronizarVencimientoCreditoPwa tiene que
 // PRESERVAR el remaining_credits actual (a diferencia de
@@ -369,7 +453,7 @@ describe('sincronizarVencimientoCreditoPwa (vencimiento de una disciplina de cr�
     let payloadInsertado = null
     mockedFrom.mockImplementation((table) => {
       if (table === 'profiles') return makeChain({ data: { id: 'user-1' }, error: null })
-      if (table === 'disciplines') return makeChain({ data: { id: 'disc-crossfit' }, error: null })
+      if (table === 'disciplines') return makeChain({ data: [{ id: 'disc-crossfit' }], error: null })
       if (table === 'user_credits') {
         const chain = makeChain({ error: null })
         chain.select = vi.fn(() => chain)
@@ -401,7 +485,7 @@ describe('sincronizarVencimientoCreditoPwa (vencimiento de una disciplina de cr�
     let payloadInsertado = null
     mockedFrom.mockImplementation((table) => {
       if (table === 'profiles') return makeChain({ data: { id: 'user-1' }, error: null })
-      if (table === 'disciplines') return makeChain({ data: { id: 'disc-crossfit' }, error: null })
+      if (table === 'disciplines') return makeChain({ data: [{ id: 'disc-crossfit' }], error: null })
       if (table === 'user_credits') {
         const chain = makeChain({ error: null })
         chain.select = vi.fn(() => chain)
