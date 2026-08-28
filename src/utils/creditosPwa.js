@@ -48,13 +48,19 @@ async function resolverDisciplinaId(nombrePlan) {
 //
 // `fechaVencimiento` es opcional -- si el mismo pago ADEMÁS carga una fecha
 // de vencimiento para esta disciplina (TAREA 3: ya no es exclusivo de
-// Aparatos), se usa esa fecha en vez del rolling de 30 días de siempre, EN
-// EL MISMO insert. A propósito: hacer un segundo insert aparte (vía
-// sincronizarVencimientoCreditoPwa) para la misma disciplina en el mismo
-// pago competía por ser "la fila más reciente" contra este insert -- dos
-// escrituras separadas casi simultáneas, cualquiera de las dos podía ganar
-// y pisar a la otra. Un solo insert con los dos datos juntos elimina esa
-// carrera de raíz.
+// Aparatos), se usa esa fecha en vez del rolling de 30 días de siempre.
+//
+// UPSERT estricto (bug real: Aixa en Kickboxing -- la migración inicial
+// solo sembró filas en user_credits para CrossFit; cualquier disciplina que
+// un socio nunca tocó antes no tenía NINGUNA fila, y sumarle créditos
+// rompía la sincronización). Si ya existe una fila para este socio+
+// disciplina (la más reciente por created_at, mismo criterio de lectura que
+// usa toda la app -- fetchUserBalances/disciplinas_del_plan_actual), se
+// actualiza ESA fila en el lugar. Si no existe ninguna (disciplina nunca
+// inicializada para este socio), se inserta una nueva arrancando desde 0.
+// Antes esto SIEMPRE insertaba una fila nueva -- funcionaba de pura
+// casualidad para disciplinas que ya tenían historial (CrossFit), pero
+// dependía en silencio de que esa fila previa existiera.
 export async function sincronizarCreditosPwa({ dni, email, disciplina, delta, fechaVencimiento }) {
   try {
     const userId = await resolverUserId({ dni, email })
@@ -63,34 +69,40 @@ export async function sincronizarCreditosPwa({ dni, email, disciplina, delta, fe
     const disciplineId = await resolverDisciplinaId(disciplina)
     if (!disciplineId) return { synced: false, reason: 'disciplina_no_encontrada' }
 
-    const { data: actual } = await supabase
+    const { data: filaActual } = await supabase
       .from('user_credits')
-      .select('remaining_credits')
+      .select('id, remaining_credits')
       .eq('user_id', userId)
       .eq('discipline_id', disciplineId)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
 
-    const nuevoBalance = Math.max(0, (actual?.remaining_credits ?? 0) + delta)
+    const nuevoBalance = Math.max(0, (filaActual?.remaining_credits ?? 0) + delta)
     const expiresAt = fechaVencimiento
       ? new Date(`${fechaVencimiento}T12:00:00`).toISOString()
       : new Date(Date.now() + DIAS_VIGENCIA_CREDITOS * 86_400_000).toISOString()
 
-    const { error } = await supabase.from('user_credits').insert({
-      user_id: userId,
-      discipline_id: disciplineId,
-      remaining_credits: nuevoBalance,
-      expires_at: expiresAt,
-      // Explícito (no depender del default now() de la columna) -- todo el
-      // resto del código lee "la fila más reciente por created_at" para
-      // saber cuál es el balance vigente, así que esto es parte del
-      // contrato real de la función, no un detalle de infraestructura.
-      created_at: new Date().toISOString(),
-    })
+    const { error } = filaActual
+      ? await supabase
+          .from('user_credits')
+          .update({ remaining_credits: nuevoBalance, expires_at: expiresAt })
+          .eq('id', filaActual.id)
+      : await supabase.from('user_credits').insert({
+          user_id: userId,
+          discipline_id: disciplineId,
+          remaining_credits: nuevoBalance,
+          expires_at: expiresAt,
+          // Explícito (no depender del default now() de la columna) -- todo
+          // el resto del código lee "la fila más reciente por created_at"
+          // para saber cuál es el balance vigente, así que esto es parte
+          // del contrato real de la función, no un detalle de
+          // infraestructura.
+          created_at: new Date().toISOString(),
+        })
 
     if (error) {
-      console.error('ERROR user_credits INSERT SUPABASE (créditos):', {
+      console.error('ERROR user_credits UPSERT SUPABASE (créditos):', {
         message: error.message,
         details: error.details,
         hint: error.hint,

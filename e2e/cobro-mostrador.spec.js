@@ -167,11 +167,13 @@ test('Cobro mostrador: acreditar créditos a una disciplina se refleja en la tab
   expect(pago.periodo_hasta).not.toBeNull()
   expect(pago.created_by).toBe(ADMIN_DEMO.id)
 
-  // Acreditación directa en user_credits -- la fila nueva (ledger append-only,
-  // ver sincronizarCreditosPwa) es la que realmente sube el saldo.
+  // Acreditación directa en user_credits -- UPSERT estricto (ver
+  // sincronizarCreditosPwa): como Braian YA tenía una fila de Kickboxing
+  // (uc-kick-1), se actualiza EN EL LUGAR en vez de insertar una nueva.
   const filasKickboxing = tables.user_credits.filter((f) => f.discipline_id === DISCIPLINA_KICKBOXING.id)
-  expect(filasKickboxing).toHaveLength(2)
-  expect(filasKickboxing.at(-1).remaining_credits).toBe(10)
+  expect(filasKickboxing).toHaveLength(1)
+  expect(filasKickboxing[0].id).toBe('uc-kick-1')
+  expect(filasKickboxing[0].remaining_credits).toBe(10)
 
   // El pozo global legacy (socios.creditos) también queda al día -- lo sigue
   // usando `esPlanDeCreditos`/`socios.creditos` como fallback en otras vistas.

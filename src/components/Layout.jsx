@@ -12,7 +12,15 @@ function Layout() {
   return (
     <ConfiguracionProvider>
       <NotasProvider>
-        <div className="flex min-h-screen bg-greenfit-dark text-white">
+        {/* min-h-dvh (no min-h-screen/100vh) -- en tablet, al abrir el
+            teclado virtual, 100vh sigue midiendo el viewport COMPLETO (sin
+            descontar el teclado), así que este contenedor no se achica y el
+            <main> de abajo termina con una porción tapada por el teclado en
+            vez de scrollear hasta ahí. dvh (dynamic viewport height) se
+            recalcula con el teclado abierto, así que el layout se ajusta de
+            verdad y el <main> (que ya tiene su propio overflow-y-auto) queda
+            100% scrolleable dentro del espacio real y visible. */}
+        <div className="flex min-h-dvh bg-greenfit-dark text-white">
           <Sidebar abierto={sidebarAbierto} onCerrar={() => setSidebarAbierto(false)} />
           <div className="flex min-w-0 flex-1 flex-col">
             <Header onAbrirSidebar={() => setSidebarAbierto(true)} />

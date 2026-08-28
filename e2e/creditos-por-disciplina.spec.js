@@ -96,14 +96,11 @@ test('un socio con CrossFit + Boxeo muestra el balance REAL de cada disciplina, 
 test('sumar créditos en la fila de Boxeo NUNCA impacta a CrossFit -- cada fila tiene su propio stepper', async ({ page }) => {
   // `tables` queda como referencia mutable (mockSupabase la muta in place)
   // -- se usa una variable propia en vez de un objeto inline para poder
-  // inspeccionar directo qué terminó insertándose en user_credits. Necesario
-  // acá porque el mock E2E no resuelve joins de verdad: una fila insertada
-  // por la propia acción (a diferencia de las fixtures iniciales de arriba)
-  // no trae el `discipline` embebido, así que leerla de vuelta vía
-  // fetchCreditosPorDisciplina (que sí necesita ese embed) no es una forma
-  // confiable de verificar ACÁ a qué disciplina viajó el ajuste -- inspeccionar
-  // el insert real es la forma directa de probar exactamente el bug (¿la
-  // disciplina en la fila insertada es la correcta?).
+  // inspeccionar directo qué terminó pasando en user_credits. UPSERT
+  // estricto (ver creditosPwa.js): como Boxeo YA tiene una fila (uc-2), el
+  // ajuste la ACTUALIZA en el lugar en vez de insertar una nueva -- por eso
+  // acá se pollea el valor de esa fila puntual, no la longitud del array
+  // (que con el UPSERT se queda igual).
   const tables = {
     ...tablasBase(),
     disciplines: [...tablasBase().disciplines, DISCIPLINA_BOXEO],
@@ -118,13 +115,82 @@ test('sumar créditos en la fila de Boxeo NUNCA impacta a CrossFit -- cada fila 
 
   await filaTabla.getByTitle('Asignar pack de 4 créditos a Boxeo').click()
 
-  // Espera a que el insert real llegue al mock (async: PATCH de socios.creditos
-  // + sincronizarCreditosPwa) en vez de un timeout fijo.
-  await expect.poll(() => tables.user_credits.length).toBe(3)
+  // Espera a que el UPDATE real llegue al mock (async: PATCH de
+  // socios.creditos + sincronizarCreditosPwa) en vez de un timeout fijo.
+  await expect.poll(() => tables.user_credits.find((f) => f.id === 'uc-2')?.remaining_credits).toBe(4)
 
-  const filaNueva = tables.user_credits.at(-1)
-  expect(filaNueva.discipline_id).toBe('disc-boxeo') // NUNCA 'disc-crossfit' -- ese es exactamente el bug reportado
-  expect(filaNueva.remaining_credits).toBe(4) // 0 (balance previo de Boxeo) + 4
-  // Ningún insert nuevo para CrossFit -- su única fila sigue siendo la fixture inicial.
-  expect(tables.user_credits.filter((f) => f.discipline_id === 'disc-crossfit')).toHaveLength(1)
+  // Ningún insert nuevo -- sigue habiendo exactamente 2 filas (una por
+  // disciplina), la de Boxeo se actualizó EN EL LUGAR.
+  expect(tables.user_credits).toHaveLength(2)
+  const filaBoxeo = tables.user_credits.find((f) => f.id === 'uc-2')
+  expect(filaBoxeo.discipline_id).toBe('disc-boxeo') // NUNCA 'disc-crossfit' -- ese es exactamente el bug reportado
+  expect(filaBoxeo.remaining_credits).toBe(4) // 0 (balance previo de Boxeo) + 4
+  // La fila de CrossFit no se tocó.
+  expect(tables.user_credits.find((f) => f.id === 'uc-1').remaining_credits).toBe(6)
+})
+
+// Caso real reportado: Aixa en Kickboxing. La migración inicial solo sembró
+// filas de user_credits para CrossFit -- un socio que además tiene
+// Kickboxing en su plan pero NUNCA tuvo créditos cargados ahí no tenía
+// ninguna fila en user_credits para esa disciplina puntual. Antes, sumarle
+// créditos rompía la sincronización con la app ("Crédito al plan
+// actualizado pero no se pudo sincronizar Kickboxing con la app"). Ahora
+// sincronizarCreditosPwa hace un UPSERT estricto: si no hay fila previa,
+// inicializa una nueva en vez de fallar.
+const DISCIPLINA_KICKBOXING = { id: 'disc-kickboxing', name: 'Kickboxing', kind: 'credits' }
+
+const SOCIO_AIXA = {
+  id: 'e2e-socio-aixa',
+  nombre: 'Aixa',
+  apellido: 'Gómez',
+  dni: '40222333',
+  email: 'aixa@e2e.test',
+  telefono: null,
+  plan: ['Kickboxing'],
+  estado: 'Activo',
+  fecha_vencimiento: null,
+  dia_corte: null,
+  created_at: '2025-06-01T00:00:00.000Z',
+  ultimo_pago: '2026-08-01',
+  creditos: 0,
+  activo: true,
+}
+
+const PROFILE_AIXA = {
+  id: 'e2e-profile-aixa',
+  dni: SOCIO_AIXA.dni,
+  full_name: 'Aixa Gómez',
+  avatar_url: null,
+  created_at: '2025-06-01T00:00:00.000Z',
+  role: 'socio',
+}
+
+test('caso Aixa: sumar créditos en una disciplina que el socio NUNCA tuvo inicializada en la app crea la fila en vez de romper la sincronización', async ({
+  page,
+}) => {
+  const tables = {
+    ...tablasBase(),
+    disciplines: [...tablasBase().disciplines, DISCIPLINA_KICKBOXING],
+    socios: [SOCIO_AIXA],
+    profiles: [PROFILE_AIXA],
+    user_credits: [], // Ninguna fila todavía para Aixa -- ni siquiera de CrossFit.
+  }
+  await loginComoAdmin(page, { tables })
+
+  await irASocios(page)
+  const filaTabla = page.getByRole('table').getByRole('row', { name: /Aixa Gómez/ })
+
+  await filaTabla.getByTitle('Sumar 1 crédito a Kickboxing').click()
+
+  // Antes de este fix, esto disparaba el toast de "no se pudo sincronizar"
+  // -- ahora tiene que sincronizar bien y no mostrar ningún aviso de error.
+  await expect.poll(() => tables.user_credits.length).toBe(1)
+
+  const filaNueva = tables.user_credits[0]
+  expect(filaNueva.discipline_id).toBe('disc-kickboxing')
+  expect(filaNueva.remaining_credits).toBe(1)
+  expect(filaNueva.user_id).toBe(PROFILE_AIXA.id)
+
+  // Y el toast de "no se pudo sincronizar" NUNCA aparece.
+  await expect(page.getByText(/no se pudo sincronizar Kickboxing con la app/)).toHaveCount(0)
 })

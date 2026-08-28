@@ -16,7 +16,7 @@ const mockedFrom = supabase.from
 function makeChain(result) {
   const chain = {}
   const self = () => chain
-  ;['select', 'eq', 'ilike', 'limit', 'order', 'insert'].forEach((metodo) => {
+  ;['select', 'eq', 'ilike', 'limit', 'order', 'insert', 'update'].forEach((metodo) => {
     chain[metodo] = vi.fn(self)
   })
   chain.maybeSingle = vi.fn().mockResolvedValue(result)
@@ -121,7 +121,7 @@ describe('resolución de cuenta PWA con fallback a email (sin DNI cargado)', () 
       llamadas.push(table)
       if (table === 'profiles') return makeChain({ data: { id: 'user-1' }, error: null })
       if (table === 'disciplines') return makeChain({ data: { id: 'disc-crossfit' }, error: null })
-      if (table === 'user_credits') return makeChain({ data: { remaining_credits: 3 }, error: null })
+      if (table === 'user_credits') return makeChain({ data: { id: 'uc-existente', remaining_credits: 3 }, error: null })
       throw new Error(`tabla inesperada en el test: ${table}`)
     })
 
@@ -174,6 +174,115 @@ describe('resolución de cuenta PWA con fallback a email (sin DNI cargado)', () 
   it('una excepción inesperada (no un error de Supabase, un throw real) se atrapa y no se propaga', async () => {
     mockedFrom.mockImplementation(() => {
       throw new Error('Falla de red simulada')
+    })
+
+    const resultado = await sincronizarCreditosPwa({ dni: '30111222', disciplina: 'CrossFit', delta: 1 })
+    expect(resultado).toEqual({ synced: false, reason: 'error_supabase' })
+  })
+})
+
+// Caso real: Aixa en Kickboxing. La migración inicial solo sembró filas de
+// user_credits para CrossFit -- cualquier socio que nunca tuvo créditos
+// cargados en OTRA disciplina no tenía ninguna fila ahí, y sumarle créditos
+// rompía la sincronización con la PWA ("Crédito al plan actualizado pero no
+// se pudo sincronizar Kickboxing con la app"). Ahora es un UPSERT estricto:
+// UPDATE en el lugar si ya existe una fila para ese socio+disciplina,
+// INSERT (arrancando desde 0) si es la primera vez.
+describe('sincronizarCreditosPwa (UPSERT estricto: UPDATE si la fila ya existe, INSERT si nunca se inicializó)', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('con una fila previa (ej. CrossFit, ya tenía créditos): actualiza esa fila en el lugar, no inserta una nueva', async () => {
+    let payloadUpdate = null
+    let idActualizado = null
+    let seInsertoAlgo = false
+    mockedFrom.mockImplementation((table) => {
+      if (table === 'profiles') return makeChain({ data: { id: 'user-1' }, error: null })
+      if (table === 'disciplines') return makeChain({ data: { id: 'disc-crossfit' }, error: null })
+      if (table === 'user_credits') {
+        const chain = makeChain({ error: null })
+        chain.select = vi.fn(() => chain)
+        chain.eq = vi.fn((columna, valor) => {
+          if (columna === 'id') idActualizado = valor
+          return chain
+        })
+        chain.order = vi.fn(() => chain)
+        chain.limit = vi.fn(() => chain)
+        chain.maybeSingle = vi.fn().mockResolvedValue({ data: { id: 'uc-crossfit-1', remaining_credits: 5 }, error: null })
+        chain.update = vi.fn((payload) => {
+          payloadUpdate = payload
+          return chain
+        })
+        chain.insert = vi.fn(() => {
+          seInsertoAlgo = true
+          return { error: null }
+        })
+        return chain
+      }
+      throw new Error(`tabla inesperada en el test: ${table}`)
+    })
+
+    const resultado = await sincronizarCreditosPwa({ dni: '30111222', disciplina: 'CrossFit', delta: 3 })
+
+    expect(resultado).toEqual({ synced: true })
+    expect(seInsertoAlgo).toBe(false)
+    expect(idActualizado).toBe('uc-crossfit-1')
+    expect(payloadUpdate.remaining_credits).toBe(8) // 5 + 3
+  })
+
+  it('caso Aixa: sin ninguna fila previa en Kickboxing, inicializa con un INSERT en vez de fallar', async () => {
+    let payloadInsertado = null
+    let seActualizoAlgo = false
+    mockedFrom.mockImplementation((table) => {
+      if (table === 'profiles') return makeChain({ data: { id: 'user-aixa' }, error: null })
+      if (table === 'disciplines') return makeChain({ data: { id: 'disc-kickboxing' }, error: null })
+      if (table === 'user_credits') {
+        const chain = makeChain({ error: null })
+        chain.select = vi.fn(() => chain)
+        chain.eq = vi.fn(() => chain)
+        chain.order = vi.fn(() => chain)
+        chain.limit = vi.fn(() => chain)
+        // Nunca tuvo una fila en Kickboxing -- 0 filas, no un error.
+        chain.maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null })
+        chain.update = vi.fn(() => {
+          seActualizoAlgo = true
+          return chain
+        })
+        chain.insert = vi.fn((payload) => {
+          payloadInsertado = payload
+          return { error: null }
+        })
+        return chain
+      }
+      throw new Error(`tabla inesperada en el test: ${table}`)
+    })
+
+    const resultado = await sincronizarCreditosPwa({ dni: '40222333', disciplina: 'Kickboxing', delta: 6 })
+
+    expect(resultado).toEqual({ synced: true })
+    expect(seActualizoAlgo).toBe(false)
+    expect(payloadInsertado).toEqual(
+      expect.objectContaining({ user_id: 'user-aixa', discipline_id: 'disc-kickboxing', remaining_credits: 6 }),
+    )
+  })
+
+  it('si el UPDATE de la fila existente falla en Supabase, propaga el error (no lo confunde con éxito)', async () => {
+    mockedFrom.mockImplementation((table) => {
+      if (table === 'profiles') return makeChain({ data: { id: 'user-1' }, error: null })
+      if (table === 'disciplines') return makeChain({ data: { id: 'disc-crossfit' }, error: null })
+      if (table === 'user_credits') {
+        // .update({...}).eq('id', ...) encadena sobre el MISMO chain (no
+        // pasa por .maybeSingle()) -- por eso acá el resultado base
+        // (`chain.then`) es el error, y solo .maybeSingle() (la lectura
+        // previa) se pisa aparte con el balance existente.
+        const chain = makeChain({ error: { message: 'permission denied', code: '42501' } })
+        chain.select = vi.fn(() => chain)
+        chain.eq = vi.fn(() => chain)
+        chain.order = vi.fn(() => chain)
+        chain.limit = vi.fn(() => chain)
+        chain.maybeSingle = vi.fn().mockResolvedValue({ data: { id: 'uc-1', remaining_credits: 5 }, error: null })
+        return chain
+      }
+      throw new Error(`tabla inesperada en el test: ${table}`)
     })
 
     const resultado = await sincronizarCreditosPwa({ dni: '30111222', disciplina: 'CrossFit', delta: 1 })

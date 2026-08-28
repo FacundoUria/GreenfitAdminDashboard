@@ -36,7 +36,9 @@ function Login() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-greenfit-dark px-4">
+    // min-h-dvh (no min-h-screen) -- mismo motivo que Layout.jsx: en
+    // tablet/mobile, 100vh no descuenta el teclado virtual al abrirse, dvh sí.
+    <div className="flex min-h-dvh items-center justify-center bg-greenfit-dark px-4">
       <div className="w-full max-w-sm rounded-xl border border-white/5 bg-greenfit-card p-6 sm:p-8">
         <div className="mb-6 flex flex-col items-center gap-2">
           <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-greenfit-primary">
