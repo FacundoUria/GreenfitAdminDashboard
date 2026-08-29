@@ -3,7 +3,7 @@ import { loginComoAdmin } from './support/auth.js'
 import { tablasBase, PROFILE_MARTINA, DISCIPLINA_CROSSFIT } from './support/fixtures.js'
 import { irASocios } from './support/nav.js'
 
-// Socio de plan "por vencimiento" (Aparatos / Musculación) con fecha ya
+// Socio de plan "por vencimiento" (Aparatos) con fecha ya
 // cargada -- para probar la edición DIRECTA, sin pasar por "Registrar Pago".
 const SOCIO_APARATOS = {
   id: 'e2e-socio-aparatos',
@@ -12,7 +12,7 @@ const SOCIO_APARATOS = {
   dni: '30222333',
   email: 'lucia@e2e.test',
   telefono: '2610000001',
-  plan: ['Aparatos / Musculación'],
+  plan: ['Aparatos'],
   estado: 'Activo',
   fecha_vencimiento: '2026-08-10',
   dia_corte: 10,

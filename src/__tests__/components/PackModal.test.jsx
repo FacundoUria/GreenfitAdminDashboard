@@ -35,9 +35,9 @@ describe('PackModal -- alta/edición de un pack/combo real de `packs` (precio/cr
     expect(screen.getByLabelText('Créditos 1')).toBeInTheDocument()
   })
 
-  it('tildar "¿Incluye Aparatos / Musculación?" muestra Días de Vigencia con los atajos de meses', () => {
+  it('tildar "¿Incluye Aparatos?" muestra Días de Vigencia con los atajos de meses', () => {
     render(<PackModal pack={null} disciplinas={DISCIPLINAS} onClose={vi.fn()} onSaved={vi.fn()} />)
-    fireEvent.click(screen.getByLabelText('¿Incluye Aparatos / Musculación?'))
+    fireEvent.click(screen.getByLabelText('¿Incluye Aparatos?'))
 
     expect(screen.getByLabelText('Días de Vigencia')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '2 Meses (60 días)' }))
@@ -47,7 +47,7 @@ describe('PackModal -- alta/edición de un pack/combo real de `packs` (precio/cr
   it('bloquea el submit si el precio es 0', () => {
     render(<PackModal pack={null} disciplinas={DISCIPLINAS} onClose={vi.fn()} onSaved={vi.fn()} />)
     fireEvent.change(screen.getByLabelText('Nombre del Plan/Combo'), { target: { value: 'Combo 8+8' } })
-    fireEvent.click(screen.getByLabelText('¿Incluye Aparatos / Musculación?'))
+    fireEvent.click(screen.getByLabelText('¿Incluye Aparatos?'))
     fireEvent.click(screen.getByRole('button', { name: 'Guardar' }))
 
     expect(screen.getByText('El precio tiene que ser mayor a 0.')).toBeInTheDocument()
@@ -113,7 +113,7 @@ describe('PackModal -- alta/edición de un pack/combo real de `packs` (precio/cr
     render(<PackModal pack={null} disciplinas={DISCIPLINAS} onClose={vi.fn()} onSaved={vi.fn()} />)
     fireEvent.change(screen.getByLabelText('Nombre del Plan/Combo'), { target: { value: 'Pase 2 Meses Aparatos' } })
     fireEvent.change(screen.getByLabelText('Precio ($)'), { target: { value: '70000' } })
-    fireEvent.click(screen.getByLabelText('¿Incluye Aparatos / Musculación?'))
+    fireEvent.click(screen.getByLabelText('¿Incluye Aparatos?'))
     fireEvent.click(screen.getByRole('button', { name: '2 Meses (60 días)' }))
     fireEvent.click(screen.getByRole('button', { name: 'Guardar' }))
 
@@ -138,7 +138,7 @@ describe('PackModal -- alta/edición de un pack/combo real de `packs` (precio/cr
     render(<PackModal pack={null} disciplinas={DISCIPLINAS} onClose={vi.fn()} onSaved={vi.fn()} />)
     fireEvent.change(screen.getByLabelText('Nombre del Plan/Combo'), { target: { value: 'Aparatos + 12 créditos CrossFit' } })
     fireEvent.change(screen.getByLabelText('Precio ($)'), { target: { value: '90000' } })
-    fireEvent.click(screen.getByLabelText('¿Incluye Aparatos / Musculación?'))
+    fireEvent.click(screen.getByLabelText('¿Incluye Aparatos?'))
     fireEvent.click(screen.getByRole('button', { name: '1 Mes (30 días)' }))
     fireEvent.click(screen.getByRole('button', { name: 'Agregar Disciplina' }))
     fireEvent.change(screen.getByLabelText('Disciplina 1'), { target: { value: 'disc-crossfit' } })
@@ -199,7 +199,7 @@ describe('PackModal -- alta/edición de un pack/combo real de `packs` (precio/cr
     render(<PackModal pack={comboExistente} disciplinas={DISCIPLINAS} onClose={vi.fn()} onSaved={vi.fn()} />)
 
     expect(screen.getByLabelText('Nombre del Plan/Combo')).toHaveValue('Aparatos + 12 créditos CrossFit')
-    expect(screen.getByLabelText('¿Incluye Aparatos / Musculación?')).toBeChecked()
+    expect(screen.getByLabelText('¿Incluye Aparatos?')).toBeChecked()
     expect(screen.getByLabelText('Días de Vigencia')).toHaveValue(30)
     expect(screen.getByLabelText('Disciplina 1')).toHaveValue('disc-crossfit')
     expect(screen.getByLabelText('Créditos 1')).toHaveValue(12)

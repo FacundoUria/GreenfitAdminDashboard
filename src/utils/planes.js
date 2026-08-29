@@ -1,11 +1,14 @@
-export const PLANES_DISPONIBLES = ['Pase Libre', 'CrossFit', 'Boxeo', 'Kickstrike', 'Aparatos / Musculación']
+// Nomenclatura estricta (pedido del cliente): "Aparatos / Musculación" se
+// unifica a "Aparatos" -- mismo criterio que el rename Kickboxing ->
+// Kickstrike, misma migración SQL (supabase_migration_unificar_disciplinas.sql).
+export const PLANES_DISPONIBLES = ['Pase Libre', 'CrossFit', 'Boxeo', 'Kickstrike', 'Aparatos']
 export const PLANES_DE_CREDITOS = ['crossfit', 'boxeo', 'kickstrike']
 
 const PRECIO_POR_PLAN = {
   crossfit: 'precio_crossfit',
   boxeo: 'precio_boxeo',
   kickstrike: 'precio_kickstrike',
-  'aparatos / musculación': 'precio_aparatos',
+  aparatos: 'precio_aparatos',
 }
 
 // `plan` puede venir como texto suelto (dato legacy) o como array (multi-plan).
@@ -32,8 +35,8 @@ export function tienePlanDeVencimiento(plan) {
 }
 
 // Subconjunto de `plan` que son actividades por vencimiento (no de créditos)
-// -- "Pase Libre" y "Aparatos / Musculación" son las dos etiquetas posibles
-// hoy, y un socio podría (en teoría) tener las dos cargadas. Se usa para
+// -- "Pase Libre" y "Aparatos" son las dos etiquetas posibles hoy, y un
+// socio podría (en teoría) tener las dos cargadas. Se usa para
 // sincronizar la fecha de vencimiento con la PWA resolviendo la disciplina
 // por NOMBRE (igual que planesDeCreditos con los créditos) en vez de
 // asumir "la única disciplina de tipo membership que exista" -- esa
@@ -42,8 +45,8 @@ export function planesDeVencimiento(plan) {
   return normalizarPlanes(plan).filter((p) => !PLANES_DE_CREDITOS.includes((p ?? '').toLowerCase()))
 }
 
-// "Pase Libre" SÍ es un plan real (membresía de acceso libre a Aparatos/
-// Musculación, sin créditos ni turnos) -- no hay que descartarlo: la
+// "Pase Libre" SÍ es un plan real (membresía de acceso libre a Aparatos,
+// sin créditos ni turnos) -- no hay que descartarlo: la
 // mayoría de los socios activos lo tienen como su membresía de verdad. Acá
 // solo formateamos lo que haya; "Sin plan" es nada más el fallback para un
 // `plan` null/vacío de verdad (no debería pasar si se cargó desde el panel,

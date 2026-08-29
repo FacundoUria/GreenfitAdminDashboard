@@ -226,7 +226,7 @@ export async function sincronizarCreditosPwa({ dni, email, disciplina, delta, fe
   }
 }
 
-// El pase de Aparatos / Musculación (y "Pase Libre", que es el mismo acceso
+// El pase de Aparatos (y "Pase Libre", que es el mismo acceso
 // libre sin créditos ni turnos -- ver planes.js) vence por fecha, no se
 // consume por reserva. A diferencia de sincronizarCreditosPwa, acá SÍ
 // pisamos con el valor absoluto que calculó el admin: no hay uso del lado
@@ -235,7 +235,7 @@ export async function sincronizarCreditosPwa({ dni, email, disciplina, delta, fe
 // fuente de verdad (el ciclo de pago/edición directa que gestiona el admin).
 //
 // `disciplina` es el nombre del plan tal cual está en `socios.plan` (ej.
-// "Aparatos / Musculación") -- se resuelve por nombre igual que
+// "Aparatos") -- se resuelve por nombre igual que
 // sincronizarCreditosPwa, en vez de asumir "la única disciplina kind=
 // membership que exista" (esa asunción era el bug real: se rompe apenas
 // haya una segunda disciplina por vencimiento en `disciplines`). Si el

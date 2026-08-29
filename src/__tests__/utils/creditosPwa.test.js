@@ -43,7 +43,7 @@ describe('sincronizarVencimientoPwa (resolución por nombre de plan, no "cualqui
 
     const resultado = await sincronizarVencimientoPwa({
       dni: '30111222',
-      disciplina: 'Aparatos / Musculación',
+      disciplina: 'Aparatos',
       fechaVencimiento: '2026-09-01',
     })
 
@@ -100,7 +100,7 @@ describe('sincronizarVencimientoPwa (resolución por nombre de plan, no "cualqui
 
     const resultado = await sincronizarVencimientoPwa({
       dni: '00000000',
-      disciplina: 'Aparatos / Musculación',
+      disciplina: 'Aparatos',
       fechaVencimiento: '2026-09-01',
     })
 

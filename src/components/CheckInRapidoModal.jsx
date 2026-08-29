@@ -20,7 +20,7 @@ function iniciales(nombre) {
 //    puntual como asistida -- dispara el trigger de XP con la disciplina
 //    correcta, sea CrossFit, Boxeo, etc.).
 //  - Escribiendo nombre/DNI: busca cualquier socio con cuenta PWA y le
-//    acredita +100 XP de entreno libre de Musculación/Aparatos (para el
+//    acredita +100 XP de entreno libre de Aparatos (para el
 //    socio que vino a hacer pesas, no tiene una reserva de clase que marcar).
 function CheckInRapidoModal({ visible, onClose }) {
   const [busqueda, setBusqueda] = useState('')
@@ -143,7 +143,7 @@ function CheckInRapidoModal({ visible, onClose }) {
             autoFocus
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
-            placeholder="Buscar por nombre o DNI (Musculación/Aparatos)..."
+            placeholder="Buscar por nombre o DNI (Aparatos)..."
             aria-label="Buscar socio"
             className="w-full rounded-lg border border-white/10 bg-greenfit-dark py-2.5 pl-9 pr-3 text-sm text-white placeholder:text-gray-500 outline-none focus:border-greenfit-primary"
           />
@@ -209,7 +209,7 @@ function CheckInRapidoModal({ visible, onClose }) {
             </div>
           ) : sugerencias.length === 0 ? (
             <p className="py-6 text-center text-xs text-gray-500">
-              No hay ninguna clase en curso ni por arrancar ahora. Si viene a Musculación/Aparatos, buscalo por
+              No hay ninguna clase en curso ni por arrancar ahora. Si viene a Aparatos, buscalo por
               nombre o DNI arriba.
             </p>
           ) : (

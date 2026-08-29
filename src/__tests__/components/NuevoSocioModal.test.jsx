@@ -38,7 +38,7 @@ describe('NuevoSocioModal -- ningún plan arranca pre-tildado (fix del bug de di
     const checkboxKickstrike = screen.getByRole('checkbox', { name: 'Kickstrike' })
     expect(checkboxKickstrike.checked).toBe(true)
 
-    // Ninguna otra actividad -- en particular, "Aparatos / Musculación" y
+    // Ninguna otra actividad -- en particular, "Aparatos" y
     // "Pase Libre" (las dos etiquetas de vencimiento) tienen que quedar
     // SIN tildar para un socio que solo tiene Kickstrike.
     const otrosCheckboxes = screen.getAllByRole('checkbox').filter((cb) => cb !== checkboxKickstrike)

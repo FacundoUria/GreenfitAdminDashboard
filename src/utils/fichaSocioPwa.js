@@ -516,7 +516,7 @@ export async function fetchActividadReciente(limite = 20) {
         ? `Reversión de ${disciplina?.name ?? 'un evento'} (${e.xp_amount} XP)`
         : esClase
           ? `Asistencia confirmada: ${disciplina?.name ?? 'clase'}`
-          : `Check-in de ${disciplina?.name ?? 'Musculación'}`,
+          : `Check-in de ${disciplina?.name ?? 'Aparatos'}`,
       xpEventId: esReversion ? null : e.id,
       xpAmount: e.xp_amount,
       revertido: !esReversion && revertidos.has(e.id),

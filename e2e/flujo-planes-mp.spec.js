@@ -68,7 +68,7 @@ test.describe('Admin -- flujo de punta a punta: alta de pack en Configuración -
     await irAConfiguracion(page)
     await page.getByRole('button', { name: 'Nuevo Pack' }).click()
     await page.getByLabel('Nombre del Plan/Combo').fill('Pase 2 Meses Aparatos')
-    await page.getByLabel('¿Incluye Aparatos / Musculación?').click()
+    await page.getByLabel('¿Incluye Aparatos?').click()
     await expect(page.getByLabel('Días de Vigencia')).toBeVisible()
     await page.getByLabel('Precio ($)').fill('70000')
     await page.getByLabel('Días de Vigencia').fill('60')

@@ -38,7 +38,7 @@ const SOCIO_SIN_FOTO = {
   apellido: 'Álvarez',
   dni: '30999888',
   email: 'bruno@mail.com',
-  plan: ['Aparatos / Musculación'],
+  plan: ['Aparatos'],
   creditos: 0,
   activo: true,
   estado: 'activo',

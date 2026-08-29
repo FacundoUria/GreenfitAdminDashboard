@@ -3,7 +3,7 @@ import { planesDeVencimiento, planesDeCreditos, tienePlanDeVencimiento } from '.
 
 describe('planesDeVencimiento (subconjunto de plan que es "por vencimiento", no créditos)', () => {
   it('devuelve solo los planes de vencimiento en una cuenta multi-disciplina', () => {
-    expect(planesDeVencimiento(['Aparatos / Musculación', 'Boxeo', 'CrossFit'])).toEqual(['Aparatos / Musculación'])
+    expect(planesDeVencimiento(['Aparatos', 'Boxeo', 'CrossFit'])).toEqual(['Aparatos'])
   })
 
   it('devuelve un array vacío si el socio es 100% créditos', () => {
@@ -15,7 +15,7 @@ describe('planesDeVencimiento (subconjunto de plan que es "por vencimiento", no 
   })
 
   it('nunca se superpone con planesDeCreditos para el mismo plan', () => {
-    const plan = ['Aparatos / Musculación', 'Boxeo', 'CrossFit', 'Kickstrike', 'Pase Libre']
+    const plan = ['Aparatos', 'Boxeo', 'CrossFit', 'Kickstrike', 'Pase Libre']
     const vencimiento = planesDeVencimiento(plan)
     const creditos = planesDeCreditos(plan)
     expect(vencimiento.some((p) => creditos.includes(p))).toBe(false)
@@ -24,8 +24,8 @@ describe('planesDeVencimiento (subconjunto de plan que es "por vencimiento", no 
 
   it('coincide con tienePlanDeVencimiento (uno es la versión booleana del otro)', () => {
     expect(planesDeVencimiento(['Boxeo']).length > 0).toBe(tienePlanDeVencimiento(['Boxeo']))
-    expect(planesDeVencimiento(['Aparatos / Musculación']).length > 0).toBe(
-      tienePlanDeVencimiento(['Aparatos / Musculación']),
+    expect(planesDeVencimiento(['Aparatos']).length > 0).toBe(
+      tienePlanDeVencimiento(['Aparatos']),
     )
   })
 })

@@ -268,7 +268,7 @@ function NuevoSocioModal({
     }
 
     // Alta nueva: además de la tabla legacy `socios`, cargamos los créditos
-    // por disciplina y/o el vencimiento de Aparatos/Musculación en la tabla
+    // por disciplina y/o el vencimiento de Aparatos en la tabla
     // real que lee la PWA (`user_credits`) -- sin esto el socio recién
     // creado no ve nada en su Home hasta una acción separada posterior.
     if (!esEdicion) {

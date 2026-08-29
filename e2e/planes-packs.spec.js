@@ -71,7 +71,7 @@ test('crear un pase de Aparatos (¿Incluye Aparatos?) pide Días de Vigencia, no
 
   await page.getByLabel('Nombre del Plan/Combo').fill('Pase 2 Meses Aparatos')
   await expect(page.getByLabel('Días de Vigencia')).toHaveCount(0)
-  await page.getByLabel('¿Incluye Aparatos / Musculación?').click()
+  await page.getByLabel('¿Incluye Aparatos?').click()
   await expect(page.getByLabel('Días de Vigencia')).toBeVisible()
 
   await page.getByLabel('Precio ($)').fill('70000')

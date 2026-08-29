@@ -194,7 +194,7 @@ function PackModal({ pack, disciplinas, onClose, onSaved }) {
               onChange={(e) => updateField('incluyeAparatos', e.target.checked)}
               className="h-4 w-4 accent-greenfit-primary"
             />
-            <span className="text-sm text-gray-300">¿Incluye Aparatos / Musculación?</span>
+            <span className="text-sm text-gray-300">¿Incluye Aparatos?</span>
           </label>
 
           {form.incluyeAparatos && (

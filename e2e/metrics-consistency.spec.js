@@ -26,7 +26,7 @@ const SOCIOS_MIXTOS = [
     apellido: 'Activa',
     dni: '10000001',
     email: 'ana@e2e.test',
-    plan: ['Aparatos / Musculación'],
+    plan: ['Aparatos'],
     estado: 'Activo',
     fecha_vencimiento: fechaOffset(10), // vence en el futuro -> activo
     dia_corte: 10,
@@ -40,7 +40,7 @@ const SOCIOS_MIXTOS = [
     apellido: 'Tolerante',
     dni: '10000002',
     email: 'tomas@e2e.test',
-    plan: ['Aparatos / Musculación'],
+    plan: ['Aparatos'],
     estado: 'Vencido', // texto legacy A PROPÓSITO "equivocado" -- si algo
     // todavía leyera este campo en vez del cálculo real, este socio
     // aparecería mal categorizado y el test lo detectaría.
@@ -56,7 +56,7 @@ const SOCIOS_MIXTOS = [
     apellido: 'Vencida',
     dni: '10000003',
     email: 'vicky@e2e.test',
-    plan: ['Aparatos / Musculación'],
+    plan: ['Aparatos'],
     estado: 'Activo', // texto legacy también "equivocado" a propósito.
     fecha_vencimiento: fechaOffset(-20), // vencido hace 20 días, más allá de la tolerancia
     dia_corte: 10,
@@ -84,7 +84,7 @@ const SOCIOS_MIXTOS = [
     apellido: 'Baja',
     dni: '10000005',
     email: 'bruno@e2e.test',
-    plan: ['Aparatos / Musculación'],
+    plan: ['Aparatos'],
     estado: 'Activo',
     fecha_vencimiento: fechaOffset(10),
     dia_corte: 10,
