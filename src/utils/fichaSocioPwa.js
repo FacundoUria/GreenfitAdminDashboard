@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabaseClient'
+import { hoyISO } from './fecha'
 
 // Puente de lectura entre el panel admin (tabla legacy `socios`) y el schema
 // real que usa la PWA de socios (profiles/bookings/xp_events/routines,
@@ -142,13 +143,26 @@ export async function fetchCreditosPorDisciplina(dnis) {
 // Ficha 360° -- Historial único de Asistencias y Entrenamientos
 // ============================================================
 
+// Bug real reportado: la pestaña "Asistencias" de la Ficha 360° dependía
+// EXCLUSIVAMENTE de `attended = true` -- una columna que solo se pone en
+// true a mano desde "Check-in Rápido" en el gimnasio. Un socio que reservó
+// y fue a la clase pero nadie le hizo ese check-in puntual (lo más común)
+// no aparecía NUNCA acá, aunque hubiera ido -- mostraba "Todavía no hay
+// asistencias registradas" de forma permanente por más actividad real que
+// tuviera. Regla de negocio correcta: toda reserva ACTIVA (cancelar borra
+// la fila de `bookings` -- ver cancel_booking() -- así que cualquier fila
+// que sigue existiendo NUNCA fue cancelada) cuya fecha ya pasó cuenta como
+// "Asistió", haya o no check-in explícito de por medio. Por eso se saca el
+// `.eq('attended', true)` y se filtra por fecha en su lugar -- el check-in
+// explícito (attended=true) queda como un detalle informativo más, no
+// como el ÚNICO camino para aparecer acá.
 export async function fetchHistorialAsistencias(userId) {
   const [{ data: reservas, error: reservasError }, { data: checkins, error: checkinsError }] = await Promise.all([
     supabase
       .from('bookings')
-      .select('id, booking_date, classes(title, instructor)')
+      .select('id, booking_date, attended, classes(title, instructor)')
       .eq('user_id', userId)
-      .eq('attended', true)
+      .lte('booking_date', hoyISO())
       .order('booking_date', { ascending: false }),
     supabase
       .from('xp_events')
@@ -168,6 +182,8 @@ export async function fetchHistorialAsistencias(userId) {
       fecha: booking.booking_date,
       tipo: `Clase: ${clase?.title ?? 'Sin nombre'}`,
       detalle: clase?.instructor ? `Prof. ${clase.instructor}` : '—',
+      // Ya pasó y la reserva sigue activa (no cancelada) = Asistió, sin
+      // importar si hubo check-in puntual -- ver el comentario de arriba.
       estado: 'Asistió',
     }
   })

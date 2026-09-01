@@ -13,9 +13,22 @@ const PRECIO_POR_PLAN = {
 
 // `plan` puede venir como texto suelto (dato legacy) o como array (multi-plan).
 // Normalizamos acá para que el resto del código no tenga que preguntarse cuál es.
+//
+// Dedupe (Set, preserva el orden de la primera aparición) -- bug real: un
+// socio con "CrossFit" Y "Crosstraining" en su plan (dos strings distintos,
+// misma disciplina real) quedó con plan=["CrossFit","CrossFit"] LITERAL
+// después de unificar la nomenclatura (supabase_migration_unificar_
+// disciplinas.sql normaliza cada string por separado, sin deduplicar el
+// array resultante -- ver supabase_migration_limpiar_duplicados_plan.sql
+// para el backfill de los datos ya guardados así). NuevoSocioModal.jsx
+// arma `form.planes` con checkboxes fijos (no puede pushear un duplicado
+// nuevo por sí solo), pero SÍ carga cualquier duplicado histórico que ya
+// tuviera el socio -- como esta es la ÚNICA función por la que pasa
+// cualquier lectura de `plan` en todo el panel (creditosPwa.js incluido),
+// dedupear acá corta el problema de raíz para toda la UI de una vez.
 export function normalizarPlanes(plan) {
-  if (Array.isArray(plan)) return plan.filter(Boolean)
-  return plan ? [plan] : []
+  const lista = Array.isArray(plan) ? plan.filter(Boolean) : plan ? [plan] : []
+  return Array.from(new Set(lista))
 }
 
 export function esPlanDeCreditos(plan) {

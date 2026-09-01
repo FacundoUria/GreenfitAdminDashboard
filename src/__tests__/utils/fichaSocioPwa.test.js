@@ -28,7 +28,7 @@ const mockedRpc = supabase.rpc
 function makeChain(result) {
   const chain = {}
   const self = () => chain
-  ;['select', 'eq', 'in', 'is', 'order'].forEach((metodo) => {
+  ;['select', 'eq', 'lte', 'in', 'is', 'order'].forEach((metodo) => {
     chain[metodo] = vi.fn(self)
   })
   chain.then = (resolve, reject) => Promise.resolve(result).then(resolve, reject)
@@ -208,6 +208,52 @@ describe('fetchHistorialAsistencias (unifica Reservas de Clases + Check-in "¡Ho
     // Más reciente primero: el check-in del 10 antes que la clase del 9.
     expect(historial[0]).toMatchObject({ fecha: '2026-08-10', tipo: 'Entrenamiento Libre: ¡Hoy entrené!' })
     expect(historial[1]).toMatchObject({ fecha: '2026-08-09', tipo: 'Clase: CrossFit', detalle: 'Prof. Seba' })
+  })
+
+  // Bug real reportado: la pestaña quedaba en "Todavía no hay asistencias
+  // registradas" para SIEMPRE si nadie le hacía "Check-in Rápido" puntual al
+  // socio -- aunque hubiera ido a clase. Una reserva pasada sigue en
+  // `bookings` solo si NUNCA se canceló (cancel_booking() borra la fila), así
+  // que su sola existencia con fecha pasada ya es "Asistió", sin importar
+  // `attended`.
+  it('una reserva pasada SIN check-in explícito (attended=false, nunca marcada) igual cuenta como "Asistió"', async () => {
+    mockedFrom.mockImplementation((tabla) => {
+      if (tabla === 'bookings') {
+        return makeChain({
+          data: [
+            { id: 'b1', booking_date: '2026-08-09', attended: false, classes: { title: 'Boxeo', instructor: 'Seba' } },
+          ],
+          error: null,
+        })
+      }
+      return makeChain({ data: [], error: null })
+    })
+
+    const historial = await fetchHistorialAsistencias('u1')
+
+    expect(historial).toHaveLength(1)
+    expect(historial[0]).toMatchObject({ fecha: '2026-08-09', tipo: 'Clase: Boxeo', estado: 'Asistió' })
+  })
+
+  it('filtra por fecha (lte hoy) en vez de por `attended` -- no depende del check-in puntual para nada', async () => {
+    let searchParamsEq = null
+    mockedFrom.mockImplementation((tabla) => {
+      if (tabla === 'bookings') {
+        const chain = makeChain({ data: [], error: null })
+        chain.eq = vi.fn((columna) => {
+          searchParamsEq = columna
+          return chain
+        })
+        return chain
+      }
+      return makeChain({ data: [], error: null })
+    })
+
+    await fetchHistorialAsistencias('u1')
+
+    // El único .eq() de la query de bookings es user_id -- `attended` ya no
+    // se usa como filtro (la fecha, vía .lte(), es lo que decide).
+    expect(searchParamsEq).toBe('user_id')
   })
 })
 
