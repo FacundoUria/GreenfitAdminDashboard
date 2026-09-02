@@ -25,7 +25,7 @@ test('Check-in Rápido otorga +100 XP y respeta el límite de 1 por día', async
   await loginComoAdmin(page, {
     tables: { ...tablasBase(), profiles: [SOCIO_CHECKIN], xp_events: [] },
     rpc: {
-      admin_otorgar_checkin_musculacion: (request) => {
+      admin_otorgar_checkin_aparatos: (request) => {
         const { p_user_id: userId } = request.postDataJSON()
         expect(userId).toBe(SOCIO_CHECKIN.id) // el Admin manda el user_id exacto del socio buscado
         if (otorgado) {

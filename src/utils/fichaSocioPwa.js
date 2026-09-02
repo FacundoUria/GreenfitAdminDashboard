@@ -345,13 +345,13 @@ export async function buscarSociosParaCheckin(query) {
 export const CHECKIN_OTORGADO = 'otorgado'
 export const CHECKIN_YA_REGISTRADO = 'ya_registrado_hoy'
 
-// +100 XP de entreno libre (Musculación/Aparatos), 1 vez por día por socio
-// -- lo hace cumplir el índice único de xp_events del lado del servidor
+// +100 XP de entreno libre (Aparatos), 1 vez por día por socio -- lo hace
+// cumplir el índice único de xp_events del lado del servidor
 // (idx_xp_events_asistencia_por_dia_disciplina): un segundo intento el
 // mismo día tira 23505, que acá se trata como "ya registrado hoy", no
 // como un error real.
-export async function otorgarCheckinMusculacion(userId) {
-  const { error } = await supabase.rpc('admin_otorgar_checkin_musculacion', { p_user_id: userId })
+export async function otorgarCheckinAparatos(userId) {
+  const { error } = await supabase.rpc('admin_otorgar_checkin_aparatos', { p_user_id: userId })
   if (error) {
     if (error.code === '23505') return CHECKIN_YA_REGISTRADO
     throw new Error(error.message)

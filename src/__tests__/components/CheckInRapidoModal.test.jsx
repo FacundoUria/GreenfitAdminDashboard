@@ -3,7 +3,7 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 
 vi.mock('../../utils/fichaSocioPwa', () => ({
   buscarSociosParaCheckin: vi.fn(),
-  otorgarCheckinMusculacion: vi.fn(),
+  otorgarCheckinAparatos: vi.fn(),
   buscarSociosClaseActiva: vi.fn(),
   darPresenteClase: vi.fn(),
   CHECKIN_OTORGADO: 'otorgado',
@@ -12,7 +12,7 @@ vi.mock('../../utils/fichaSocioPwa', () => ({
 
 import {
   buscarSociosParaCheckin,
-  otorgarCheckinMusculacion,
+  otorgarCheckinAparatos,
   buscarSociosClaseActiva,
   darPresenteClase,
 } from '../../utils/fichaSocioPwa'
@@ -44,7 +44,7 @@ describe('CheckInRapidoModal (Navbar -- Check-in Rápido ⚡)', () => {
 
   it('busca socios (debounced) y otorga +100 XP con un clic', async () => {
     buscarSociosParaCheckin.mockResolvedValue([SOCIO])
-    otorgarCheckinMusculacion.mockResolvedValue('otorgado')
+    otorgarCheckinAparatos.mockResolvedValue('otorgado')
 
     render(<CheckInRapidoModal visible onClose={vi.fn()} />)
     fireEvent.change(screen.getByLabelText('Buscar socio'), { target: { value: 'Martina' } })
@@ -55,12 +55,12 @@ describe('CheckInRapidoModal (Navbar -- Check-in Rápido ⚡)', () => {
     fireEvent.click(screen.getByRole('button', { name: /otorgar/i }))
 
     await waitFor(() => expect(screen.getByText('+100 XP')).toBeTruthy())
-    expect(otorgarCheckinMusculacion).toHaveBeenCalledWith('u1')
+    expect(otorgarCheckinAparatos).toHaveBeenCalledWith('u1')
   })
 
   it('si el socio ya tiene un check-in hoy, muestra "Ya registrado hoy" en vez de romper', async () => {
     buscarSociosParaCheckin.mockResolvedValue([SOCIO])
-    otorgarCheckinMusculacion.mockResolvedValue('ya_registrado_hoy')
+    otorgarCheckinAparatos.mockResolvedValue('ya_registrado_hoy')
 
     render(<CheckInRapidoModal visible onClose={vi.fn()} />)
     fireEvent.change(screen.getByLabelText('Buscar socio'), { target: { value: 'Martina' } })

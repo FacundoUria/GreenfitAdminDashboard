@@ -13,7 +13,7 @@ import {
   fetchHistorialAsistencias,
   fetchHistorialPagos,
   buscarSociosParaCheckin,
-  otorgarCheckinMusculacion,
+  otorgarCheckinAparatos,
   buscarSociosClaseActiva,
   darPresenteClase,
   fetchActividadReciente,
@@ -323,24 +323,24 @@ describe('buscarSociosParaCheckin (Check-in Rápido -- buscador del modal)', () 
   })
 })
 
-describe('otorgarCheckinMusculacion (+100 XP de entreno libre, 1 vez por día)', () => {
+describe('otorgarCheckinAparatos (+100 XP de entreno libre, 1 vez por día)', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('camino feliz: llama al RPC admin_otorgar_checkin_musculacion y devuelve "otorgado"', async () => {
+  it('camino feliz: llama al RPC admin_otorgar_checkin_aparatos y devuelve "otorgado"', async () => {
     mockedRpc.mockResolvedValue({ data: 'xp-1', error: null })
-    const resultado = await otorgarCheckinMusculacion('u1')
-    expect(mockedRpc).toHaveBeenCalledWith('admin_otorgar_checkin_musculacion', { p_user_id: 'u1' })
+    const resultado = await otorgarCheckinAparatos('u1')
+    expect(mockedRpc).toHaveBeenCalledWith('admin_otorgar_checkin_aparatos', { p_user_id: 'u1' })
     expect(resultado).toBe(CHECKIN_OTORGADO)
   })
 
   it('si ya tiene un check-in de Musculación hoy (23505), devuelve "ya_registrado_hoy" en vez de romper', async () => {
     mockedRpc.mockResolvedValue({ data: null, error: { code: '23505', message: 'duplicate key' } })
-    expect(await otorgarCheckinMusculacion('u1')).toBe(CHECKIN_YA_REGISTRADO)
+    expect(await otorgarCheckinAparatos('u1')).toBe(CHECKIN_YA_REGISTRADO)
   })
 
   it('otro error real sí se propaga', async () => {
     mockedRpc.mockResolvedValue({ data: null, error: { code: '42501', message: 'permission denied' } })
-    await expect(otorgarCheckinMusculacion('u1')).rejects.toThrow('permission denied')
+    await expect(otorgarCheckinAparatos('u1')).rejects.toThrow('permission denied')
   })
 })
 

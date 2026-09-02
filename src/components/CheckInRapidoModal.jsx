@@ -3,7 +3,7 @@ import { CheckCircle2, Loader2, Search, X, Zap } from 'lucide-react'
 import {
   buscarSociosParaCheckin,
   buscarSociosClaseActiva,
-  otorgarCheckinMusculacion,
+  otorgarCheckinAparatos,
   darPresenteClase,
   CHECKIN_YA_REGISTRADO,
 } from '../utils/fichaSocioPwa'
@@ -84,7 +84,7 @@ function CheckInRapidoModal({ visible, onClose }) {
   const handleOtorgar = async (socio) => {
     setEstadoPorSocio((prev) => ({ ...prev, [socio.userId]: 'otorgando' }))
     try {
-      const resultado = await otorgarCheckinMusculacion(socio.userId)
+      const resultado = await otorgarCheckinAparatos(socio.userId)
       setEstadoPorSocio((prev) => ({
         ...prev,
         [socio.userId]: resultado === CHECKIN_YA_REGISTRADO ? 'ya_registrado' : 'otorgado',
