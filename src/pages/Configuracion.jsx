@@ -10,6 +10,7 @@ function mapConfigToForm(config) {
   return {
     diasTolerancia: String(config.dias_tolerancia ?? 5),
     limiteCancelacionMinutos: String(config.limite_cancelacion_minutos ?? (config.limite_cancelacion_hs ?? 2) * 60),
+    xpPorReserva: String(config.xp_por_reserva ?? 100),
     aliasCvu: config.alias_cvu ?? '',
     titularCuenta: config.titular_cuenta ?? '',
     notifVencimientoActivo: Boolean(config.notif_vencimiento_activo ?? true),
@@ -112,6 +113,7 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
     let payload = {
       dias_tolerancia: Number(form.diasTolerancia) || 0,
       limite_cancelacion_minutos: Number(form.limiteCancelacionMinutos) || 0,
+      xp_por_reserva: Number(form.xpPorReserva) || 0,
       alias_cvu: form.aliasCvu,
       titular_cuenta: form.titularCuenta,
       notif_vencimiento_activo: form.notifVencimientoActivo,
@@ -225,6 +227,12 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
             value={form.limiteCancelacionMinutos}
             onChange={(value) => updateField('limiteCancelacionMinutos', value)}
             suffix="min antes"
+          />
+          <NumberField
+            label="XP por reservar una clase"
+            value={form.xpPorReserva}
+            onChange={(value) => updateField('xpPorReserva', value)}
+            suffix="XP"
           />
         </ConfigCard>
 
