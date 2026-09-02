@@ -282,6 +282,29 @@ function NuevoSocioModal({
       return
     }
 
+    // Sentido inverso de la sincronización PWA -> Admin (ver
+    // sincronizar_telefono_a_socio, disparada desde "Mis datos" en la
+    // PWA): si el admin edita o unifica el teléfono de un socio ya
+    // existente, se refleja en profiles.phone -- sin esto, el socio
+    // seguía viendo su teléfono viejo en su propio perfil de la PWA
+    // aunque Seba ya lo hubiera corregido acá. Solo aplica a `socios` que
+    // YA existían (edición/unificación) -- un alta nueva no necesita esto:
+    // el teléfono de un socio recién creado ya le llega a profiles.phone
+    // solo, vía el trigger on_socio_dni_upsert (crea la cuenta de Auth con
+    // `phone` en el metadata) + handle_new_user (la copia a profiles).
+    // Best-effort a propósito -- no bloquea el guardado si la migración
+    // todavía no corrió o el socio no tiene cuenta de PWA vinculada
+    // (mismo criterio "fail open" que el resto de este puente por DNI).
+    if (esEdicion || socioAUnificar) {
+      const { error: syncTelefonoError } = await supabase.rpc('sincronizar_telefono_a_profile', {
+        p_dni: form.dni,
+        p_telefono: form.telefono,
+      })
+      if (syncTelefonoError) {
+        console.warn('No se pudo sincronizar el teléfono con la app del socio:', syncTelefonoError.message)
+      }
+    }
+
     // Alta nueva: además de la tabla legacy `socios`, cargamos los créditos
     // por disciplina y/o el vencimiento de Aparatos en la tabla
     // real que lee la PWA (`user_credits`) -- sin esto el socio recién

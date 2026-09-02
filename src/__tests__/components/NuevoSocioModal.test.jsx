@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 
 vi.mock('../../lib/supabaseClient', () => ({
   supabase: { from: vi.fn(), rpc: vi.fn() },
@@ -132,5 +132,82 @@ describe('NuevoSocioModal -- valida el formato de DNI antes de guardar (mismo pa
 
     expect(screen.queryByText(/DNI tiene que tener entre 6 y 10 dígitos/)).toBeNull()
     expect(supabase.from).toHaveBeenCalledWith('socios')
+  })
+})
+
+// Sentido inverso de la sincronización PWA -> Admin (sincronizar_telefono_a_socio,
+// ProfileScreen.tsx del otro repo): si Seba edita el teléfono de un socio ya
+// existente desde el panel, tiene que reflejarse en profiles.phone -- antes
+// de este fix, el socio seguía viendo su teléfono viejo en su propio perfil
+// de la PWA para siempre.
+describe('NuevoSocioModal -- sincroniza el teléfono editado con profiles.phone (RPC sincronizar_telefono_a_profile)', () => {
+  const socioExistente = {
+    id: 's-edit-1',
+    nombre: 'Marina',
+    apellido: 'Gómez',
+    dni: '30555444',
+    email: 'marina@test.com',
+    telefono: '2610000000',
+    plan: ['Boxeo'],
+    fechaVencimiento: null,
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('editar el teléfono de un socio existente llama a sincronizar_telefono_a_profile con el DNI y el teléfono nuevo', async () => {
+    supabase.from.mockReturnValue({
+      update: () => ({ eq: () => ({ select: () => Promise.resolve({ data: [{ id: socioExistente.id }], error: null }) }) }),
+    })
+    supabase.rpc.mockResolvedValue({ data: null, error: null })
+
+    render(<NuevoSocioModal socio={socioExistente} onClose={vi.fn()} onSaved={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '2610009999' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    await waitFor(() =>
+      expect(supabase.rpc).toHaveBeenCalledWith('sincronizar_telefono_a_profile', {
+        p_dni: '30555444',
+        p_telefono: '2610009999',
+      }),
+    )
+  })
+
+  it('un alta nueva (socio recién creado) NO llama a sincronizar_telefono_a_profile -- ya le llega solo vía el trigger on_socio_dni_upsert', async () => {
+    supabase.from.mockImplementation((tabla) => {
+      if (tabla === 'socios') {
+        return { insert: () => ({ select: () => Promise.resolve({ data: [{ id: 'nuevo-2' }], error: null }) }) }
+      }
+      return { select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }) }
+    })
+
+    render(<NuevoSocioModal onClose={vi.fn()} onSaved={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText('Nombre'), { target: { value: 'Nuevo' } })
+    fireEvent.change(screen.getByLabelText('Apellido'), { target: { value: 'Socio' } })
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'nuevo@test.com' } })
+    fireEvent.change(screen.getByLabelText('DNI'), { target: { value: '3099988' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: 'CrossFit' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    await waitFor(() => expect(supabase.from).toHaveBeenCalledWith('socios'))
+    expect(supabase.rpc).not.toHaveBeenCalledWith('sincronizar_telefono_a_profile', expect.anything())
+  })
+
+  it('si la sincronización de teléfono falla, no bloquea el guardado (best-effort, no crítico)', async () => {
+    const onSaved = vi.fn()
+    const onClose = vi.fn()
+    supabase.from.mockReturnValue({
+      update: () => ({ eq: () => ({ select: () => Promise.resolve({ data: [{ id: socioExistente.id }], error: null }) }) }),
+    })
+    supabase.rpc.mockResolvedValue({ data: null, error: { message: 'function not found in schema cache' } })
+
+    render(<NuevoSocioModal socio={socioExistente} onClose={onClose} onSaved={onSaved} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect(onClose).toHaveBeenCalled()
   })
 })
