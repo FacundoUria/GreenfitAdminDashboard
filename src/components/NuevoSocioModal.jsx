@@ -13,6 +13,16 @@ import { sincronizarCreditosPwa, sincronizarVencimientoPwa, sincronizarVencimien
 import { normalizarTexto } from '../utils/coincidenciaSocios'
 import FichaSocioHistorial from './FichaSocioHistorial'
 
+// Mismo patrón que isValidDni() en greenfit-app/src/lib/dni.ts (PWA) --
+// también es el que usa el trigger handle_socio_dni_upsert() en SQL
+// (supabase_migration_socios_auto_auth.sql) para decidir si aprovisiona
+// la cuenta de la PWA. Antes, el Admin no validaba el formato en absoluto:
+// un DNI mal tipeado se guardaba sin error visible, y como no matcheaba
+// ese mismo patrón en el trigger, el socio quedaba con su ficha completa
+// acá pero SIN cuenta de PWA -- nadie se enteraba hasta que el socio decía
+// "no puedo entrar a la app".
+const DNI_REGEX = /^\d{6,10}$/
+
 // BUG CRÍTICO (2026-08-07): esta función arrancaba `planes` con
 // `[PLANES_DISPONIBLES[0]]` ('Pase Libre') YA TILDADO -- si el staff cargaba
 // un socio de Kickstrike/CrossFit sin darse cuenta de tocar/destildar ese
@@ -149,6 +159,11 @@ function NuevoSocioModal({
 
   const handleSubmit = async (event) => {
     event.preventDefault()
+
+    if (!DNI_REGEX.test(form.dni.trim())) {
+      setError('El DNI tiene que tener entre 6 y 10 dígitos, sin puntos ni espacios.')
+      return
+    }
 
     if (form.planes.length === 0) {
       setError('Seleccioná al menos un plan/actividad.')
