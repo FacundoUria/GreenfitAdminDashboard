@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom
 import Layout from './components/Layout'
 import Reportes from './pages/Reportes'
 import Socios from './pages/Socios'
+import Pagos from './pages/Pagos'
 import Configuracion from './pages/Configuracion'
 import Clases from './pages/Clases'
 import Disciplinas from './pages/Disciplinas'
@@ -41,6 +42,7 @@ function App() {
             <Route element={<Layout />}>
               <Route index element={<Home />} />
               <Route path="socios" element={<Socios />} />
+              <Route path="pagos" element={<Pagos />} />
               <Route path="clases" element={<Clases />} />
               <Route path="disciplinas" element={<Disciplinas />} />
               <Route path="rutinas" element={<Rutinas />} />
