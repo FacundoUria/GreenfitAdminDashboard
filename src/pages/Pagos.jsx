@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { CheckCircle2, Loader2, Receipt, RefreshCw, X, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Loader2, Receipt, RefreshCw, RotateCcw, X } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { formatMoneda } from '../utils/moneda'
-import { aprobarComprobante, fetchComprobantesPendientes, rechazarComprobante } from '../utils/pagosSocio'
+import { fetchHistorialComprobantes, revertirComprobante } from '../utils/pagosSocio'
 
 function formatFechaHora(iso) {
   const fecha = new Date(iso)
@@ -19,9 +19,28 @@ function Toast({ message }) {
   )
 }
 
-// Overlay simple de imagen ampliada -- no había ningún lightbox en el
-// proyecto todavía, mismo criterio visual (fixed inset-0 z-50 bg-black/60)
-// que ya usan los modales existentes (CheckInRapidoModal, etc.).
+// Banner de advertencia persistente (NO un toast que desaparece solo) --
+// pedido explícito: si la reversión trae aviso de que la fecha de Aparatos
+// no se pudo restaurar automática, tiene que verse bien visible, no como un
+// detalle chico. Se cierra a mano, no con un timeout.
+function BannerAdvertencia({ message, onCerrar }) {
+  if (!message) return null
+  return (
+    <div className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200">
+      <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+      <p className="flex-1">{message}</p>
+      <button
+        type="button"
+        onClick={onCerrar}
+        aria-label="Cerrar advertencia"
+        className="shrink-0 rounded-lg p-1 text-amber-300 hover:bg-amber-500/10 hover:text-amber-100"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </div>
+  )
+}
+
 function ImagenAmpliada({ url, onCerrar }) {
   if (!url) return null
   return (
@@ -50,10 +69,24 @@ function ImagenAmpliada({ url, onCerrar }) {
   )
 }
 
-// Fase 3: revisión manual de comprobantes de transferencia -- lista lo que
-// el socio sube desde la PWA (Fase 2, estado='pendiente' en pagos_socio) y
-// deja aprobar (acredita créditos reales vía admin_aprobar_comprobante) o
-// descartar (admin_rechazar_comprobante, no acredita ni notifica).
+function EstadoBadge({ estado }) {
+  if (estado === 'anulado') {
+    return (
+      <span className="inline-flex w-fit items-center rounded-full bg-red-500/10 px-2.5 py-1 text-[11px] font-semibold text-red-400">
+        Anulado
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex w-fit items-center rounded-full bg-greenfit-primary/10 px-2.5 py-1 text-[11px] font-semibold text-greenfit-primary">
+      Pagado
+    </span>
+  )
+}
+
+// Fase 3: los comprobantes se acreditan AUTOMÁTICO al subirse desde la PWA
+// -- ya no hay "pendientes por aprobar". Esto es un HISTORIAL (pagado/
+// anulado) con la posibilidad de revertir una acreditación ya hecha.
 function Pagos() {
   const [filas, setFilas] = useState([])
   const [cargando, setCargando] = useState(true)
@@ -62,6 +95,7 @@ function Pagos() {
   const [erroresPorId, setErroresPorId] = useState(new Map())
   const [imagenAmpliada, setImagenAmpliada] = useState(null)
   const [toastMessage, setToastMessage] = useState(null)
+  const [advertencia, setAdvertencia] = useState(null)
 
   const mostrarToast = (mensaje) => {
     setToastMessage(mensaje)
@@ -70,10 +104,10 @@ function Pagos() {
 
   const cargar = useCallback(async () => {
     try {
-      setFilas(await fetchComprobantesPendientes())
+      setFilas(await fetchHistorialComprobantes())
       setError(null)
     } catch (err) {
-      setError(err.message ?? 'No se pudieron cargar los comprobantes pendientes.')
+      setError(err.message ?? 'No se pudo cargar el historial de comprobantes.')
     } finally {
       setCargando(false)
     }
@@ -84,14 +118,12 @@ function Pagos() {
     cargar()
   }, [cargar])
 
-  // Refresco en vivo -- mismo patrón que ActividadReciente.jsx: un socio
-  // subiendo un comprobante nuevo (INSERT), u otra pestaña de Seba
-  // aprobando/rechazando uno (UPDATE de estado), actualiza esta lista sin
-  // que haga falta recargar la página. El payload crudo del evento no se
-  // usa directo (no valida RLS por sí solo) -- solo dispara `cargar()`.
+  // Refresco en vivo -- un socio subiendo un comprobante nuevo (ya se
+  // acredita solo), u otro admin revirtiendo uno desde otra pestaña,
+  // actualiza esta lista sin recargar la página.
   useEffect(() => {
     const channel = supabase
-      .channel('pagos-pendientes-transferencia')
+      .channel('pagos-comprobantes-transferencia')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pagos_socio' }, () => {
         cargar()
       })
@@ -111,50 +143,34 @@ function Pagos() {
     })
   }
 
-  const handleAprobar = async (fila) => {
-    const detalleCreditos = fila.creditosTexto
-      ? `Se le van a otorgar los créditos de "${fila.pack?.name ?? fila.paquete}": ${fila.creditosTexto}.`
-      : `Se le va a otorgar el pack "${fila.pack?.name ?? fila.paquete}".`
+  const handleRevertir = async (fila) => {
+    const detalle = fila.detalleRevertidoTexto
+      ? `Se le va a quitar: ${fila.detalleRevertidoTexto}.`
+      : 'No se encontró el detalle de qué se le otorgó -- puede que este pago sea de antes de este cambio y no se pueda revertir automático.'
     const confirmado = window.confirm(
-      `¿Aprobar el comprobante de ${fila.socioNombre}?\n\n${detalleCreditos}\nMonto: ${formatMoneda(fila.monto)}.`,
+      `¿Revertir la acreditación del comprobante de ${fila.socioNombre}?\n\n${detalle}\n\nLo que el socio ya haya usado (clases reservadas) no se recupera -- solo se quita lo que le queda sin usar. Esta acción no se puede deshacer.`,
     )
     if (!confirmado) return
 
     setProcesandoId(fila.id)
     setErrorFila(fila.id, null)
+    setAdvertencia(null)
     try {
-      const { creditoOtorgado } = await aprobarComprobante(fila.id)
-      if (!creditoOtorgado) {
-        // Ya estaba revisado (reviewed_at no es null) -- otra pestaña/otro
-        // admin se adelantó. No es un error de verdad, pero tampoco hay
-        // nada para festejar -- se avisa y se refresca la lista real.
-        window.alert('Este comprobante ya había sido revisado antes (probablemente desde otra pestaña). La lista se va a actualizar.')
+      const { revertido, aparatosAdvertencia } = await revertirComprobante(fila.id)
+      if (!revertido) {
+        window.alert('Este comprobante ya había sido revertido antes (probablemente desde otra pestaña). La lista se va a actualizar.')
         await cargar()
         return
       }
-      setFilas((prev) => prev.filter((f) => f.id !== fila.id))
-      mostrarToast(`Comprobante aprobado -- créditos acreditados a ${fila.socioNombre}.`)
+      if (aparatosAdvertencia) {
+        // Bien visible -- banner persistente, no un toast que se va solo.
+        setAdvertencia(`${fila.socioNombre}: ${aparatosAdvertencia}`)
+      } else {
+        mostrarToast(`Acreditación revertida -- se le quitó lo que quedaba sin usar a ${fila.socioNombre}.`)
+      }
+      await cargar()
     } catch (err) {
-      setErrorFila(fila.id, err.message ?? 'No se pudo aprobar el comprobante.')
-    } finally {
-      setProcesandoId(null)
-    }
-  }
-
-  const handleRechazar = async (fila) => {
-    const confirmado = window.confirm(
-      `¿Descartar el comprobante de ${fila.socioNombre}?\n\nNo se le va a acreditar nada y esta acción no notifica al socio -- si hace falta avisarle, hacelo aparte (WhatsApp/Anunciar).`,
-    )
-    if (!confirmado) return
-
-    setProcesandoId(fila.id)
-    setErrorFila(fila.id, null)
-    try {
-      await rechazarComprobante(fila.id)
-      setFilas((prev) => prev.filter((f) => f.id !== fila.id))
-      mostrarToast(`Comprobante de ${fila.socioNombre} descartado.`)
-    } catch (err) {
-      setErrorFila(fila.id, err.message ?? 'No se pudo descartar el comprobante.')
+      setErrorFila(fila.id, err.message ?? 'No se pudo revertir esta acreditación.')
     } finally {
       setProcesandoId(null)
     }
@@ -165,18 +181,23 @@ function Pagos() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-xl font-semibold text-white">Pagos</h2>
-          <p className="text-sm text-gray-400">Comprobantes de transferencia pendientes de revisión.</p>
+          <p className="text-sm text-gray-400">
+            Historial de comprobantes de transferencia -- se acreditan automático al subirse. Revertí uno si hace
+            falta corregirlo.
+          </p>
         </div>
         <button
           type="button"
           onClick={cargar}
-          aria-label="Actualizar comprobantes pendientes"
+          aria-label="Actualizar historial de comprobantes"
           className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-white/10 px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:bg-white/5 hover:text-white"
         >
           {cargando ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           Actualizar
         </button>
       </div>
+
+      <BannerAdvertencia message={advertencia} onCerrar={() => setAdvertencia(null)} />
 
       {error ? (
         <p className="rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-400">{error}</p>
@@ -187,7 +208,7 @@ function Pagos() {
       ) : filas.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-xl border border-white/5 bg-greenfit-card py-12 text-center text-sm text-gray-400">
           <Receipt className="h-8 w-8 text-gray-600" />
-          No hay comprobantes pendientes de revisión.
+          Todavía no hay comprobantes en el historial.
         </div>
       ) : (
         <ul className="flex flex-col gap-4">
@@ -212,35 +233,35 @@ function Pagos() {
                 </button>
 
                 <div className="min-w-0 flex-1">
-                  <p className="font-semibold text-white">{fila.socioNombre}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-semibold text-white">{fila.socioNombre}</p>
+                    <EstadoBadge estado={fila.estado} />
+                  </div>
                   <p className="text-sm text-gray-300">
                     {fila.pack?.name ?? fila.paquete} · {formatMoneda(fila.monto)}
                   </p>
                   {fila.creditosTexto && <p className="text-xs text-gray-500">{fila.creditosTexto}</p>}
-                  <p className="mt-1 text-xs text-gray-500">{formatFechaHora(fila.fecha)}</p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    {fila.estado === 'anulado' && fila.revertidoEl
+                      ? `Revertido ${formatFechaHora(fila.revertidoEl)} · subido ${formatFechaHora(fila.fecha)}`
+                      : formatFechaHora(fila.fecha)}
+                  </p>
                   {errorFila && <p className="mt-2 text-xs font-medium text-red-400">{errorFila}</p>}
                 </div>
 
-                <div className="flex shrink-0 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleRechazar(fila)}
-                    disabled={procesando}
-                    className="flex min-h-[40px] items-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-gray-300 transition-colors hover:border-red-400/40 hover:bg-red-500/10 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {procesando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <XCircle className="h-3.5 w-3.5" />}
-                    Descartar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleAprobar(fila)}
-                    disabled={procesando}
-                    className="flex min-h-[40px] items-center gap-1.5 rounded-lg bg-greenfit-primary px-3 py-2 text-xs font-semibold text-greenfit-dark transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {procesando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-                    Aprobar
-                  </button>
-                </div>
+                {fila.estado === 'pagado' && (
+                  <div className="flex shrink-0 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleRevertir(fila)}
+                      disabled={procesando}
+                      className="flex min-h-[40px] items-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-gray-300 transition-colors hover:border-red-400/40 hover:bg-red-500/10 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {procesando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+                      Revertir
+                    </button>
+                  </div>
+                )}
               </li>
             )
           })}
