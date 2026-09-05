@@ -1,10 +1,9 @@
-﻿import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 
 vi.mock('../../utils/pagosSocio', () => ({
-  fetchComprobantesPendientes: vi.fn(),
-  aprobarComprobante: vi.fn(),
-  rechazarComprobante: vi.fn(),
+  fetchHistorialComprobantes: vi.fn(),
+  revertirComprobante: vi.fn(),
 }))
 
 // on/subscribe encadenan (mockReturnThis-style) igual que el cliente real --
@@ -22,7 +21,7 @@ vi.mock('../../lib/supabaseClient', () => ({
   },
 }))
 
-import { fetchComprobantesPendientes, aprobarComprobante, rechazarComprobante } from '../../utils/pagosSocio'
+import { fetchHistorialComprobantes, revertirComprobante } from '../../utils/pagosSocio'
 import { supabase } from '../../lib/supabaseClient'
 import Pagos from '../../pages/Pagos'
 
@@ -33,8 +32,11 @@ const PAGO_BRUNO = {
   paquete: 'Pack 12 CrossFit',
   pack: { name: 'Pack 12 CrossFit', creditos: [{ discipline_id: 'disc-crossfit', credits: 12 }], incluye_aparatos: false },
   creditosTexto: '12 créditos CrossFit',
+  detalleRevertidoTexto: '12 créditos CrossFit',
   monto: 30000,
   fecha: '2026-09-01T10:00:00.000Z',
+  estado: 'pagado',
+  revertidoEl: null,
   comprobanteUrl: 'https://signed.test/socio-1/123.jpg',
 }
 
@@ -45,12 +47,30 @@ const PAGO_MARTINA = {
   paquete: 'Aparatos Pase Libre',
   pack: { name: 'Aparatos Pase Libre', creditos: [], incluye_aparatos: true },
   creditosTexto: 'Aparatos Pase Libre',
+  detalleRevertidoTexto: 'la extensión de Aparatos',
   monto: 21000,
   fecha: '2026-09-01T09:00:00.000Z',
+  estado: 'pagado',
+  revertidoEl: null,
   comprobanteUrl: null,
 }
 
-describe('Pagos (Fase 3 -- revisión de comprobantes de transferencia)', () => {
+const PAGO_ANULADO = {
+  id: 'pago-3',
+  userId: 'socio-3',
+  socioNombre: 'Charbel Nara',
+  paquete: 'Pack 8 Boxeo',
+  pack: { name: 'Pack 8 Boxeo', creditos: [{ discipline_id: 'disc-boxeo', credits: 8 }], incluye_aparatos: false },
+  creditosTexto: '8 créditos Boxeo',
+  detalleRevertidoTexto: '8 créditos Boxeo',
+  monto: 20000,
+  fecha: '2026-08-30T09:00:00.000Z',
+  estado: 'anulado',
+  revertidoEl: '2026-09-01T12:00:00.000Z',
+  comprobanteUrl: null,
+}
+
+describe('Pagos (Fase 3 -- historial de comprobantes, acreditación automática + reversión)', () => {
   let confirmSpy
   let alertSpy
 
@@ -58,7 +78,7 @@ describe('Pagos (Fase 3 -- revisión de comprobantes de transferencia)', () => {
     vi.clearAllMocks()
     confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {})
-    fetchComprobantesPendientes.mockResolvedValue([PAGO_BRUNO, PAGO_MARTINA])
+    fetchHistorialComprobantes.mockResolvedValue([PAGO_BRUNO, PAGO_MARTINA])
   })
 
   afterEach(() => {
@@ -66,29 +86,36 @@ describe('Pagos (Fase 3 -- revisión de comprobantes de transferencia)', () => {
     alertSpy.mockRestore()
   })
 
-  it('lista los comprobantes pendientes con socio, pack, monto y fecha, más recientes primero (orden que ya devuelve fetchComprobantesPendientes)', async () => {
+  it('lista el historial con socio, pack, monto, fecha y el badge de estado', async () => {
     render(<Pagos />)
 
     await waitFor(() => expect(screen.getByText('Bruno Álvarez')).toBeInTheDocument())
     const filaBruno = screen.getByText('Bruno Álvarez').closest('li')
     expect(filaBruno).toHaveTextContent('Pack 12 CrossFit')
-    // Solo la parte numérica -- formatMoneda() separa el símbolo "$" del
-    // monto con un espacio duro ( ) que toHaveTextContent normaliza
-    // en el textContent recibido pero NO en el string esperado, así que
-    // comparar el string armado por formatMoneda() 1:1 da un falso negativo.
     expect(filaBruno).toHaveTextContent('30.000')
+    expect(within(filaBruno).getByText('Pagado')).toBeInTheDocument()
     expect(screen.getByText('12 créditos CrossFit')).toBeInTheDocument()
     expect(screen.getByText('Martina Ríos')).toBeInTheDocument()
   })
 
-  it('sin ningún comprobante pendiente, muestra el estado vacío', async () => {
-    fetchComprobantesPendientes.mockResolvedValue([])
+  it('una fila anulada muestra el badge "Anulado" y NO tiene botón Revertir', async () => {
+    fetchHistorialComprobantes.mockResolvedValue([PAGO_ANULADO])
     render(<Pagos />)
-    await waitFor(() => expect(screen.getByText('No hay comprobantes pendientes de revisión.')).toBeInTheDocument())
+
+    await waitFor(() => expect(screen.getByText('Charbel Nara')).toBeInTheDocument())
+    const fila = screen.getByText('Charbel Nara').closest('li')
+    expect(within(fila).getByText('Anulado')).toBeInTheDocument()
+    expect(within(fila).queryByRole('button', { name: /revertir/i })).not.toBeInTheDocument()
   })
 
-  it('si fetchComprobantesPendientes falla, muestra un mensaje de error claro', async () => {
-    fetchComprobantesPendientes.mockRejectedValue(new Error('No se pudo conectar con Supabase.'))
+  it('sin ningún comprobante en el historial, muestra el estado vacío', async () => {
+    fetchHistorialComprobantes.mockResolvedValue([])
+    render(<Pagos />)
+    await waitFor(() => expect(screen.getByText('Todavía no hay comprobantes en el historial.')).toBeInTheDocument())
+  })
+
+  it('si fetchHistorialComprobantes falla, muestra un mensaje de error claro', async () => {
+    fetchHistorialComprobantes.mockRejectedValue(new Error('No se pudo conectar con Supabase.'))
     render(<Pagos />)
     await waitFor(() => expect(screen.getByText('No se pudo conectar con Supabase.')).toBeInTheDocument())
   })
@@ -111,105 +138,107 @@ describe('Pagos (Fase 3 -- revisión de comprobantes de transferencia)', () => {
     expect(screen.queryByRole('dialog', { name: 'Comprobante ampliado' })).not.toBeInTheDocument()
   })
 
-  it('Aprobar: pide confirmación describiendo el pack/créditos, y al confirmar acredita y saca la fila de la lista', async () => {
-    aprobarComprobante.mockResolvedValue({ creditoOtorgado: true })
+  it('Revertir: pide confirmación describiendo lo que se le va a quitar (detalleRevertidoTexto, no la definición actual del pack), y al confirmar revierte', async () => {
+    revertirComprobante.mockResolvedValue({ revertido: true, aparatosAdvertencia: null })
     render(<Pagos />)
     await waitFor(() => expect(screen.getByText('Bruno Álvarez')).toBeInTheDocument())
 
     const filaBruno = screen.getByText('Bruno Álvarez').closest('li')
-    fireEvent.click(within(filaBruno).getByRole('button', { name: /aprobar/i }))
+    fireEvent.click(within(filaBruno).getByRole('button', { name: /revertir/i }))
 
     expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('12 créditos CrossFit'))
     expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('Bruno Álvarez'))
-    await waitFor(() => expect(aprobarComprobante).toHaveBeenCalledWith('pago-1'))
-    await waitFor(() => expect(screen.queryByText('Bruno Álvarez')).not.toBeInTheDocument())
-    // La otra fila (Martina) no se tocó.
-    expect(screen.getByText('Martina Ríos')).toBeInTheDocument()
+    await waitFor(() => expect(revertirComprobante).toHaveBeenCalledWith('pago-1'))
   })
 
-  it('Aprobar: si se cancela la confirmación, no llama al RPC ni saca la fila', async () => {
+  it('Revertir: si se cancela la confirmación, no llama al RPC', async () => {
     confirmSpy.mockReturnValue(false)
     render(<Pagos />)
     await waitFor(() => expect(screen.getByText('Bruno Álvarez')).toBeInTheDocument())
 
     const filaBruno = screen.getByText('Bruno Álvarez').closest('li')
-    fireEvent.click(within(filaBruno).getByRole('button', { name: /aprobar/i }))
+    fireEvent.click(within(filaBruno).getByRole('button', { name: /revertir/i }))
 
-    expect(aprobarComprobante).not.toHaveBeenCalled()
-    expect(screen.getByText('Bruno Álvarez')).toBeInTheDocument()
+    expect(revertirComprobante).not.toHaveBeenCalled()
   })
 
-  it('Aprobar: si el comprobante ya había sido revisado por otra pestaña (creditoOtorgado=false), avisa y refresca la lista real', async () => {
-    aprobarComprobante.mockResolvedValue({ creditoOtorgado: false })
-    fetchComprobantesPendientes.mockResolvedValueOnce([PAGO_BRUNO, PAGO_MARTINA]).mockResolvedValueOnce([PAGO_MARTINA])
+  it('Revertir sin advertencia: muestra un toast de éxito, SIN mostrar el banner de advertencia', async () => {
+    revertirComprobante.mockResolvedValue({ revertido: true, aparatosAdvertencia: null })
+    render(<Pagos />)
+    await waitFor(() => expect(screen.getByText('Bruno Álvarez')).toBeInTheDocument())
+
+    fireEvent.click(within(screen.getByText('Bruno Álvarez').closest('li')).getByRole('button', { name: /revertir/i }))
+
+    await waitFor(() => expect(screen.getByText(/Acreditación revertida/)).toBeInTheDocument())
+  })
+
+  // Pedido explícito: la advertencia de Aparatos tiene que verse BIEN
+  // VISIBLE (banner persistente), no como un detalle chico que se puede
+  // pasar por alto.
+  it('Revertir CON advertencia de Aparatos: muestra un banner persistente y visible con el texto exacto', async () => {
+    revertirComprobante.mockResolvedValue({
+      revertido: true,
+      aparatosAdvertencia: 'La fecha de vencimiento de Aparatos no se pudo revertir automáticamente -- cambió desde que se otorgó esta acreditación. Ajustala a mano en "Editar Socio".',
+    })
+    render(<Pagos />)
+    await waitFor(() => expect(screen.getByText('Martina Ríos')).toBeInTheDocument())
+
+    fireEvent.click(within(screen.getByText('Martina Ríos').closest('li')).getByRole('button', { name: /revertir/i }))
+
+    await waitFor(() =>
+      expect(screen.getByText(/no se pudo revertir automáticamente/)).toBeInTheDocument()
+    )
+    // El nombre del socio va incluido en el banner, para que quede claro a
+    // quién corresponde ajustar la fecha a mano (regex compuesta -- "Martina
+    // Ríos" sola matchea también la fila de la lista, no solo el banner).
+    expect(screen.getByText(/Martina Ríos: La fecha/)).toBeInTheDocument()
+    // El banner se puede cerrar a mano.
+    fireEvent.click(screen.getByLabelText('Cerrar advertencia'))
+    expect(screen.queryByText(/no se pudo revertir automáticamente/)).not.toBeInTheDocument()
+  })
+
+  it('Revertir: si el comprobante ya había sido revertido por otra pestaña (revertido=false), avisa y refresca la lista real', async () => {
+    revertirComprobante.mockResolvedValue({ revertido: false, aparatosAdvertencia: null })
+    fetchHistorialComprobantes.mockResolvedValueOnce([PAGO_BRUNO, PAGO_MARTINA]).mockResolvedValueOnce([{ ...PAGO_BRUNO, estado: 'anulado' }, PAGO_MARTINA])
+    render(<Pagos />)
+    await waitFor(() => expect(screen.getByText('Bruno Álvarez')).toBeInTheDocument())
+
+    fireEvent.click(within(screen.getByText('Bruno Álvarez').closest('li')).getByRole('button', { name: /revertir/i }))
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('ya había sido revertido')))
+    await waitFor(() => expect(fetchHistorialComprobantes).toHaveBeenCalledTimes(2))
+  })
+
+  it('Revertir: con un error real del RPC, muestra el error en la fila y el botón vuelve a estar disponible (no queda colgado)', async () => {
+    revertirComprobante.mockRejectedValue(new Error('No existe ningún pago con ese id.'))
     render(<Pagos />)
     await waitFor(() => expect(screen.getByText('Bruno Álvarez')).toBeInTheDocument())
 
     const filaBruno = screen.getByText('Bruno Álvarez').closest('li')
-    fireEvent.click(within(filaBruno).getByRole('button', { name: /aprobar/i }))
+    const botonRevertir = within(filaBruno).getByRole('button', { name: /revertir/i })
+    fireEvent.click(botonRevertir)
 
-    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('ya había sido revisado')))
-    await waitFor(() => expect(screen.queryByText('Bruno Álvarez')).not.toBeInTheDocument())
-    expect(fetchComprobantesPendientes).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(screen.getByText('No existe ningún pago con ese id.')).toBeInTheDocument())
+    expect(screen.getByText('Bruno Álvarez')).toBeInTheDocument()
+    expect(within(filaBruno).getByRole('button', { name: /revertir/i })).not.toBeDisabled()
   })
 
-  it('Aprobar: con un error real del RPC, muestra el error en la fila y el botón vuelve a estar disponible (no queda colgado)', async () => {
-    aprobarComprobante.mockRejectedValue(new Error('No existe ningún comprobante con ese id.'))
+  it('se suscribe en vivo a pagos_socio y refresca la lista cuando llega un evento (comprobante nuevo, o revertido desde otra pestaña)', async () => {
     render(<Pagos />)
     await waitFor(() => expect(screen.getByText('Bruno Álvarez')).toBeInTheDocument())
 
-    const filaBruno = screen.getByText('Bruno Álvarez').closest('li')
-    const botonAprobar = within(filaBruno).getByRole('button', { name: /aprobar/i })
-    fireEvent.click(botonAprobar)
-
-    await waitFor(() => expect(screen.getByText('No existe ningún comprobante con ese id.')).toBeInTheDocument())
-    // La fila sigue en la lista (estado ambiguo evitado) y el botón no quedó deshabilitado para siempre.
-    expect(screen.getByText('Bruno Álvarez')).toBeInTheDocument()
-    expect(within(filaBruno).getByRole('button', { name: /aprobar/i })).not.toBeDisabled()
-  })
-
-  it('Descartar: pide confirmación, y al confirmar rechaza y saca la fila de la lista', async () => {
-    rechazarComprobante.mockResolvedValue(undefined)
-    render(<Pagos />)
-    await waitFor(() => expect(screen.getByText('Martina Ríos')).toBeInTheDocument())
-
-    const filaMartina = screen.getByText('Martina Ríos').closest('li')
-    fireEvent.click(within(filaMartina).getByRole('button', { name: /descartar/i }))
-
-    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('Martina Ríos'))
-    await waitFor(() => expect(rechazarComprobante).toHaveBeenCalledWith('pago-2'))
-    await waitFor(() => expect(screen.queryByText('Martina Ríos')).not.toBeInTheDocument())
-    expect(screen.getByText('Bruno Álvarez')).toBeInTheDocument()
-  })
-
-  it('Descartar: con un error real, lo muestra en la fila sin sacarla de la lista', async () => {
-    rechazarComprobante.mockRejectedValue(new Error('Error de red.'))
-    render(<Pagos />)
-    await waitFor(() => expect(screen.getByText('Martina Ríos')).toBeInTheDocument())
-
-    const filaMartina = screen.getByText('Martina Ríos').closest('li')
-    fireEvent.click(within(filaMartina).getByRole('button', { name: /descartar/i }))
-
-    await waitFor(() => expect(screen.getByText('Error de red.')).toBeInTheDocument())
-    expect(screen.getByText('Martina Ríos')).toBeInTheDocument()
-  })
-
-  it('se suscribe en vivo a pagos_socio y refresca la lista cuando llega un evento (nuevo comprobante, o revisado desde otra pestaña)', async () => {
-    render(<Pagos />)
-    await waitFor(() => expect(screen.getByText('Bruno Álvarez')).toBeInTheDocument())
-
-    expect(supabase.channel).toHaveBeenCalledWith('pagos-pendientes-transferencia')
+    expect(supabase.channel).toHaveBeenCalledWith('pagos-comprobantes-transferencia')
     expect(mockChannelOn).toHaveBeenCalledWith(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'pagos_socio' },
       expect.any(Function),
     )
 
-    fetchComprobantesPendientes.mockClear()
+    fetchHistorialComprobantes.mockClear()
     const callbackRealtime = mockChannelOn.mock.calls[0][2]
     callbackRealtime({})
 
-    await waitFor(() => expect(fetchComprobantesPendientes).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(fetchHistorialComprobantes).toHaveBeenCalledTimes(1))
   })
 
   it('al desmontar, da de baja el canal de Realtime', async () => {
