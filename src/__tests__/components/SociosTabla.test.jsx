@@ -223,3 +223,58 @@ describe('VencimientoCell -- desglose de vencimiento por lote de créditos (fix 
     expect(screen.getAllByText('—').length).toBeGreaterThan(0)
   })
 })
+
+// Bug real detectado en la auditoría de Socios: EstadoBadge ("Con
+// Créditos"/"Sin Créditos") leía `socio.creditos` -- el pozo global viejo,
+// que no se siembra al alta (sincronizarCreditosPwa solo escribe
+// user_credits) ni baja con el consumo real (book_class/cancel_booking
+// tampoco lo tocan). Ahora usa la misma fuente real que CreditosCell/
+// VencimientoCell -- `socio.creditosPwaPorDisciplina` (suma de lotes
+// activos) + `socio.fechaVencimiento` para Aparatos.
+describe('EstadoBadge -- "Con/Sin Créditos" migrado a la fuente real (lotes activos), no socios.creditos', () => {
+  it('caso "alta nueva": créditos reales pero socios.creditos=0 -- ahora muestra "Con Créditos"', () => {
+    const socio = {
+      ...SOCIO_CON_FOTO,
+      creditos: 0, // el pozo global nunca se sembró al alta
+      creditosPwaPorDisciplina: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 12, lotes: [{ id: 'l1', remainingCredits: 12, expiresAt: '2099-01-01T12:00:00.000Z' }] }],
+    }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('Con Créditos').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Sin Créditos')).toBeNull()
+  })
+
+  it('caso "gastó todo": socios.creditos>0 pero sin ningún lote activo real -- ahora muestra "Sin Créditos"', () => {
+    const socio = {
+      ...SOCIO_CON_FOTO,
+      creditos: 8, // el pozo global nunca bajó con el consumo real
+      creditosPwaPorDisciplina: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 0, lotes: [] }],
+    }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('Sin Créditos').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Con Créditos')).toBeNull()
+  })
+
+  it('Aparatos vigente sin créditos de otras disciplinas -- muestra "Con Créditos" (plan combinado)', () => {
+    const socio = {
+      ...SOCIO_CON_FOTO,
+      plan: ['CrossFit', 'Aparatos'],
+      creditos: 0,
+      creditosPwaPorDisciplina: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 0, lotes: [] }],
+      fechaVencimiento: '2099-01-01',
+    }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('Con Créditos').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Sin Créditos')).toBeNull()
+  })
+
+  it('sin créditos activos y sin Aparatos vigente -- sigue "Sin Créditos"', () => {
+    const socio = {
+      ...SOCIO_CON_FOTO,
+      creditos: 0,
+      creditosPwaPorDisciplina: [],
+    }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('Sin Créditos').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Con Créditos')).toBeNull()
+  })
+})

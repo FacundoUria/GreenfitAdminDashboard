@@ -18,6 +18,26 @@ const estadoLabels = {
   pendiente: 'Pendiente',
 }
 
+// Créditos por LOTES (ver supabase_migration_lotes_creditos_fase1/2.sql):
+// `socio.creditosPwaPorDisciplina` (batch vía fetchCreditosPorDisciplina en
+// Socios.jsx, mismo dato que ya usan CreditosCell/VencimientoCell acá abajo
+// -- no se duplica ninguna consulta) trae `remainingCredits` YA sumado sobre
+// los lotes activos de cada disciplina, así que alcanza con que UNA sola
+// tenga saldo > 0.
+function tieneCreditosActivos(creditosPwaPorDisciplina) {
+  return (creditosPwaPorDisciplina ?? []).some((c) => (c.remainingCredits ?? 0) > 0)
+}
+
+// Aparatos no pasa por fetchCreditosPorDisciplina (esa función filtra
+// kind='credits' a propósito, Aparatos es kind='membership') -- se reusa
+// `socio.fechaVencimiento`, el mismo dato que ya muestra VencimientoCell
+// para esa disciplina, sin ninguna consulta nueva.
+function tieneAparatosVigente(socio) {
+  if (!socio.fechaVencimiento) return false
+  const vencimiento = new Date(`${socio.fechaVencimiento}T00:00:00`)
+  return vencimiento.getTime() > Date.now()
+}
+
 function EstadoBadge({ socio }) {
   // La baja de cuenta es más fundamental que el estado de pago -- un socio
   // dado de baja se marca así sin importar si tiene créditos o la cuota al día.
@@ -30,7 +50,17 @@ function EstadoBadge({ socio }) {
   }
 
   if (esPlanDeCreditos(socio.plan)) {
-    const sinCreditos = (socio.creditos ?? 0) <= 0
+    // BUG REAL (ver auditoría de Socios): esto leía `socio.creditos`, el
+    // pozo global viejo -- nunca se siembra al alta (sincronizarCreditosPwa
+    // solo escribe user_credits) ni baja con el consumo real (book_class/
+    // cancel_booking tampoco lo tocan), así que podía mostrar "Sin
+    // Créditos" a un socio recién dado de alta con créditos reales, o "Con
+    // Créditos" a uno que ya gastó todo. Ahora usa la MISMA fuente real que
+    // las columnas Créditos/Vencimiento: al menos un lote activo en
+    // cualquier disciplina de créditos, O Aparatos vigente (un socio con
+    // plan combinado -- ej. CrossFit + Aparatos -- sigue "Con Créditos" si
+    // le queda Aparatos, aunque los créditos de CrossFit se hayan agotado).
+    const sinCreditos = !tieneCreditosActivos(socio.creditosPwaPorDisciplina) && !tieneAparatosVigente(socio)
     return (
       <span
         className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium ${
