@@ -92,6 +92,16 @@ export async function fetchAvataresYNiveles(dnis) {
 // `user_credits` -- la fuente de verdad real que usa la PWA -- para que el
 // ajuste rápido de créditos en la tabla de Socios (CreditosCell) muestre y
 // edite el número correcto por disciplina, no un total ambiguo.
+//
+// Créditos por LOTES (ver supabase_migration_lotes_creditos_fase1/2.sql):
+// una disciplina de créditos puede tener 2+ filas ACTIVAS al mismo tiempo
+// (compras distintas, vencimientos distintos). Bug real reportado (caso
+// Elena Castillo, DNI 34237434): esto se quedaba con "la fila más
+// reciente" nada más -- el Admin mostraba 1 crédito mientras la PWA (ya
+// corregida, ver fetchUserBalances() en creditsApi.ts) sumaba los 2 lotes
+// y mostraba 9. Mismo criterio EXACTO acá: se suman TODOS los lotes
+// activos (remaining_credits>0, expires_at>ahora) por disciplina -- el
+// número que ve Seba tiene que ser SIEMPRE igual al que ve el socio.
 export async function fetchCreditosPorDisciplina(dnis) {
   const dnisValidos = Array.from(new Set((dnis ?? []).filter(Boolean)))
   if (dnisValidos.length === 0) return new Map()
@@ -107,33 +117,44 @@ export async function fetchCreditosPorDisciplina(dnis) {
 
   const { data: filas, error: creditosError } = await supabase
     .from('user_credits')
-    .select('user_id, remaining_credits, created_at, discipline:disciplines(id, name, kind)')
+    .select('id, user_id, remaining_credits, expires_at, discipline:disciplines(id, name, kind)')
     .in('user_id', userIds)
-    .order('created_at', { ascending: false })
   if (creditosError) {
     if (esErrorDeRelacionFaltante(creditosError)) return new Map()
     console.error('No se pudieron traer los créditos reales de la PWA:', creditosError.message)
     return new Map()
   }
 
-  // La fila más reciente por (user_id, discipline_id) gana -- mismo
-  // criterio "último inserta, último vale" que fetchUserBalances() del
-  // lado de la PWA (creditsApi.ts): user_credits es un ledger append-only,
-  // no se actualiza in place.
-  const vistos = new Set()
-  const resultado = new Map()
+  // Agrupar TODAS las filas por (user_id, discipline_id) -- ya no solo la
+  // más reciente.
+  const filasPorClave = new Map()
   for (const fila of filas ?? []) {
     const disciplina = Array.isArray(fila.discipline) ? fila.discipline[0] : fila.discipline
     if (!disciplina || disciplina.kind !== 'credits') continue
 
     const clave = `${fila.user_id}:${disciplina.id}`
-    if (vistos.has(clave)) continue
-    vistos.add(clave)
+    const entrada = filasPorClave.get(clave) ?? { userId: fila.user_id, disciplina, filas: [] }
+    entrada.filas.push(fila)
+    filasPorClave.set(clave, entrada)
+  }
 
-    const dni = dniPorUserId.get(fila.user_id)
+  const ahora = Date.now()
+  const resultado = new Map()
+  for (const { userId, disciplina, filas: filasDisciplina } of filasPorClave.values()) {
+    const dni = dniPorUserId.get(userId)
     if (!dni) continue
+
+    // Lotes ACTIVOS (con saldo Y sin vencer), en orden FIFO (el que vence
+    // antes, primero) -- mismo criterio que fetchUserBalances() (PWA).
+    const lotesActivos = filasDisciplina
+      .filter((f) => (f.remaining_credits ?? 0) > 0 && !!f.expires_at && new Date(f.expires_at).getTime() > ahora)
+      .sort((a, b) => new Date(a.expires_at) - new Date(b.expires_at))
+
+    const lotes = lotesActivos.map((f) => ({ id: f.id, remainingCredits: f.remaining_credits ?? 0, expiresAt: f.expires_at }))
+    const remainingCredits = lotes.reduce((suma, lote) => suma + lote.remainingCredits, 0)
+
     const lista = resultado.get(dni) ?? []
-    lista.push({ disciplineId: disciplina.id, disciplineName: disciplina.name, remainingCredits: fila.remaining_credits ?? 0 })
+    lista.push({ disciplineId: disciplina.id, disciplineName: disciplina.name, remainingCredits, lotes })
     resultado.set(dni, lista)
   }
   return resultado

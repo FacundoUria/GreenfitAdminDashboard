@@ -99,7 +99,7 @@ describe('fetchAvataresYNiveles (tabla principal -- avatar + badge de nivel en b
 describe('fetchCreditosPorDisciplina (fix del bug de sincronización: fuente de verdad = user_credits real, no el pozo global socios.creditos)', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('un socio con dos disciplinas de créditos (CrossFit + Boxeo) devuelve el balance real de CADA UNA por separado', async () => {
+  it('un socio con dos disciplinas de créditos (CrossFit + Boxeo), cada una con 1 solo lote activo, devuelve el balance real de CADA UNA por separado', async () => {
     mockedFrom.mockImplementation((tabla) => {
       if (tabla === 'profiles') {
         return makeChain({ data: [{ id: 'u1', dni: '20111222' }], error: null })
@@ -107,8 +107,8 @@ describe('fetchCreditosPorDisciplina (fix del bug de sincronización: fuente de 
       if (tabla === 'user_credits') {
         return makeChain({
           data: [
-            { user_id: 'u1', remaining_credits: 6, created_at: '2026-08-07T10:00:00.000Z', discipline: { id: 'd-crossfit', name: 'CrossFit', kind: 'credits' } },
-            { user_id: 'u1', remaining_credits: 0, created_at: '2026-08-06T10:00:00.000Z', discipline: { id: 'd-boxeo', name: 'Boxeo', kind: 'credits' } },
+            { id: 'uc-1', user_id: 'u1', remaining_credits: 6, expires_at: '2099-01-01T00:00:00.000Z', discipline: { id: 'd-crossfit', name: 'CrossFit', kind: 'credits' } },
+            { id: 'uc-2', user_id: 'u1', remaining_credits: 0, expires_at: '2099-01-01T00:00:00.000Z', discipline: { id: 'd-boxeo', name: 'Boxeo', kind: 'credits' } },
           ],
           error: null,
         })
@@ -118,19 +118,54 @@ describe('fetchCreditosPorDisciplina (fix del bug de sincronización: fuente de 
 
     const mapa = await fetchCreditosPorDisciplina(['20111222'])
     expect(mapa.get('20111222')).toEqual([
-      { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6 },
-      { disciplineId: 'd-boxeo', disciplineName: 'Boxeo', remainingCredits: 0 },
+      { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6, lotes: [{ id: 'uc-1', remainingCredits: 6, expiresAt: '2099-01-01T00:00:00.000Z' }] },
+      { disciplineId: 'd-boxeo', disciplineName: 'Boxeo', remainingCredits: 0, lotes: [] },
     ])
   })
 
-  it('con más de una fila para la MISMA disciplina, gana la más reciente (created_at desc) -- user_credits es un ledger append-only', async () => {
+  // Caso real reportado (Elena Castillo, DNI 34237434): el Admin mostraba 1
+  // crédito (la fila más reciente nada más) mientras la PWA ya sumaba los 2
+  // lotes activos y mostraba 9. Fix: sumar TODOS los lotes activos
+  // (remaining_credits>0, expires_at>ahora) por disciplina, exactamente el
+  // mismo criterio que fetchUserBalances() (PWA, creditsApi.ts) -- y
+  // devolver el desglose por lote, ordenado por vencimiento ascendente.
+  it('con 2+ lotes ACTIVOS para la MISMA disciplina, suma el total real y devuelve el desglose ordenado por vencimiento (mismo criterio que la PWA)', async () => {
+    mockedFrom.mockImplementation((tabla) => {
+      if (tabla === 'profiles') return makeChain({ data: [{ id: 'u1', dni: '34237434' }], error: null })
+      if (tabla === 'user_credits') {
+        return makeChain({
+          data: [
+            { id: 'uc-nuevo', user_id: 'u1', remaining_credits: 1, expires_at: '2099-02-01T00:00:00.000Z', discipline: { id: 'd-crossfit', name: 'CrossFit', kind: 'credits' } },
+            { id: 'uc-viejo', user_id: 'u1', remaining_credits: 8, expires_at: '2099-01-01T00:00:00.000Z', discipline: { id: 'd-crossfit', name: 'CrossFit', kind: 'credits' } },
+          ],
+          error: null,
+        })
+      }
+      throw new Error(`tabla inesperada: ${tabla}`)
+    })
+
+    const mapa = await fetchCreditosPorDisciplina(['34237434'])
+    expect(mapa.get('34237434')).toEqual([
+      {
+        disciplineId: 'd-crossfit',
+        disciplineName: 'CrossFit',
+        remainingCredits: 9, // 1 + 8 -- YA NO "la fila más reciente" (que sería 1)
+        lotes: [
+          { id: 'uc-viejo', remainingCredits: 8, expiresAt: '2099-01-01T00:00:00.000Z' }, // vence antes -- primero
+          { id: 'uc-nuevo', remainingCredits: 1, expiresAt: '2099-02-01T00:00:00.000Z' },
+        ],
+      },
+    ])
+  })
+
+  it('un lote VENCIDO (expires_at en el pasado) no cuenta para el total ni aparece en el desglose, aunque tenga saldo', async () => {
     mockedFrom.mockImplementation((tabla) => {
       if (tabla === 'profiles') return makeChain({ data: [{ id: 'u1', dni: '20111222' }], error: null })
       if (tabla === 'user_credits') {
         return makeChain({
           data: [
-            { user_id: 'u1', remaining_credits: 6, created_at: '2026-08-07T10:00:00.000Z', discipline: { id: 'd-crossfit', name: 'CrossFit', kind: 'credits' } },
-            { user_id: 'u1', remaining_credits: 2, created_at: '2026-08-01T10:00:00.000Z', discipline: { id: 'd-crossfit', name: 'CrossFit', kind: 'credits' } },
+            { id: 'uc-activo', user_id: 'u1', remaining_credits: 4, expires_at: '2099-01-01T00:00:00.000Z', discipline: { id: 'd-crossfit', name: 'CrossFit', kind: 'credits' } },
+            { id: 'uc-vencido', user_id: 'u1', remaining_credits: 5, expires_at: '2020-01-01T00:00:00.000Z', discipline: { id: 'd-crossfit', name: 'CrossFit', kind: 'credits' } },
           ],
           error: null,
         })
@@ -139,7 +174,9 @@ describe('fetchCreditosPorDisciplina (fix del bug de sincronización: fuente de 
     })
 
     const mapa = await fetchCreditosPorDisciplina(['20111222'])
-    expect(mapa.get('20111222')).toEqual([{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6 }])
+    expect(mapa.get('20111222')).toEqual([
+      { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 4, lotes: [{ id: 'uc-activo', remainingCredits: 4, expiresAt: '2099-01-01T00:00:00.000Z' }] },
+    ])
   })
 
   it('ignora filas de disciplinas kind=membership (Aparatos) -- esta función es solo para créditos', async () => {
@@ -147,7 +184,7 @@ describe('fetchCreditosPorDisciplina (fix del bug de sincronización: fuente de 
       if (tabla === 'profiles') return makeChain({ data: [{ id: 'u1', dni: '20111222' }], error: null })
       if (tabla === 'user_credits') {
         return makeChain({
-          data: [{ user_id: 'u1', remaining_credits: null, created_at: '2026-08-07T10:00:00.000Z', discipline: { id: 'd-aparatos', name: 'Aparatos', kind: 'membership' } }],
+          data: [{ id: 'uc-1', user_id: 'u1', remaining_credits: null, expires_at: '2099-01-01T00:00:00.000Z', discipline: { id: 'd-aparatos', name: 'Aparatos', kind: 'membership' } }],
           error: null,
         })
       }
