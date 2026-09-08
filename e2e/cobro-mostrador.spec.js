@@ -41,6 +41,13 @@ const PROFILE_KICK = {
   role: 'socio',
 }
 
+// expires_at futuro -- créditos por lotes (ver supabase_migration_lotes_
+// creditos_fase1/2.sql): fetchCreditosPorDisciplina solo suma lotes
+// ACTIVOS (remaining_credits>0 Y expires_at>ahora), mismo criterio que
+// fetchUserBalances() (PWA). En producción real esto siempre está poblado
+// (sincronizarCreditosPwa lo setea en cada escritura).
+const EN_30_DIAS = new Date(Date.now() + 30 * 86_400_000).toISOString()
+
 function userCreditsIniciales() {
   return [
     {
@@ -48,6 +55,7 @@ function userCreditsIniciales() {
       user_id: PROFILE_KICK.id,
       discipline_id: DISCIPLINA_KICKSTRIKE.id,
       remaining_credits: 2,
+      expires_at: EN_30_DIAS,
       created_at: '2026-08-01T00:00:00.000Z',
     },
   ]
