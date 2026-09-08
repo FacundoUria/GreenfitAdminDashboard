@@ -12,7 +12,8 @@ import {
 } from 'recharts'
 import { AlertCircle, Clock, Download, Loader2, UserPlus, Users } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
-import { calcularEstadoCuota, esDelMesActual } from '../utils/fecha'
+import { esDelMesActual } from '../utils/fecha'
+import { estadoOperativoSocio, getSocioMetrics } from '../utils/socioMetrics'
 import { useConfiguracion } from '../context/useConfiguracion'
 
 const DIAS_SEMANA_LABELS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
@@ -201,34 +202,28 @@ function Reportes() {
     fetchSocios()
   }, [])
 
+  // Mismo criterio EXACTO que ya usan Home.jsx y Socios.jsx -- antes acá se
+  // llamaba a calcularEstadoCuota() directo, que solo mira fecha_vencimiento
+  // y no sabe nada de `socio.activo`. Un socio dado de baja con
+  // fecha_vencimiento todavía futura contaba como "Activo" en Reportes,
+  // mientras Home/Socios ya lo excluían (lo cuentan aparte, como
+  // "inactivo"). getSocioMetrics() es la fuente única para estos 3 números
+  // en todo el panel -- si cambia el criterio de negocio en el futuro,
+  // alcanza con tocarlo ahí una sola vez.
+  const metricasVigentes = useMemo(() => getSocioMetrics(socios, diasTolerancia), [socios, diasTolerancia])
+
   const kpis = useMemo(
     () => [
-      {
-        label: 'Socios Activos',
-        value: socios.filter((s) => calcularEstadoCuota(s.fecha_vencimiento, diasTolerancia) === 'activo')
-          .length,
-        icon: Users,
-      },
-      {
-        label: 'Cuota Vencida',
-        value: socios.filter((s) => calcularEstadoCuota(s.fecha_vencimiento, diasTolerancia) === 'vencido')
-          .length,
-        icon: AlertCircle,
-      },
-      {
-        label: 'En Tolerancia',
-        value: socios.filter(
-          (s) => calcularEstadoCuota(s.fecha_vencimiento, diasTolerancia) === 'tolerancia',
-        ).length,
-        icon: Clock,
-      },
+      { label: 'Socios Activos', value: metricasVigentes.activos, icon: Users },
+      { label: 'Cuota Vencida', value: metricasVigentes.vencidos, icon: AlertCircle },
+      { label: 'En Tolerancia', value: metricasVigentes.tolerancia, icon: Clock },
       {
         label: 'Nuevos del mes',
         value: socios.filter((s) => esDelMesActual(s.created_at)).length,
         icon: UserPlus,
       },
     ],
-    [socios, diasTolerancia],
+    [metricasVigentes, socios],
   )
 
   // Fecha de alta del socio más antiguo (para "Desde el origen").
@@ -258,6 +253,14 @@ function Reportes() {
   // (respetando la tolerancia configurada) en vez de comparar siempre contra
   // hoy — así un socio que dejó de pagar en 2024 deja de contar como activo
   // a partir de ese mes, en lugar de sumarse para siempre al total acumulado.
+  //
+  // Mismo criterio que el KPI de arriba -- estadoOperativoSocio() excluye a
+  // un socio dado de baja (activo=false) SIEMPRE, en cualquier mes del
+  // gráfico, no solo en el estado vigente de hoy: tampoco guardamos un
+  // historial real de altas/bajas, así que no hay forma honesta de saber
+  // desde cuándo estuvo de baja -- se lo excluye de punta a punta del rango,
+  // mismo espíritu que ya tenía esta reconstrucción retroactiva para la
+  // fecha de vencimiento.
   const sociosActivosData = useMemo(
     () =>
       meses.map((fecha) => {
@@ -268,9 +271,7 @@ function Reportes() {
           const alta = new Date(s.created_at)
           if (alta > finDeMes) return false
 
-          const estadoEnEsePeriodo = calcularEstadoCuota(s.fecha_vencimiento, diasTolerancia, finDeMes)
-          if (estadoEnEsePeriodo) return estadoEnEsePeriodo === 'activo'
-          return (s.estado ?? '').toLowerCase() === 'activo'
+          return estadoOperativoSocio(s, diasTolerancia, finDeMes) === 'activo'
         }).length
 
         return { mes: formatearMes(fecha, conAnio), valor }
