@@ -46,6 +46,15 @@ const PROFILE_MULTI = {
 // alias que pide el `.select('...discipline:disciplines(...)...')` real),
 // si no fetchCreditosPorDisciplina no tiene de dónde sacar kind/name y
 // descarta la fila entera.
+// expires_at futuro en las dos filas -- créditos por lotes (ver
+// supabase_migration_lotes_creditos_fase1/2.sql): fetchCreditosPorDisciplina
+// solo suma lotes ACTIVOS (remaining_credits>0 Y expires_at>ahora), mismo
+// criterio que fetchUserBalances() del lado de la PWA. En producción real
+// esto siempre está poblado (sincronizarCreditosPwa lo setea en cada
+// escritura) -- acá se declara explícito para que el fixture represente un
+// lote real, no uno inválido/legacy.
+const EN_30_DIAS = new Date(Date.now() + 30 * 86_400_000).toISOString()
+
 function userCreditsIniciales() {
   return [
     {
@@ -53,6 +62,7 @@ function userCreditsIniciales() {
       user_id: PROFILE_MULTI.id,
       discipline_id: 'disc-crossfit',
       remaining_credits: 6,
+      expires_at: EN_30_DIAS,
       created_at: '2026-08-01T00:00:00.000Z',
       discipline: { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' },
     },
@@ -61,6 +71,7 @@ function userCreditsIniciales() {
       user_id: PROFILE_MULTI.id,
       discipline_id: 'disc-boxeo',
       remaining_credits: 0,
+      expires_at: EN_30_DIAS,
       created_at: '2026-08-01T00:00:00.000Z',
       discipline: { id: 'disc-boxeo', name: 'Boxeo', kind: 'credits' },
     },
