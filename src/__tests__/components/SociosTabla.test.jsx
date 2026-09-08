@@ -159,3 +159,67 @@ describe('CreditosCell -- ajuste de créditos SIN AMBIGÜEDAD de disciplina (fix
     expect(celdas.every((el) => el.textContent === '0')).toBe(true)
   })
 })
+
+// Créditos por LOTES (ver supabase_migration_lotes_creditos_fase1/2.sql):
+// caso real reportado (Elena Castillo, DNI 34237434) -- la columna
+// Vencimiento nunca mostraba nada para disciplinas de créditos, solo la
+// fecha de Aparatos. Mismo formato que la PWA (formatCreditosDisponibles).
+describe('VencimientoCell -- desglose de vencimiento por lote de créditos (fix Admin↔PWA)', () => {
+  it('con 1 solo lote activo, muestra "Vence el dd/mm/yyyy"', () => {
+    const socio = {
+      ...SOCIO_CON_FOTO,
+      creditosPwaPorDisciplina: [
+        { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 4, lotes: [{ id: 'l1', remainingCredits: 4, expiresAt: '2026-10-05T12:00:00.000Z' }] },
+      ],
+    }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('Vence el 05/10/2026').length).toBeGreaterThan(0)
+  })
+
+  // Caso Elena: 2 lotes (8 + 1 = 9), cada uno con su propia fecha -- mismo
+  // formato "X vencen el dd/mm · Y vencen el dd/mm" que la PWA, en orden de
+  // vencimiento ascendente (el que vence antes, primero).
+  it('con 2 lotes activos, muestra el desglose "X vencen el dd/mm · Y vencen el dd/mm" en orden de vencimiento', () => {
+    const socio = {
+      ...SOCIO_CON_FOTO,
+      creditosPwaPorDisciplina: [
+        {
+          disciplineId: 'd-crossfit',
+          disciplineName: 'CrossFit',
+          remainingCredits: 9,
+          lotes: [
+            { id: 'l1', remainingCredits: 8, expiresAt: '2026-09-20T12:00:00.000Z' },
+            { id: 'l2', remainingCredits: 1, expiresAt: '2026-10-15T12:00:00.000Z' },
+          ],
+        },
+      ],
+    }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('8 vencen el 20/09/2026 · 1 vencen el 15/10/2026').length).toBeGreaterThan(0)
+  })
+
+  it('con 2+ disciplinas de créditos, cada línea antepone el nombre de la disciplina', () => {
+    const socio = {
+      ...SOCIO_CON_FOTO,
+      plan: ['CrossFit', 'Boxeo'],
+      creditosPwaPorDisciplina: [
+        { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 4, lotes: [{ id: 'l1', remainingCredits: 4, expiresAt: '2026-10-05T12:00:00.000Z' }] },
+        { disciplineId: 'd-boxeo', disciplineName: 'Boxeo', remainingCredits: 2, lotes: [{ id: 'l2', remainingCredits: 2, expiresAt: '2026-11-01T12:00:00.000Z' }] },
+      ],
+    }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('CrossFit: Vence el 05/10/2026').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Boxeo: Vence el 01/11/2026').length).toBeGreaterThan(0)
+  })
+
+  it('Aparatos (membresía) sigue mostrándose exactamente igual -- sin cambios', () => {
+    const socio = { ...SOCIO_SIN_FOTO, fechaVencimiento: '2026-12-31' }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('31/12/2026').length).toBeGreaterThan(0)
+  })
+
+  it('sin fecha de Aparatos y sin ningún lote de créditos activo, muestra "—"', () => {
+    render(<SociosTabla socios={[SOCIO_CON_FOTO]} {...HANDLERS} />)
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0)
+  })
+})

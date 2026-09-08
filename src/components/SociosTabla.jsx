@@ -139,15 +139,66 @@ function CreditosCell({ socio, onAjustarCredito }) {
   )
 }
 
+// Créditos por LOTES (ver supabase_migration_lotes_creditos_fase1/2.sql):
+// hasta acá esta celda solo mostraba fecha_vencimiento -- que es la fecha
+// de Aparatos/membresía, nunca la de una disciplina de créditos. Un socio
+// con 2+ lotes activos de la misma disciplina (compras distintas,
+// vencimientos distintos) no tenía NINGÚN lugar en el panel para ver
+// cuándo vence cada uno -- CreditosCell solo muestra el total. Mismo
+// formato "X vencen el dd/mm · Y vencen el dd/mm" que ya usa la PWA
+// (formatCreditosDisponibles en creditsApi.ts) para que Seba vea
+// exactamente lo mismo que el socio, tope 2 lotes + "y N más" -- mismo
+// criterio de recorte que la PWA.
+const MAX_LOTES_EN_DESGLOSE = 2
+
+function formatVencimientoLotes(lotes) {
+  if (!lotes || lotes.length === 0) return null
+  if (lotes.length === 1) return `Vence el ${formatFecha(lotes[0].expiresAt)}`
+
+  const visibles = lotes.slice(0, MAX_LOTES_EN_DESGLOSE)
+  const partes = visibles.map((lote) => `${lote.remainingCredits} vencen el ${formatFecha(lote.expiresAt)}`)
+  const restantes = lotes.length - visibles.length
+  if (restantes > 0) partes.push(`y ${restantes} más`)
+  return partes.join(' · ')
+}
+
 // Una fecha de vencimiento pasada solo tiene sentido mostrarla mientras la
 // cuota sigue "activa" (todavía no llegó el día) -- una vez vencida (aunque
 // esté en tolerancia) o si el socio no está realmente activo, mostrar la
-// fecha vieja es más confuso que útil.
+// fecha vieja es más confuso que útil. Esto es SOLO para Aparatos/membresía
+// -- las líneas de créditos de abajo no dependen de `socio.estado` (ese
+// campo es del ciclo de cuota por vencimiento, no tiene sentido para
+// créditos, que se rigen por sus propios lotes).
 function VencimientoCell({ socio }) {
-  if (socio.estado !== 'activo' || !socio.fechaVencimiento) {
+  const mostrarAparatos = socio.estado === 'activo' && !!socio.fechaVencimiento
+  const disciplinasCredito = planesDeCreditos(socio.plan)
+  const lineasCreditos = disciplinasCredito
+    .map((disciplina) => {
+      const entrada = (socio.creditosPwaPorDisciplina ?? []).find(
+        (c) => (c.disciplineName ?? '').trim().toLowerCase() === disciplina.trim().toLowerCase(),
+      )
+      const texto = formatVencimientoLotes(entrada?.lotes)
+      if (!texto) return null
+      // Con más de una disciplina de créditos, antepone el nombre --
+      // mismo criterio que CreditosCell (solo desambigua cuando hace falta).
+      return disciplinasCredito.length > 1 ? `${disciplina}: ${texto}` : texto
+    })
+    .filter(Boolean)
+
+  if (!mostrarAparatos && lineasCreditos.length === 0) {
     return <span className="text-gray-600">—</span>
   }
-  return <span>{formatFecha(socio.fechaVencimiento)}</span>
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      {mostrarAparatos && <span>{formatFecha(socio.fechaVencimiento)}</span>}
+      {lineasCreditos.map((linea) => (
+        <span key={linea} className="text-xs text-gray-400">
+          {linea}
+        </span>
+      ))}
+    </div>
+  )
 }
 
 function iniciales(nombre, apellido) {
