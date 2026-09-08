@@ -1,3 +1,8 @@
+// dd/mm/yyyy siempre -- con opciones explícitas, no dependiente de qué
+// formato por defecto le dé el motor JS a 'es-AR' sin especificar nada
+// (antes `toLocaleDateString('es-AR')` a secas -- en la práctica solía dar
+// "5/9/2026", sin cero a la izquierda, en vez del "05/09/2026" que se
+// espera en todo el sistema).
 export function formatFecha(valor) {
   if (!valor) return '-'
 
@@ -9,7 +14,24 @@ export function formatFecha(valor) {
   const fecha = valor instanceof Date ? valor : new Date(esSoloFecha ? `${valor}T00:00:00` : valor)
 
   if (Number.isNaN(fecha.getTime())) return '-'
-  return fecha.toLocaleDateString('es-AR')
+  return fecha.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+}
+
+// Fecha + hora -- reusa formatFecha() para la parte de fecha (misma
+// garantía de dd/mm/yyyy, mismo criterio de "solo fecha" vs. timestamp
+// completo) en vez de reimplementarla -- así hay una sola fuente de verdad
+// para cómo se ve una fecha en todo el Admin. `hour12: false` explícito por
+// el mismo motivo que ya documenta la PWA (classTime.ts): no confiar en que
+// el motor JS respete el formato 24hs de 'es-AR' por default.
+export function formatFechaHora(valor) {
+  const fechaTexto = formatFecha(valor)
+  if (fechaTexto === '-') return '-'
+
+  const esSoloFecha = typeof valor === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(valor)
+  const fecha = valor instanceof Date ? valor : new Date(esSoloFecha ? `${valor}T00:00:00` : valor)
+  const horaTexto = fecha.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false })
+
+  return `${fechaTexto} ${horaTexto}`
 }
 
 export function hoyISO() {

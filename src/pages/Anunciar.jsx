@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { AlertTriangle, Loader2, Megaphone, Send, X } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { buscarSociosParaCheckin } from '../utils/fichaSocioPwa'
+import { formatFechaHora } from '../utils/fecha'
 
 const AUDIENCIAS = [
   { value: 'all', label: 'Todos los socios' },
@@ -9,10 +10,6 @@ const AUDIENCIAS = [
   { value: 'class', label: 'Anotados en una clase' },
   { value: 'user', label: 'Un socio puntual' },
 ]
-
-function formatFecha(iso) {
-  return new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-}
 
 function iniciales(nombre) {
   const partes = (nombre ?? '?').trim().split(/\s+/)
@@ -328,7 +325,7 @@ function Anunciar() {
               <li key={n.id} className="py-3">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-medium text-white">{n.title}</p>
-                  <span className="shrink-0 text-xs text-gray-500">{formatFecha(n.created_at)}</span>
+                  <span className="shrink-0 text-xs text-gray-500">{formatFechaHora(n.created_at)}</span>
                 </div>
                 <p className="mt-1 text-sm text-gray-400">{n.body}</p>
               </li>

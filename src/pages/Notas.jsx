@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { CheckCircle2, Circle, Plus, Trash2 } from 'lucide-react'
 import { useNotas } from '../context/useNotas'
+import { formatFechaHora } from '../utils/fecha'
 
 const FILTROS = [
   { value: 'todas', label: 'Todas' },
@@ -9,19 +10,6 @@ const FILTROS = [
 ]
 
 const formInicial = { titulo: '', detalle: '', fechaAlerta: '' }
-
-function formatearFechaAlerta(valor) {
-  if (!valor) return null
-  const fecha = new Date(valor)
-  if (Number.isNaN(fecha.getTime())) return null
-  return fecha.toLocaleString('es-AR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
 
 function Notas() {
   const { notas, agregarNota, actualizarNota, eliminarNota } = useNotas()
@@ -139,7 +127,11 @@ function Notas() {
         <div className="flex flex-col gap-3">
           {notasFiltradas.map((nota) => {
             const completada = nota.estado === 'completada'
-            const fechaAlertaTexto = formatearFechaAlerta(nota.fechaAlerta)
+            // Chequeo sobre el valor crudo (no sobre el texto formateado):
+            // formatFechaHora() devuelve '-' ante una fecha inválida, no
+            // null -- si dependiéramos de su verdad, una nota sin alerta
+            // mostraría "⏰ Alerta: -" en vez de no mostrar la línea.
+            const fechaAlertaTexto = nota.fechaAlerta ? formatFechaHora(nota.fechaAlerta) : null
 
             return (
               <div

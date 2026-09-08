@@ -2,13 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Loader2, Receipt, RefreshCw, RotateCcw, X } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { formatMoneda } from '../utils/moneda'
+import { formatFechaHora } from '../utils/fecha'
 import { fetchHistorialComprobantes, revertirComprobante } from '../utils/pagosSocio'
-
-function formatFechaHora(iso) {
-  const fecha = new Date(iso)
-  if (Number.isNaN(fecha.getTime())) return '-'
-  return fecha.toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })
-}
 
 function Toast({ message }) {
   return (
