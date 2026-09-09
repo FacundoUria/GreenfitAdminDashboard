@@ -263,11 +263,18 @@ function VencimientoCell({ socio }) {
     return <span className="text-gray-600">—</span>
   }
 
+  // BUG VISUAL (caso real: Agustina Ochoa -- solo Aparatos -- mostraba
+  // "04/10/2026" pelada, mientras Agustina Alvarez -- Aparatos + CrossFit
+  // -- mostraba "Vence el 08/10/2026" con prefijo): la línea de créditos
+  // SIEMPRE pasa por formatVencimientoLotes/formatFecha con el prefijo
+  // "Vence el " (o "X vencen el ") ya incluido, pero la de Aparatos se
+  // armaba con formatFecha() a secas, sin ese prefijo. Unificado -- "Vence
+  // el " va SIEMPRE, con o sin etiqueta de disciplina.
+  const textoAparatos = `Vence el ${formatFecha(socio.fechaVencimiento)}`
+
   return (
     <div className="flex flex-col gap-0.5">
-      {mostrarAparatos && (
-        <span>{necesitaEtiqueta ? `${etiquetaMembresia}: ${formatFecha(socio.fechaVencimiento)}` : formatFecha(socio.fechaVencimiento)}</span>
-      )}
+      {mostrarAparatos && <span>{necesitaEtiqueta ? `${etiquetaMembresia}: ${textoAparatos}` : textoAparatos}</span>}
       {lineasCreditos.map(({ disciplina, texto }) => (
         <span key={disciplina} className="text-xs text-gray-400">
           {necesitaEtiqueta ? `${disciplina}: ${texto}` : texto}

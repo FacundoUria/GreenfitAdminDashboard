@@ -202,10 +202,10 @@ describe('VencimientoCell -- desglose de vencimiento por lote de créditos (fix 
     expect(screen.getAllByText('Boxeo: Vence el 01/11/2026').length).toBeGreaterThan(0)
   })
 
-  it('Aparatos (membresía) sigue mostrándose exactamente igual -- sin cambios', () => {
+  it('Aparatos (membresía) lleva el mismo prefijo "Vence el " que las líneas de créditos', () => {
     const socio = { ...SOCIO_SIN_FOTO, fechaVencimiento: '2026-12-31' }
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
-    expect(screen.getAllByText('31/12/2026').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Vence el 31/12/2026').length).toBeGreaterThan(0)
   })
 
   it('sin fecha de Aparatos y sin ningún lote de créditos activo, muestra "—"', () => {
@@ -298,7 +298,7 @@ describe('VencimientoCell -- fecha_vencimiento solo se muestra si el socio tiene
       ],
     }
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
-    expect(screen.getAllByText('Aparatos: 10/08/2026').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Aparatos: Vence el 10/08/2026').length).toBeGreaterThan(0)
     expect(screen.getAllByText('CrossFit: Vence el 23/09/2026').length).toBeGreaterThan(0)
   })
 
@@ -318,10 +318,10 @@ describe('VencimientoCell -- fecha_vencimiento solo se muestra si el socio tiene
     expect(screen.queryByText(/11\/09\/2026/)).toBeNull()
   })
 
-  it('socio con Aparatos solamente: sin cambios respecto a hoy -- 1 fecha sin etiqueta', () => {
+  it('socio con Aparatos solamente: 1 fecha sin etiqueta de disciplina, pero CON el prefijo "Vence el "', () => {
     const socio = { ...SOCIO_SIN_FOTO, fechaVencimiento: '2026-12-31' } // plan: ['Aparatos']
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
-    expect(screen.getAllByText('31/12/2026').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Vence el 31/12/2026').length).toBeGreaterThan(0)
     expect(screen.queryByText(/Aparatos:/)).toBeNull()
   })
 })
