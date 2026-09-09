@@ -211,3 +211,59 @@ describe('NuevoSocioModal -- sincroniza el teléfono editado con profiles.phone 
     expect(onClose).toHaveBeenCalled()
   })
 })
+
+// Caso real (Agustina Barbero, DNI 43151174, plan=solo CrossFit): este
+// campo escribe SIEMPRE en socios.fecha_vencimiento, sin importar el plan
+// -- la MISMA columna que SociosTabla.jsx ya no muestra para un socio sin
+// Aparatos/Pase Libre. No se oculta acá (un socio 100% créditos SÍ tiene
+// que poder renovar su vencimiento, ver editar-vencimiento.spec.js) --
+// pero la etiqueta ahora aclara siempre a qué disciplina se aplica, para
+// que no se confunda con "el vencimiento de Aparatos" cuando el socio no
+// lo tiene.
+describe('NuevoSocioModal -- el campo de vencimiento aclara a qué disciplina se aplica (fix Agustina Barbero)', () => {
+  it('socio con Aparatos: el campo se llama "Fecha de vencimiento (Aparatos)"', () => {
+    const socio = {
+      id: 's-aparatos',
+      nombre: 'Lucía',
+      apellido: 'Paz',
+      dni: '30222333',
+      email: 'lucia@test.com',
+      telefono: '',
+      plan: ['Aparatos'],
+      fechaVencimiento: '2026-08-10',
+    }
+    render(<NuevoSocioModal socio={socio} onClose={vi.fn()} onSaved={vi.fn()} />)
+    expect(screen.getByLabelText('Fecha de vencimiento (Aparatos)')).toBeTruthy()
+  })
+
+  it('socio 100% de créditos (sin Aparatos): el campo se llama "Renovar vencimiento de créditos (...)", no el genérico de antes', () => {
+    const socio = {
+      id: 's-solo-creditos',
+      nombre: 'Bruno',
+      apellido: 'Álvarez',
+      dni: '30999888',
+      email: 'bruno@test.com',
+      telefono: '',
+      plan: ['Boxeo'],
+      fechaVencimiento: '2026-09-11', // residual -- no le corresponde a Aparatos, que no tiene
+    }
+    render(<NuevoSocioModal socio={socio} onClose={vi.fn()} onSaved={vi.fn()} />)
+    expect(screen.getByLabelText('Renovar vencimiento de créditos (Boxeo)')).toBeTruthy()
+    expect(screen.queryByText('Fecha de vencimiento')).toBeNull()
+  })
+
+  it('socio con Aparatos + una disciplina de créditos: la etiqueta sigue asociada a Aparatos (una sola fecha, una sola membresía real)', () => {
+    const socio = {
+      id: 's-combinado',
+      nombre: 'Facundo',
+      apellido: 'Uria',
+      dni: '20333444',
+      email: 'facu@test.com',
+      telefono: '',
+      plan: ['Aparatos', 'CrossFit'],
+      fechaVencimiento: '2026-08-10',
+    }
+    render(<NuevoSocioModal socio={socio} onClose={vi.fn()} onSaved={vi.fn()} />)
+    expect(screen.getByLabelText('Fecha de vencimiento (Aparatos)')).toBeTruthy()
+  })
+})

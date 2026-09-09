@@ -1,5 +1,5 @@
 import { CreditCard, MessageCircle, Pencil, UserX, UserCheck } from 'lucide-react'
-import { esPlanDeCreditos, formatearPlanes, planesDeCreditos } from '../utils/planes'
+import { esPlanDeCreditos, formatearPlanes, planesDeCreditos, planesDeVencimiento, tienePlanDeVencimiento } from '../utils/planes'
 import { formatFecha } from '../utils/fecha'
 
 const estadoStyles = {
@@ -30,7 +30,19 @@ function tieneCreditosActivos(creditosPwaPorDisciplina) {
 // kind='credits' a propósito, Aparatos es kind='membership') -- se reusa
 // `socio.fechaVencimiento`, el mismo dato que ya muestra VencimientoCell
 // para esa disciplina, sin ninguna consulta nueva.
+//
+// BUG REAL (caso Agustina Barbero, DNI 43151174, plan=solo CrossFit):
+// esto no chequeaba si el socio REALMENTE tiene Aparatos/Pase Libre
+// tildado en su plan -- socios.fecha_vencimiento es una sola columna que
+// se puede haber cargado alguna vez (alta vieja, migración de CrossFy, o
+// el campo "Fecha de vencimiento" de NuevoSocioModal, que aplica a
+// CUALQUIER plan) sin que le corresponda a una membresía real hoy. Un
+// socio 100% créditos con un remanente vencido pero una
+// `fecha_vencimiento` residual todavía futura podía figurar "Con
+// Créditos" en el badge por esa fecha sola, sin tener ni un crédito real
+// ni Aparatos. Ahora exige `tienePlanDeVencimiento` primero.
 function tieneAparatosVigente(socio) {
+  if (!tienePlanDeVencimiento(socio.plan)) return false
   if (!socio.fechaVencimiento) return false
   const vencimiento = new Date(`${socio.fechaVencimiento}T00:00:00`)
   return vencimiento.getTime() > Date.now()
@@ -202,8 +214,31 @@ function formatVencimientoLotes(lotes) {
 // -- las líneas de créditos de abajo no dependen de `socio.estado` (ese
 // campo es del ciclo de cuota por vencimiento, no tiene sentido para
 // créditos, que se rigen por sus propios lotes).
+//
+// BUG REAL (caso Agustina Barbero, DNI 43151174, plan=solo CrossFit):
+// esto mostraba `socios.fecha_vencimiento` SIEMPRE que hubiera un valor y
+// el socio estuviera activo, sin chequear si el socio REALMENTE tiene
+// Aparatos/Pase Libre tildado -- una fecha residual (dato sucio de la
+// migración de CrossFy, o cargada una vez desde el campo "Fecha de
+// vencimiento" de NuevoSocioModal, que aplica a cualquier plan) se veía
+// como una segunda fecha sin etiqueta, indistinguible de la de créditos.
+// Ahora exige `tienePlanDeVencimiento` (Aparatos O Pase Libre -- las dos
+// etiquetas que usan esta misma columna, ver utils/planes.js) antes de
+// mostrar nada.
+//
+// Etiquetado (2+ disciplinas con vencimiento propio, sea Aparatos/Pase
+// Libre + créditos, o 2+ de créditos entre sí): antes esto solo miraba la
+// cantidad de disciplinas de CRÉDITOS (`disciplinasCredito.length > 1`),
+// ignorando si Aparatos también se estaba mostrando -- un socio con
+// Aparatos + 1 sola disciplina de créditos veía 2 fechas SIN etiquetar,
+// indistinguibles entre sí. Ahora se cuenta el total de líneas que se van
+// a mostrar (Aparatos/Pase Libre + cada disciplina de créditos con lotes)
+// y se etiqueta TODO si ese total es 2 o más -- con 1 sola línea, se sigue
+// mostrando sin etiqueta (caso simple, sin cambios).
 function VencimientoCell({ socio }) {
-  const mostrarAparatos = socio.estado === 'activo' && !!socio.fechaVencimiento
+  const tieneMembresia = tienePlanDeVencimiento(socio.plan)
+  const mostrarAparatos = tieneMembresia && socio.estado === 'activo' && !!socio.fechaVencimiento
+
   const disciplinasCredito = planesDeCreditos(socio.plan)
   const lineasCreditos = disciplinasCredito
     .map((disciplina) => {
@@ -212,11 +247,17 @@ function VencimientoCell({ socio }) {
       )
       const texto = formatVencimientoLotes(entrada?.lotes)
       if (!texto) return null
-      // Con más de una disciplina de créditos, antepone el nombre --
-      // mismo criterio que CreditosCell (solo desambigua cuando hace falta).
-      return disciplinasCredito.length > 1 ? `${disciplina}: ${texto}` : texto
+      return { disciplina, texto }
     })
     .filter(Boolean)
+
+  const totalLineas = (mostrarAparatos ? 1 : 0) + lineasCreditos.length
+  const necesitaEtiqueta = totalLineas > 1
+  // "Aparatos" y "Pase Libre" son las dos etiquetas posibles de la misma
+  // columna (fecha_vencimiento) -- en el caso real (uno de los dos
+  // tildado) esto da un solo nombre; el `join` es solo para el caso
+  // teórico de tener ambos tildados a la vez, sin perder ningún dato.
+  const etiquetaMembresia = planesDeVencimiento(socio.plan).join(' + ')
 
   if (!mostrarAparatos && lineasCreditos.length === 0) {
     return <span className="text-gray-600">—</span>
@@ -224,10 +265,12 @@ function VencimientoCell({ socio }) {
 
   return (
     <div className="flex flex-col gap-0.5">
-      {mostrarAparatos && <span>{formatFecha(socio.fechaVencimiento)}</span>}
-      {lineasCreditos.map((linea) => (
-        <span key={linea} className="text-xs text-gray-400">
-          {linea}
+      {mostrarAparatos && (
+        <span>{necesitaEtiqueta ? `${etiquetaMembresia}: ${formatFecha(socio.fechaVencimiento)}` : formatFecha(socio.fechaVencimiento)}</span>
+      )}
+      {lineasCreditos.map(({ disciplina, texto }) => (
+        <span key={disciplina} className="text-xs text-gray-400">
+          {necesitaEtiqueta ? `${disciplina}: ${texto}` : texto}
         </span>
       ))}
     </div>

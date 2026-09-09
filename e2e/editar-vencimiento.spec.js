@@ -42,7 +42,10 @@ test.describe('Admin -- Edición directa de vencimiento (sin pasar por "Cobrar")
     await page.locator('[title="Editar"]:visible').click()
 
     await expect(page.getByRole('heading', { name: 'Editar Socio' })).toBeVisible()
-    const inputFecha = page.getByLabel('Fecha de vencimiento')
+    // Rediseño (etiquetado de vencimiento): con Aparatos tildado, el campo
+    // aclara explícitamente a qué disciplina corresponde -- "Fecha de
+    // vencimiento (Aparatos)", no un genérico ambiguo.
+    const inputFecha = page.getByLabel('Fecha de vencimiento (Aparatos)')
     await expect(inputFecha).toHaveValue('2026-08-10')
 
     await inputFecha.fill('2026-09-15')
@@ -90,7 +93,13 @@ test.describe('Admin -- Edición directa de vencimiento (sin pasar por "Cobrar")
     await page.locator('[title="Editar"]:visible').click()
     await expect(page.getByRole('heading', { name: 'Editar Socio' })).toBeVisible()
 
-    const inputFecha = page.getByLabel('Fecha de vencimiento')
+    // Rediseño (etiquetado de vencimiento): un socio 100% de créditos no
+    // tiene Aparatos, así que este campo YA NO se llama "Fecha de
+    // vencimiento" a secas (ver NuevoSocioModal.jsx) -- deja bien claro
+    // que renueva el vencimiento de sus disciplinas de créditos, no de una
+    // Aparatos que no tiene.
+    await expect(page.getByText('Renovar vencimiento de créditos (CrossFit)')).toBeVisible()
+    const inputFecha = page.getByLabel('Renovar vencimiento de créditos')
     await expect(inputFecha).toBeVisible()
 
     await inputFecha.fill('2026-09-20')

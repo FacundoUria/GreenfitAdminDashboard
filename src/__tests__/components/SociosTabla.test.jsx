@@ -264,6 +264,68 @@ describe('VencimientoCell -- agrupa lotes que vencen el MISMO día calendario en
   })
 })
 
+// Caso real (Agustina Barbero, DNI 43151174, plan=solo CrossFit):
+// socios.fecha_vencimiento mostraba SIEMPRE que hubiera un valor y el
+// socio estuviera activo, sin chequear si el socio REALMENTE tiene
+// Aparatos/Pase Libre tildado -- una fecha residual (dato sucio, nunca le
+// correspondió) se veía como una segunda fecha sin etiqueta,
+// indistinguible de la de créditos reales. Ahora exige tener Aparatos o
+// Pase Libre en el plan, y etiqueta TODO (Aparatos + créditos) apenas hay
+// 2 o más líneas en total, no solo cuando hay 2+ disciplinas de créditos.
+describe('VencimientoCell -- fecha_vencimiento solo se muestra si el socio tiene Aparatos/Pase Libre (fix Agustina Barbero)', () => {
+  it('socio con 1 sola disciplina de créditos y SIN Aparatos: 1 fecha sin etiqueta, ni rastro de fecha_vencimiento', () => {
+    const socio = {
+      ...SOCIO_CON_FOTO, // plan: ['CrossFit']
+      fechaVencimiento: '2026-09-11', // dato residual -- no le corresponde a nada de su plan actual
+      creditosPwaPorDisciplina: [
+        { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 12, lotes: [{ id: 'l1', remainingCredits: 12, expiresAt: '2026-09-23T12:00:00.000Z' }] },
+      ],
+    }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('Vence el 23/09/2026').length).toBeGreaterThan(0)
+    // La fecha vieja (11/09) no aparece en NINGÚN lado de la fila.
+    expect(screen.queryByText(/11\/09\/2026/)).toBeNull()
+    expect(screen.queryByText(/CrossFit:/)).toBeNull() // 1 sola línea -- sin etiqueta
+  })
+
+  it('socio con Aparatos + 1 disciplina de créditos: 2 fechas, las DOS etiquetadas', () => {
+    const socio = {
+      ...SOCIO_CON_FOTO,
+      plan: ['CrossFit', 'Aparatos'],
+      fechaVencimiento: '2026-08-10',
+      creditosPwaPorDisciplina: [
+        { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 12, lotes: [{ id: 'l1', remainingCredits: 12, expiresAt: '2026-09-23T12:00:00.000Z' }] },
+      ],
+    }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('Aparatos: 10/08/2026').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('CrossFit: Vence el 23/09/2026').length).toBeGreaterThan(0)
+  })
+
+  it('socio con 2 disciplinas de créditos y SIN Aparatos: 2 fechas etiquetadas, sin fecha_vencimiento', () => {
+    const socio = {
+      ...SOCIO_CON_FOTO,
+      plan: ['CrossFit', 'Boxeo'],
+      fechaVencimiento: '2026-09-11', // residual -- tampoco tiene que aparecer acá
+      creditosPwaPorDisciplina: [
+        { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 4, lotes: [{ id: 'l1', remainingCredits: 4, expiresAt: '2026-10-05T12:00:00.000Z' }] },
+        { disciplineId: 'd-boxeo', disciplineName: 'Boxeo', remainingCredits: 2, lotes: [{ id: 'l2', remainingCredits: 2, expiresAt: '2026-11-01T12:00:00.000Z' }] },
+      ],
+    }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('CrossFit: Vence el 05/10/2026').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Boxeo: Vence el 01/11/2026').length).toBeGreaterThan(0)
+    expect(screen.queryByText(/11\/09\/2026/)).toBeNull()
+  })
+
+  it('socio con Aparatos solamente: sin cambios respecto a hoy -- 1 fecha sin etiqueta', () => {
+    const socio = { ...SOCIO_SIN_FOTO, fechaVencimiento: '2026-12-31' } // plan: ['Aparatos']
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('31/12/2026').length).toBeGreaterThan(0)
+    expect(screen.queryByText(/Aparatos:/)).toBeNull()
+  })
+})
+
 // Bug real detectado en la auditoría de Socios: EstadoBadge ("Con
 // Créditos"/"Sin Créditos") leía `socio.creditos` -- el pozo global viejo,
 // que no se siembra al alta (sincronizarCreditosPwa solo escribe
@@ -312,6 +374,21 @@ describe('EstadoBadge -- "Con/Sin Créditos" migrado a la fuente real (lotes act
       ...SOCIO_CON_FOTO,
       creditos: 0,
       creditosPwaPorDisciplina: [],
+    }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('Sin Créditos').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Con Créditos')).toBeNull()
+  })
+
+  // Caso real (Agustina Barbero, DNI 43151174, plan=solo CrossFit): una
+  // fecha_vencimiento residual (sin Aparatos real en el plan) NO tiene que
+  // poder disfrazar a un socio sin créditos reales como "Con Créditos".
+  it('fecha_vencimiento residual (futura) SIN Aparatos en el plan -- NO cuenta como "vigente", sigue "Sin Créditos"', () => {
+    const socio = {
+      ...SOCIO_CON_FOTO, // plan: ['CrossFit']
+      creditos: 0,
+      fechaVencimiento: '2099-01-01', // stray -- no le corresponde a nada de su plan actual
+      creditosPwaPorDisciplina: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 0, lotes: [] }],
     }
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
     expect(screen.getAllByText('Sin Créditos').length).toBeGreaterThan(0)

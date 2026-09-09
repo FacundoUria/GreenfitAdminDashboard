@@ -506,24 +506,45 @@ function NuevoSocioModal({
             </div>
           </div>
 
-          {esEdicion && form.planes.length > 0 && (
-            <div className="flex flex-col gap-1.5 sm:col-span-2">
-              <label htmlFor="fechaVencimientoEdicion" className="text-xs font-medium text-gray-400">
-                Fecha de vencimiento
-              </label>
-              <input
-                id="fechaVencimientoEdicion"
-                type="date"
-                value={form.fechaVencimiento}
-                onChange={handleChange('fechaVencimiento')}
-                className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
-              />
-              <p className="text-[11px] text-gray-500">
-                Edición directa, independiente de "Registrar Pago" -- guardar acá actualiza la fecha ya y la
-                sincroniza con la app del socio.
-              </p>
-            </div>
-          )}
+          {esEdicion &&
+            form.planes.length > 0 &&
+            (() => {
+              // Este campo escribe SIEMPRE en `socios.fecha_vencimiento` --
+              // la MISMA columna que la tabla de Socios ya no muestra para
+              // un socio sin Aparatos/Pase Libre (ver SociosTabla.jsx,
+              // VencimientoCell). Ocultarlo de acá rompería una función
+              // real y ya probada (un socio 100% créditos SÍ tiene que
+              // poder renovar su vencimiento sin Aparatos, ver
+              // editar-vencimiento.spec.js) -- así que en vez de
+              // esconderlo, se aclara explícitamente a qué disciplina(s)
+              // se aplica, para que no se confunda con "el vencimiento de
+              // Aparatos" cuando el socio no lo tiene.
+              const membresias = planesDeVencimiento(form.planes)
+              const creditos = planesDeCreditos(form.planes)
+              const tieneMembresia = membresias.length > 0
+              const etiqueta = tieneMembresia
+                ? `Fecha de vencimiento (${membresias.join(' + ')})`
+                : `Renovar vencimiento de créditos (${creditos.join(', ')})`
+              const ayuda = tieneMembresia
+                ? 'Edición directa, independiente de "Registrar Pago" -- guardar acá actualiza la fecha ya y la sincroniza con la app del socio.'
+                : `Este socio no tiene Aparatos ni Pase Libre -- esta fecha NO es un "vencimiento de Aparatos" (la tabla de Socios ya no la muestra como tal). Al guardar, extiende el vencimiento de ${creditos.join(', ') || 'sus créditos'} en la app, preservando el balance real de créditos.`
+
+              return (
+                <div className="flex flex-col gap-1.5 sm:col-span-2">
+                  <label htmlFor="fechaVencimientoEdicion" className="text-xs font-medium text-gray-400">
+                    {etiqueta}
+                  </label>
+                  <input
+                    id="fechaVencimientoEdicion"
+                    type="date"
+                    value={form.fechaVencimiento}
+                    onChange={handleChange('fechaVencimiento')}
+                    className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
+                  />
+                  <p className="text-[11px] text-gray-500">{ayuda}</p>
+                </div>
+              )
+            })()}
 
           {!esEdicion && planesDeCreditos(form.planes).length > 0 && (
             <div className="flex flex-col gap-1.5 sm:col-span-2">
