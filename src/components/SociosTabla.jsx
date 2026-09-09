@@ -181,13 +181,53 @@ function CreditosCell({ socio, onAjustarCredito }) {
 // criterio de recorte que la PWA.
 const MAX_LOTES_EN_DESGLOSE = 2
 
+// "YYYY-MM-DD" del día calendario en hora Argentina -- mismo criterio que
+// ya usa acreditar_pack() para decidir si dos acreditaciones fusionan en
+// un solo lote (ver supabase_migration_fix_zona_horaria_fusion_lotes.sql).
+// Puramente para AGRUPAR EL TEXTO acá -- no toca ninguna fila real de
+// user_credits. Mismo agrupamiento que fetchCreditosPorDisciplina() aplica
+// del lado de la PWA (creditsApi.ts) -- tienen que verse coherentes.
+function claveDiaArgentina(isoString) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Mendoza',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(isoString))
+}
+
+// Socios con 2+ lotes que vencen el MISMO día calendario (típico en datos
+// de antes del fix de zona horaria de la fusión, que quedaron en filas
+// separadas aunque deberían haber fusionado) se veían como líneas
+// redundantes -- "8 vencen el 23/09 · 4 vencen el 23/09" en vez de "12
+// vencen el 23/09". Se agrupan acá, en la presentación, ANTES de decidir
+// cuántas líneas hacen falta -- `lotes` ya viene ordenado ascendente por
+// expiresAt (fetchCreditosPorDisciplina), así que agrupar preservando el
+// orden de primera aparición alcanza, sin reordenar nada.
+function agruparLotesPorDiaArgentina(lotes) {
+  const porDia = new Map()
+  const orden = []
+  for (const lote of lotes) {
+    const clave = claveDiaArgentina(lote.expiresAt)
+    const existente = porDia.get(clave)
+    if (existente) {
+      existente.remainingCredits += lote.remainingCredits
+    } else {
+      porDia.set(clave, { remainingCredits: lote.remainingCredits, expiresAt: lote.expiresAt })
+      orden.push(clave)
+    }
+  }
+  return orden.map((clave) => porDia.get(clave))
+}
+
 function formatVencimientoLotes(lotes) {
   if (!lotes || lotes.length === 0) return null
-  if (lotes.length === 1) return `Vence el ${formatFecha(lotes[0].expiresAt)}`
+  const agrupados = agruparLotesPorDiaArgentina(lotes)
+  if (agrupados.length === 1) return `Vence el ${formatFecha(agrupados[0].expiresAt)}`
 
-  const visibles = lotes.slice(0, MAX_LOTES_EN_DESGLOSE)
+  const visibles = agrupados.slice(0, MAX_LOTES_EN_DESGLOSE)
   const partes = visibles.map((lote) => `${lote.remainingCredits} vencen el ${formatFecha(lote.expiresAt)}`)
-  const restantes = lotes.length - visibles.length
+  const restantes = agrupados.length - visibles.length
   if (restantes > 0) partes.push(`y ${restantes} más`)
   return partes.join(' · ')
 }

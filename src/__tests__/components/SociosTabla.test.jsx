@@ -224,6 +224,56 @@ describe('VencimientoCell -- desglose de vencimiento por lote de créditos (fix 
   })
 })
 
+// Caso real (Agustina Barbero): 2 lotes de la misma disciplina que vencen
+// el MISMO día calendario en Argentina (típico de datos de antes del fix
+// de zona horaria de la fusión, supabase_migration_fix_zona_horaria_fusion_
+// lotes.sql, que quedaron en 2 filas separadas aunque deberían haber
+// fusionado) se mostraban como líneas redundantes -- "8 vencen el 23/09 ·
+// 4 vencen el 23/09" -- en vez de unificadas. Mismo agrupamiento que ya
+// aplica formatCreditosDisponibles() del lado de la PWA (creditsApi.ts).
+describe('VencimientoCell -- agrupa lotes que vencen el MISMO día calendario en Argentina (fix Agustina Barbero)', () => {
+  it('2 lotes el mismo día -- se unifican en "Vence el dd/mm/yyyy" con la suma (mismo formato "1 lote" de siempre)', () => {
+    const socio = {
+      ...SOCIO_CON_FOTO,
+      creditosPwaPorDisciplina: [
+        {
+          disciplineId: 'd-crossfit',
+          disciplineName: 'CrossFit',
+          remainingCredits: 12,
+          // 8 (10:00 UTC) + 4 (18:00 UTC) -- ambos caen en 23/09 hora
+          // Argentina (UTC-3): 07:00 y 15:00 del mismo día.
+          lotes: [
+            { id: 'l1', remainingCredits: 8, expiresAt: '2026-09-23T10:00:00.000Z' },
+            { id: 'l2', remainingCredits: 4, expiresAt: '2026-09-23T18:00:00.000Z' },
+          ],
+        },
+      ],
+    }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('Vence el 23/09/2026').length).toBeGreaterThan(0)
+    expect(screen.queryByText(/vencen el/)).toBeNull()
+  })
+
+  it('lotes en DÍAS DISTINTOS siguen mostrándose separados -- sin cambios respecto de hoy', () => {
+    const socio = {
+      ...SOCIO_CON_FOTO,
+      creditosPwaPorDisciplina: [
+        {
+          disciplineId: 'd-crossfit',
+          disciplineName: 'CrossFit',
+          remainingCredits: 12,
+          lotes: [
+            { id: 'l1', remainingCredits: 8, expiresAt: '2026-09-20T12:00:00.000Z' },
+            { id: 'l2', remainingCredits: 4, expiresAt: '2026-09-23T12:00:00.000Z' },
+          ],
+        },
+      ],
+    }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('8 vencen el 20/09/2026 · 4 vencen el 23/09/2026').length).toBeGreaterThan(0)
+  })
+})
+
 // Bug real detectado en la auditoría de Socios: EstadoBadge ("Con
 // Créditos"/"Sin Créditos") leía `socio.creditos` -- el pozo global viejo,
 // que no se siembra al alta (sincronizarCreditosPwa solo escribe
