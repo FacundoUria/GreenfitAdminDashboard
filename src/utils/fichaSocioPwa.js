@@ -407,7 +407,7 @@ export async function buscarSociosClaseActiva() {
 
   const { data: clases, error: clasesError } = await supabase
     .from('classes')
-    .select('id, title, start_time, end_time, days_of_week, discipline:disciplines(name)')
+    .select('id, title, start_time, end_time, days_of_week, discipline_id, discipline:disciplines(name)')
   if (clasesError) {
     if (esErrorDeRelacionFaltante(clasesError)) return []
     throw new Error(clasesError.message)
@@ -432,12 +432,13 @@ export async function buscarSociosClaseActiva() {
   if (bookingsError) throw new Error(bookingsError.message)
 
   const claseById = new Map(clasesActivas.map((c) => [c.id, c]))
-  return (inscriptos ?? []).map((b) => {
+  const candidatos = (inscriptos ?? []).map((b) => {
     const clase = claseById.get(b.class_id)
     const disciplina = Array.isArray(clase?.discipline) ? clase.discipline[0] : clase?.discipline
     return {
       bookingId: b.id,
       userId: b.user_id,
+      disciplineId: clase?.discipline_id ?? null,
       nombre: b.profiles?.full_name ?? '(sin nombre)',
       dni: b.profiles?.dni ?? null,
       turno: clase
@@ -446,6 +447,37 @@ export async function buscarSociosClaseActiva() {
       yaRegistrado: !!b.attended,
     }
   })
+
+  // Prevenir mejor que bloquear: si el socio ya no está habilitado para
+  // esta disciplina (vencido/créditos agotados desde que reservó), ni
+  // siquiera se lo ofrece como sugerencia de "Dar Presente" -- así Seba no
+  // llega a tocar el botón y chocar recién ahí con el bloqueo real de
+  // award_xp_asistencia() (ver supabase_migration_fix_checkin_rapido_
+  // sin_vencimiento.sql). Los que YA tienen `attended=true` se dejan
+  // igual -- ya se registraron, no hay nada que prevenir ahí.
+  //
+  // Fail-open a propósito en ESTE chequeo puntual (no en el RPC real que
+  // realmente acredita/marca presente): si `esta_habilitado_para_disciplina`
+  // todavía no está desplegada o el chequeo falla por lo que sea, se deja
+  // el candidato visible en vez de romper toda la lista de sugerencias --
+  // la protección real sigue siendo el trigger, esto es solo una ayuda
+  // visual para no ofrecer un botón condenado a fallar.
+  const resultados = await Promise.all(
+    candidatos.map(async (c) => {
+      if (c.yaRegistrado || !c.disciplineId) return c
+      const { data: habilitado, error } = await supabase.rpc('esta_habilitado_para_disciplina', {
+        p_user_id: c.userId,
+        p_discipline_id: c.disciplineId,
+      })
+      if (error) {
+        console.warn(`No se pudo chequear habilitación de ${c.nombre} para "${c.turno}":`, error.message)
+        return c
+      }
+      return habilitado ? c : null
+    }),
+  )
+
+  return resultados.filter(Boolean).map(({ disciplineId, ...resto }) => resto)
 }
 
 // "Dar Presente" de un inscripto real (viene de buscarSociosClaseActiva) --

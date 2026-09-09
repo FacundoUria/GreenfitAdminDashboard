@@ -521,6 +521,178 @@ describe('buscarSociosClaseActiva (sugerencias inteligentes del Check-in Rápido
     const [item] = await buscarSociosClaseActiva()
     expect(item.yaRegistrado).toBe(true)
   })
+
+  // Fix urgente: Check-in Rápido nunca chequeaba esta_habilitado_para_
+  // disciplina() -- mejor prevenir que bloquear después del click, ver
+  // supabase_migration_fix_checkin_rapido_sin_vencimiento.sql.
+  it('filtra a un socio que YA NO está habilitado para la disciplina de la clase (créditos vencidos/agotados)', async () => {
+    vi.setSystemTime(new Date('2026-08-10T18:10:00'))
+    mockedFrom.mockImplementation((table) => {
+      if (table === 'classes') {
+        return makeChain({
+          data: [
+            {
+              id: 'clase-1',
+              title: 'CrossFit',
+              start_time: '18:00:00',
+              end_time: '19:00:00',
+              days_of_week: [1],
+              discipline_id: 'disc-crossfit',
+              discipline: { name: 'CrossFit' },
+            },
+          ],
+          error: null,
+        })
+      }
+      if (table === 'bookings') {
+        return makeChain({
+          data: [
+            {
+              id: 'booking-1',
+              user_id: 'u2',
+              class_id: 'clase-1',
+              attended: false,
+              profiles: { full_name: 'Bruno Álvarez', dni: '30999888' },
+            },
+          ],
+          error: null,
+        })
+      }
+      throw new Error(`tabla inesperada en el test: ${table}`)
+    })
+    mockedRpc.mockResolvedValue({ data: false, error: null })
+
+    const resultado = await buscarSociosClaseActiva()
+    expect(resultado).toEqual([])
+    expect(mockedRpc).toHaveBeenCalledWith('esta_habilitado_para_disciplina', {
+      p_user_id: 'u2',
+      p_discipline_id: 'disc-crossfit',
+    })
+  })
+
+  it('deja pasar a un socio SÍ habilitado para la disciplina de la clase', async () => {
+    vi.setSystemTime(new Date('2026-08-10T18:10:00'))
+    mockedFrom.mockImplementation((table) => {
+      if (table === 'classes') {
+        return makeChain({
+          data: [
+            {
+              id: 'clase-1',
+              title: 'CrossFit',
+              start_time: '18:00:00',
+              end_time: '19:00:00',
+              days_of_week: [1],
+              discipline_id: 'disc-crossfit',
+              discipline: { name: 'CrossFit' },
+            },
+          ],
+          error: null,
+        })
+      }
+      if (table === 'bookings') {
+        return makeChain({
+          data: [
+            {
+              id: 'booking-1',
+              user_id: 'u2',
+              class_id: 'clase-1',
+              attended: false,
+              profiles: { full_name: 'Bruno Álvarez', dni: '30999888' },
+            },
+          ],
+          error: null,
+        })
+      }
+      throw new Error(`tabla inesperada en el test: ${table}`)
+    })
+    mockedRpc.mockResolvedValue({ data: true, error: null })
+
+    const resultado = await buscarSociosClaseActiva()
+    expect(resultado).toHaveLength(1)
+    expect(resultado[0].nombre).toBe('Bruno Álvarez')
+  })
+
+  it('un inscripto YA registrado (attended=true) se deja pasar sin siquiera consultar habilitación', async () => {
+    vi.setSystemTime(new Date('2026-08-10T18:10:00'))
+    mockedFrom.mockImplementation((table) => {
+      if (table === 'classes') {
+        return makeChain({
+          data: [
+            {
+              id: 'clase-1',
+              title: 'CrossFit',
+              start_time: '18:00:00',
+              end_time: '19:00:00',
+              days_of_week: [1],
+              discipline_id: 'disc-crossfit',
+              discipline: { name: 'CrossFit' },
+            },
+          ],
+          error: null,
+        })
+      }
+      if (table === 'bookings') {
+        return makeChain({
+          data: [
+            {
+              id: 'booking-1',
+              user_id: 'u2',
+              class_id: 'clase-1',
+              attended: true,
+              profiles: { full_name: 'Bruno Álvarez', dni: '30999888' },
+            },
+          ],
+          error: null,
+        })
+      }
+      throw new Error(`tabla inesperada en el test: ${table}`)
+    })
+
+    const resultado = await buscarSociosClaseActiva()
+    expect(resultado).toHaveLength(1)
+    expect(mockedRpc).not.toHaveBeenCalled()
+  })
+
+  it('si el chequeo de habilitación falla (RPC no desplegada, etc.), deja al candidato visible -- fail-open, la protección real es el trigger', async () => {
+    vi.setSystemTime(new Date('2026-08-10T18:10:00'))
+    mockedFrom.mockImplementation((table) => {
+      if (table === 'classes') {
+        return makeChain({
+          data: [
+            {
+              id: 'clase-1',
+              title: 'CrossFit',
+              start_time: '18:00:00',
+              end_time: '19:00:00',
+              days_of_week: [1],
+              discipline_id: 'disc-crossfit',
+              discipline: { name: 'CrossFit' },
+            },
+          ],
+          error: null,
+        })
+      }
+      if (table === 'bookings') {
+        return makeChain({
+          data: [
+            {
+              id: 'booking-1',
+              user_id: 'u2',
+              class_id: 'clase-1',
+              attended: false,
+              profiles: { full_name: 'Bruno Álvarez', dni: '30999888' },
+            },
+          ],
+          error: null,
+        })
+      }
+      throw new Error(`tabla inesperada en el test: ${table}`)
+    })
+    mockedRpc.mockResolvedValue({ data: null, error: { code: 'PGRST202', message: 'función no encontrada' } })
+
+    const resultado = await buscarSociosClaseActiva()
+    expect(resultado).toHaveLength(1)
+  })
 })
 
 describe('darPresenteClase (marca una reserva de clase como asistida -- dispara el trigger de XP)', () => {

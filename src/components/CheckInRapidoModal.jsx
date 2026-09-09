@@ -30,6 +30,12 @@ function CheckInRapidoModal({ visible, onClose }) {
   // Estado por socio ('otorgando' | 'otorgado' | 'ya_registrado' | 'error')
   // -- así cada fila muestra su propio feedback sin bloquear al resto.
   const [estadoPorSocio, setEstadoPorSocio] = useState({})
+  // Mensaje REAL del error por socio (ej. "Este socio no tiene Aparatos
+  // vigente..." del RPC) -- separado de `estadoPorSocio` porque antes acá
+  // solo se mostraba un "Error" genérico sin ninguna pista de qué pasó, lo
+  // que le escondía a Seba justo el motivo que más le importa saber
+  // (vencimiento/créditos agotados) detrás de un texto mudo.
+  const [erroresPorSocio, setErroresPorSocio] = useState({})
 
   // Sugerencias inteligentes: inscriptos de la clase activa/por arrancar.
   const [sugerencias, setSugerencias] = useState([])
@@ -37,6 +43,8 @@ function CheckInRapidoModal({ visible, onClose }) {
   // Estado por BOOKING (no por socio -- en teoría un socio podría estar
   // anotado en más de un turno superpuesto).
   const [estadoPorBooking, setEstadoPorBooking] = useState({})
+  // Mismo criterio que erroresPorSocio, pero para "Dar Presente".
+  const [erroresPorBooking, setErroresPorBooking] = useState({})
 
   useEffect(() => {
     if (!visible) return
@@ -48,7 +56,9 @@ function CheckInRapidoModal({ visible, onClose }) {
     setResultados([])
     setError(null)
     setEstadoPorSocio({})
+    setErroresPorSocio({})
     setEstadoPorBooking({})
+    setErroresPorBooking({})
     setCargandoSugerencias(true)
     buscarSociosClaseActiva()
       .then((items) => setSugerencias(items))
@@ -89,8 +99,12 @@ function CheckInRapidoModal({ visible, onClose }) {
         ...prev,
         [socio.userId]: resultado === CHECKIN_YA_REGISTRADO ? 'ya_registrado' : 'otorgado',
       }))
-    } catch {
+    } catch (err) {
       setEstadoPorSocio((prev) => ({ ...prev, [socio.userId]: 'error' }))
+      setErroresPorSocio((prev) => ({
+        ...prev,
+        [socio.userId]: err instanceof Error ? err.message : 'No se pudo otorgar el check-in.',
+      }))
     }
   }
 
@@ -99,8 +113,12 @@ function CheckInRapidoModal({ visible, onClose }) {
     try {
       await darPresenteClase(item.bookingId)
       setEstadoPorBooking((prev) => ({ ...prev, [item.bookingId]: 'otorgado' }))
-    } catch {
+    } catch (err) {
       setEstadoPorBooking((prev) => ({ ...prev, [item.bookingId]: 'error' }))
+      setErroresPorBooking((prev) => ({
+        ...prev,
+        [item.bookingId]: err instanceof Error ? err.message : 'No se pudo marcar el presente.',
+      }))
     }
   }
 
@@ -166,37 +184,42 @@ function CheckInRapidoModal({ visible, onClose }) {
                   return (
                     <li
                       key={socio.userId}
-                      className="flex items-center gap-3 rounded-lg border border-white/5 bg-greenfit-dark px-3 py-2.5"
+                      className="flex flex-col gap-1.5 rounded-lg border border-white/5 bg-greenfit-dark px-3 py-2.5"
                     >
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-greenfit-primary/15 text-xs font-semibold text-greenfit-primary">
-                        {iniciales(socio.nombre)}
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-greenfit-primary/15 text-xs font-semibold text-greenfit-primary">
+                          {iniciales(socio.nombre)}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-white">{socio.nombre}</p>
+                          <p className="text-xs text-gray-500">DNI {socio.dni ?? '—'}</p>
+                        </div>
+                        {estado === 'otorgado' ? (
+                          <span className="flex items-center gap-1 text-xs font-semibold text-greenfit-primary">
+                            <CheckCircle2 className="h-4 w-4" /> +100 XP
+                          </span>
+                        ) : estado === 'ya_registrado' ? (
+                          <span className="text-xs font-medium text-amber-400">Ya registrado hoy</span>
+                        ) : estado === 'error' ? (
+                          <span className="text-xs font-medium text-red-400">No se pudo</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleOtorgar(socio)}
+                            disabled={estado === 'otorgando'}
+                            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-greenfit-primary px-3 py-2 text-xs font-semibold text-greenfit-dark transition-opacity hover:opacity-90 disabled:opacity-60"
+                          >
+                            {estado === 'otorgando' ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Zap className="h-3.5 w-3.5" />
+                            )}
+                            Otorgar
+                          </button>
+                        )}
                       </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-white">{socio.nombre}</p>
-                        <p className="text-xs text-gray-500">DNI {socio.dni ?? '—'}</p>
-                      </div>
-                      {estado === 'otorgado' ? (
-                        <span className="flex items-center gap-1 text-xs font-semibold text-greenfit-primary">
-                          <CheckCircle2 className="h-4 w-4" /> +100 XP
-                        </span>
-                      ) : estado === 'ya_registrado' ? (
-                        <span className="text-xs font-medium text-amber-400">Ya registrado hoy</span>
-                      ) : estado === 'error' ? (
-                        <span className="text-xs font-medium text-red-400">Error</span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleOtorgar(socio)}
-                          disabled={estado === 'otorgando'}
-                          className="flex shrink-0 items-center gap-1.5 rounded-lg bg-greenfit-primary px-3 py-2 text-xs font-semibold text-greenfit-dark transition-opacity hover:opacity-90 disabled:opacity-60"
-                        >
-                          {estado === 'otorgando' ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <Zap className="h-3.5 w-3.5" />
-                          )}
-                          Otorgar
-                        </button>
+                      {estado === 'error' && erroresPorSocio[socio.userId] && (
+                        <p className="pl-12 text-xs text-red-400">{erroresPorSocio[socio.userId]}</p>
                       )}
                     </li>
                   )
@@ -224,35 +247,40 @@ function CheckInRapidoModal({ visible, onClose }) {
                   return (
                     <li
                       key={item.bookingId}
-                      className="flex items-center gap-3 rounded-lg border border-white/5 bg-greenfit-dark px-3 py-2.5"
+                      className="flex flex-col gap-1.5 rounded-lg border border-white/5 bg-greenfit-dark px-3 py-2.5"
                     >
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-greenfit-primary/15 text-xs font-semibold text-greenfit-primary">
-                        {iniciales(item.nombre)}
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-greenfit-primary/15 text-xs font-semibold text-greenfit-primary">
+                          {iniciales(item.nombre)}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-white">{item.nombre}</p>
+                          <p className="truncate text-xs text-gray-500">{item.turno}</p>
+                        </div>
+                        {yaRegistrado ? (
+                          <span className="flex items-center gap-1 text-xs font-semibold text-greenfit-primary">
+                            <CheckCircle2 className="h-4 w-4" /> Presente
+                          </span>
+                        ) : estado === 'error' ? (
+                          <span className="text-xs font-medium text-red-400">No se pudo</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleDarPresente(item)}
+                            disabled={estado === 'otorgando'}
+                            className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-greenfit-primary px-3 py-2 text-xs font-semibold text-greenfit-dark transition-opacity hover:opacity-90 disabled:opacity-60"
+                          >
+                            {estado === 'otorgando' ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Zap className="h-3.5 w-3.5" />
+                            )}
+                            Dar Presente (+100 XP)
+                          </button>
+                        )}
                       </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-white">{item.nombre}</p>
-                        <p className="truncate text-xs text-gray-500">{item.turno}</p>
-                      </div>
-                      {yaRegistrado ? (
-                        <span className="flex items-center gap-1 text-xs font-semibold text-greenfit-primary">
-                          <CheckCircle2 className="h-4 w-4" /> Presente
-                        </span>
-                      ) : estado === 'error' ? (
-                        <span className="text-xs font-medium text-red-400">Error</span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleDarPresente(item)}
-                          disabled={estado === 'otorgando'}
-                          className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-greenfit-primary px-3 py-2 text-xs font-semibold text-greenfit-dark transition-opacity hover:opacity-90 disabled:opacity-60"
-                        >
-                          {estado === 'otorgando' ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <Zap className="h-3.5 w-3.5" />
-                          )}
-                          Dar Presente (+100 XP)
-                        </button>
+                      {estado === 'error' && erroresPorBooking[item.bookingId] && (
+                        <p className="pl-12 text-xs text-red-400">{erroresPorBooking[item.bookingId]}</p>
                       )}
                     </li>
                   )
