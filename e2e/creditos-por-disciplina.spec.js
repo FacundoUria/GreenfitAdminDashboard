@@ -10,8 +10,14 @@ import { irASocios } from './support/nav.js'
 // la app -- fácil de dejar en la disciplina equivocada sin darse cuenta, y
 // el panel no mostraba en ningún lado el balance REAL que ya tenía la PWA
 // por disciplina. Fix: una fila por disciplina en la celda de Créditos,
-// mostrando el balance real de `user_credits` (no el pozo global) y con
-// steppers que nunca son ambiguos sobre a cuál disciplina afectan.
+// mostrando el balance real de `user_credits` (no el pozo global) -- nunca
+// ambiguo sobre a cuál disciplina corresponde cada número.
+//
+// Rediseño posterior (sacar los steppers de la tabla): esa celda pasó a
+// ser de SOLO LECTURA -- el ajuste +1/-1 por disciplina, que antes vivía
+// ahí mismo, ahora vive en "Editar Socio" (CreditosEditablesSocio.jsx). El
+// test de abajo que verifica la celda de la tabla sigue intacto; los que
+// ejercitan el ajuste abren el modal primero.
 
 const DISCIPLINA_BOXEO = { id: 'disc-boxeo', name: 'Boxeo', kind: 'credits' }
 
@@ -104,14 +110,55 @@ test('un socio con CrossFit + Boxeo muestra el balance REAL de cada disciplina, 
   await expect(filaTabla.getByTitle('Créditos reales de Boxeo en la app')).toHaveText('0')
 })
 
-test('sumar créditos en la fila de Boxeo NUNCA impacta a CrossFit -- cada fila tiene su propio stepper', async ({ page }) => {
-  // `tables` queda como referencia mutable (mockSupabase la muta in place)
-  // -- se usa una variable propia en vez de un objeto inline para poder
-  // inspeccionar directo qué terminó pasando en user_credits. UPSERT
-  // estricto (ver creditosPwa.js): como Boxeo YA tiene una fila (uc-2), el
-  // ajuste la ACTUALIZA en el lugar en vez de insertar una nueva -- por eso
-  // acá se pollea el valor de esa fila puntual, no la longitud del array
-  // (que con el UPSERT se queda igual).
+// Simula server-side lo mínimo indispensable de
+// admin_ajustar_credito_disciplina() (ver supabase_migration_editar_
+// creditos_disciplina.sql) -- fusiona con un lote ACTIVO existente
+// (remaining_credits>0) de la misma disciplina si hay uno, si no crea uno
+// nuevo. No reimplementa el chequeo de "mismo día calendario Argentina"
+// de la fusión real (ese matiz está cubierto por las verificaciones
+// manuales comentadas en la migración) -- alcanza con esto para probar que
+// la UI llama al RPC con los parámetros correctos y refleja el resultado.
+function rpcAjustarCredito(tables) {
+  return (request) => {
+    const { p_user_id: userId, p_discipline_id: disciplineId, p_delta: delta } = request.postDataJSON()
+    if (delta > 0) {
+      const activo = tables.user_credits.find(
+        (f) => f.user_id === userId && f.discipline_id === disciplineId && (f.remaining_credits ?? 0) > 0,
+      )
+      if (activo) {
+        activo.remaining_credits += delta
+      } else {
+        tables.user_credits.push({
+          id: `uc-e2e-${tables.user_credits.length + 1}`,
+          user_id: userId,
+          discipline_id: disciplineId,
+          remaining_credits: delta,
+          expires_at: EN_30_DIAS,
+          created_at: new Date().toISOString(),
+          discipline: tables.disciplines.find((d) => d.id === disciplineId),
+        })
+      }
+    } else if (delta < 0) {
+      let restante = Math.abs(delta)
+      const activos = tables.user_credits
+        .filter((f) => f.user_id === userId && f.discipline_id === disciplineId && (f.remaining_credits ?? 0) > 0)
+        .sort((a, b) => new Date(a.expires_at) - new Date(b.expires_at))
+      for (const fila of activos) {
+        if (restante <= 0) break
+        const descuento = Math.min(fila.remaining_credits, restante)
+        fila.remaining_credits -= descuento
+        restante -= descuento
+      }
+    }
+    return null
+  }
+}
+
+// Rediseño (sacar los steppers de la tabla): el ajuste rápido +1/-1 ahora
+// vive en "Editar Socio" -> sección Créditos (CreditosEditablesSocio.jsx),
+// no en la fila de la tabla -- mismo título de botón de siempre
+// ("Sumar 1 crédito a Boxeo"), solo cambia DÓNDE vive.
+test('sumar créditos en la fila de Boxeo NUNCA impacta a CrossFit -- cada disciplina tiene su propio +1/-1', async ({ page }) => {
   const tables = {
     ...tablasBase(),
     disciplines: [...tablasBase().disciplines, DISCIPLINA_BOXEO],
@@ -119,25 +166,22 @@ test('sumar créditos en la fila de Boxeo NUNCA impacta a CrossFit -- cada fila 
     profiles: [PROFILE_MULTI],
     user_credits: userCreditsIniciales(),
   }
-  await loginComoAdmin(page, { tables })
+  await loginComoAdmin(page, { tables, rpc: { admin_ajustar_credito_disciplina: rpcAjustarCredito(tables) } })
 
   await irASocios(page)
   const filaTabla = page.getByRole('table').getByRole('row', { name: /Facundo Uria/ })
+  await filaTabla.getByTitle('Editar').click()
+  await expect(page.getByRole('heading', { name: 'Editar Socio' })).toBeVisible()
 
-  await filaTabla.getByTitle('Asignar pack de 4 créditos a Boxeo').click()
+  await page.getByTitle('Sumar 1 crédito a Boxeo').click()
 
-  // Espera a que el UPDATE real llegue al mock (async: PATCH de
-  // socios.creditos + sincronizarCreditosPwa) en vez de un timeout fijo.
-  await expect.poll(() => tables.user_credits.find((f) => f.id === 'uc-2')?.remaining_credits).toBe(4)
-
-  // Ningún insert nuevo -- sigue habiendo exactamente 2 filas (una por
-  // disciplina), la de Boxeo se actualizó EN EL LUGAR.
-  expect(tables.user_credits).toHaveLength(2)
-  const filaBoxeo = tables.user_credits.find((f) => f.id === 'uc-2')
-  expect(filaBoxeo.discipline_id).toBe('disc-boxeo') // NUNCA 'disc-crossfit' -- ese es exactamente el bug reportado
-  expect(filaBoxeo.remaining_credits).toBe(4) // 0 (balance previo de Boxeo) + 4
-  // La fila de CrossFit no se tocó.
-  expect(tables.user_credits.find((f) => f.id === 'uc-1').remaining_credits).toBe(6)
+  // Boxeo (balance previo real: 0) suma a 1 -- CrossFit no se toca.
+  await expect.poll(() =>
+    tables.user_credits
+      .filter((f) => f.user_id === PROFILE_MULTI.id && f.discipline_id === 'disc-boxeo')
+      .reduce((total, f) => total + (f.remaining_credits ?? 0), 0),
+  ).toBe(1)
+  expect(tables.user_credits.find((f) => f.id === 'uc-1').remaining_credits).toBe(6) // CrossFit intacto
 })
 
 // Caso real reportado: Aixa en Kickstrike. La migración inicial solo sembró
@@ -186,22 +230,21 @@ test('caso Aixa: sumar créditos en una disciplina que el socio NUNCA tuvo inici
     profiles: [PROFILE_AIXA],
     user_credits: [], // Ninguna fila todavía para Aixa -- ni siquiera de CrossFit.
   }
-  await loginComoAdmin(page, { tables })
+  await loginComoAdmin(page, { tables, rpc: { admin_ajustar_credito_disciplina: rpcAjustarCredito(tables) } })
 
   await irASocios(page)
   const filaTabla = page.getByRole('table').getByRole('row', { name: /Aixa Gómez/ })
+  await filaTabla.getByTitle('Editar').click()
+  await expect(page.getByRole('heading', { name: 'Editar Socio' })).toBeVisible()
 
-  await filaTabla.getByTitle('Sumar 1 crédito a Kickstrike').click()
+  await page.getByTitle('Sumar 1 crédito a Kickstrike').click()
 
-  // Antes de este fix, esto disparaba el toast de "no se pudo sincronizar"
-  // -- ahora tiene que sincronizar bien y no mostrar ningún aviso de error.
+  // Antes del fix histórico esto rompía la sincronización -- ahora
+  // admin_ajustar_credito_disciplina() crea el lote nuevo sin problema.
   await expect.poll(() => tables.user_credits.length).toBe(1)
 
   const filaNueva = tables.user_credits[0]
   expect(filaNueva.discipline_id).toBe('disc-kickstrike')
   expect(filaNueva.remaining_credits).toBe(1)
   expect(filaNueva.user_id).toBe(PROFILE_AIXA.id)
-
-  // Y el toast de "no se pudo sincronizar" NUNCA aparece.
-  await expect(page.getByText(/no se pudo sincronizar Kickstrike con la app/)).toHaveCount(0)
 })

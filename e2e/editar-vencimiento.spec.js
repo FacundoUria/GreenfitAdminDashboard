@@ -94,7 +94,12 @@ test.describe('Admin -- Edición directa de vencimiento (sin pasar por "Cobrar")
     await expect(inputFecha).toBeVisible()
 
     await inputFecha.fill('2026-09-20')
-    await page.getByRole('button', { name: 'Guardar' }).click()
+    // Este socio SÍ tiene créditos (CrossFit) -- CreditosEditablesSocio
+    // (sección "Créditos", ver ticket de rediseño de los steppers) también
+    // renderiza su propio botón "Guardar" por fila, así que
+    // getByRole('button', {name:'Guardar'}) a secas queda ambiguo acá. El
+    // de guardar el FORM entero es el único con type="submit".
+    await page.locator('button[type="submit"]', { hasText: 'Guardar' }).click()
     await expect(page.getByText('Vencimiento actualizado')).toBeVisible()
 
     // La fila MÁS RECIENTE de user_credits para CrossFit tiene que traer el

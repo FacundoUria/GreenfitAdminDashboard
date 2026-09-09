@@ -1,8 +1,6 @@
-import { CreditCard, MessageCircle, Minus, Pencil, Plus, UserX, UserCheck } from 'lucide-react'
+import { CreditCard, MessageCircle, Pencil, UserX, UserCheck } from 'lucide-react'
 import { esPlanDeCreditos, formatearPlanes, planesDeCreditos } from '../utils/planes'
 import { formatFecha } from '../utils/fecha'
-
-const PACKS_RAPIDOS = [4, 8, 12]
 
 const estadoStyles = {
   activo: 'bg-greenfit-primary/15 text-greenfit-primary',
@@ -87,20 +85,16 @@ function EstadoBadge({ socio }) {
 // BUG CRÍTICO DE SINCRONIZACIÓN (2026-08-07) -- ANTES esta celda mostraba y
 // editaba `socio.creditos`, un solo pozo GLOBAL (suma de TODAS las
 // disciplinas de créditos del socio -- ver planesDeCreditos() en
-// utils/planes.js), con un <select> aparte y fácil de pasar por alto para
-// elegir a CUÁL disciplina viajaba el ajuste hacia la PWA
-// (sincronizarCreditosPwa). Un socio con más de una disciplina de créditos
-// (ej. CrossFit + Boxeo) podía ver "6" en el panel sin que ese número
-// dijera nada de cuál disciplina realmente lo tenía -- y si el <select>
-// quedaba en la disciplina "equivocada" al tocar +6, el crédito real
-// terminaba sincronizado a la OTRA disciplina en `user_credits`, mientras
-// la que el admin creía haber cargado seguía en 0 en la app. Fix: una fila
-// POR disciplina, cada una con su propio stepper (nunca ambiguo sobre a
-// cuál va el click) y mostrando el número REAL que ya tiene la PWA
-// (`socio.creditosPwaPorDisciplina`, batch vía fetchCreditosPorDisciplina
-// en Socios.jsx) en vez del pozo global -- lo que ve el admin acá es,
-// siempre, lo mismo que tiene la PWA en ese instante.
-function CreditosCell({ socio, onAjustarCredito }) {
+// utils/planes.js). Fix histórico: una fila POR disciplina, mostrando el
+// número REAL que ya tiene la PWA (`socio.creditosPwaPorDisciplina`, batch
+// vía fetchCreditosPorDisciplina en Socios.jsx) en vez del pozo global.
+//
+// Los steppers -/+1/+4/+8/+12 que vivían acá se sacaron (rediseño): con
+// datos sucios de la migración de CrossFy, corregir a alguien con muchos
+// créditos de más obligaba a tocar "-1" decenas de veces. El ajuste ahora
+// vive en "Editar Socio" (CreditosEditablesSocio.jsx), con un input para
+// escribir el número exacto -- acá la celda queda de solo lectura.
+function CreditosCell({ socio }) {
   const disciplinas = planesDeCreditos(socio.plan)
   if (disciplinas.length === 0) {
     return <span className="text-gray-600">—</span>
@@ -120,49 +114,18 @@ function CreditosCell({ socio, onAjustarCredito }) {
   )
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-1.5">
       {disciplinas.map((disciplina) => (
-        <div key={disciplina} className="flex flex-col gap-1.5">
+        <div key={disciplina} className="flex items-center gap-1.5">
           {disciplinas.length > 1 && (
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{disciplina}</span>
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{disciplina}:</span>
           )}
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              title={`Restar 1 crédito de ${disciplina}`}
-              onClick={() => onAjustarCredito(socio, -1, disciplina)}
-              className="flex h-10 w-10 items-center justify-center rounded-md border border-white/10 text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
-            >
-              <Minus className="h-3.5 w-3.5" />
-            </button>
-            <span
-              className="w-6 text-center text-sm font-semibold text-white"
-              title={`Créditos reales de ${disciplina} en la app`}
-            >
-              {realPorDisciplina.get(disciplina.trim().toLowerCase()) ?? 0}
-            </span>
-            <button
-              type="button"
-              title={`Sumar 1 crédito a ${disciplina}`}
-              onClick={() => onAjustarCredito(socio, 1, disciplina)}
-              className="flex h-10 w-10 items-center justify-center rounded-md border border-white/10 text-gray-300 transition-colors hover:bg-white/10 hover:text-greenfit-primary"
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </button>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {PACKS_RAPIDOS.map((cantidad) => (
-                <button
-                  key={cantidad}
-                  type="button"
-                  title={`Asignar pack de ${cantidad} créditos a ${disciplina}`}
-                  onClick={() => onAjustarCredito(socio, cantidad, disciplina)}
-                  className="rounded-md border border-white/10 px-2 py-2 text-[11px] font-medium text-gray-400 transition-colors hover:bg-white/10 hover:text-greenfit-primary"
-                >
-                  +{cantidad}
-                </button>
-              ))}
-            </div>
-          </div>
+          <span
+            className="text-sm font-semibold text-white"
+            title={`Créditos reales de ${disciplina} en la app`}
+          >
+            {realPorDisciplina.get(disciplina.trim().toLowerCase()) ?? 0}
+          </span>
         </div>
       ))}
     </div>
@@ -378,7 +341,6 @@ function SocioCard({
   socio,
   onRegistrarPago,
   onEditar,
-  onAjustarCredito,
   onAbrirWhatsapp,
   onCambiarBaja,
   seleccionado,
@@ -424,7 +386,7 @@ function SocioCard({
         </div>
         <div>
           <p className="mb-1 text-xs text-gray-500">Créditos</p>
-          <CreditosCell socio={socio} onAjustarCredito={onAjustarCredito} />
+          <CreditosCell socio={socio} />
         </div>
       </div>
 
@@ -445,7 +407,6 @@ function SociosTabla({
   socios,
   onRegistrarPago,
   onEditar,
-  onAjustarCredito,
   onAbrirWhatsapp,
   onCambiarBaja,
   seleccionados,
@@ -483,7 +444,6 @@ function SociosTabla({
             socio={socio}
             onRegistrarPago={onRegistrarPago}
             onEditar={onEditar}
-            onAjustarCredito={onAjustarCredito}
             onAbrirWhatsapp={onAbrirWhatsapp}
             onCambiarBaja={onCambiarBaja}
             seleccionado={seleccionados.has(socio.id)}
@@ -545,7 +505,7 @@ function SociosTabla({
                 </td>
                 <td className="px-5 py-3 text-gray-300">{formatearPlanes(socio.plan)}</td>
                 <td className="px-5 py-3">
-                  <CreditosCell socio={socio} onAjustarCredito={onAjustarCredito} />
+                  <CreditosCell socio={socio} />
                 </td>
                 <td className="px-5 py-3 text-gray-300">
                   <VencimientoCell socio={socio} />

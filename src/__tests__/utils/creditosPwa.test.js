@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('../../lib/supabaseClient', () => ({
-  supabase: { from: vi.fn() },
+  supabase: { from: vi.fn(), rpc: vi.fn() },
 }))
 
 import { supabase } from '../../lib/supabaseClient'
@@ -9,9 +9,12 @@ import {
   sincronizarVencimientoPwa,
   sincronizarCreditosPwa,
   sincronizarVencimientoCreditoPwa,
+  fijarCreditosDisciplina,
+  ajustarCreditoDisciplina,
 } from '../../utils/creditosPwa'
 
 const mockedFrom = supabase.from
+const mockedRpc = supabase.rpc
 
 function makeChain(result) {
   const chain = {}
@@ -505,5 +508,88 @@ describe('sincronizarVencimientoCreditoPwa (vencimiento de una disciplina de cr�
     await sincronizarVencimientoCreditoPwa({ dni: '30111222', disciplina: 'CrossFit', fechaVencimiento: '2026-09-01' })
 
     expect(payloadInsertado.remaining_credits).toBe(0)
+  })
+})
+
+// Rediseño (sacar los steppers de la tabla, editar desde "Editar Socio" con
+// un número exacto) -- estos dos son wrappers finos sobre los RPCs nuevos
+// (ver supabase_migration_editar_creditos_disciplina.sql), sin ninguna
+// lógica de negocio del lado del cliente: consolidar lotes, fusionar por
+// día calendario Argentina y el FIFO de -N viven ENTERAMENTE server-side en
+// PL/pgSQL, así que no son observables desde un test unitario de JS -- esos
+// escenarios (fijar mayor/menor/en 0, +1 con/sin lote del mismo día, -1
+// con varios lotes, -1 sin nada que descontar) están cubiertos como casos
+// de verificación manual comentados al final de esa migración. Acá se
+// verifica el contrato real que SÍ vive en este archivo: el nombre del RPC
+// y los parámetros que le llegan, además de que un error se relance en vez
+// de devolver un {synced,reason} como el resto de creditosPwa.js (a
+// propósito -- ver el comentario de la función).
+describe('fijarCreditosDisciplina (wrapper de admin_fijar_creditos_disciplina)', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('fijar un número MAYOR al actual -- llama al RPC con el total exacto pedido', async () => {
+    mockedRpc.mockResolvedValue({ error: null })
+    await fijarCreditosDisciplina('user-1', 'disc-crossfit', 20)
+    expect(mockedRpc).toHaveBeenCalledWith('admin_fijar_creditos_disciplina', {
+      p_user_id: 'user-1',
+      p_discipline_id: 'disc-crossfit',
+      p_creditos: 20,
+    })
+  })
+
+  it('fijar un número MENOR al actual -- mismo contrato, sin importar la dirección del cambio', async () => {
+    mockedRpc.mockResolvedValue({ error: null })
+    await fijarCreditosDisciplina('user-1', 'disc-crossfit', 4)
+    expect(mockedRpc).toHaveBeenCalledWith('admin_fijar_creditos_disciplina', {
+      p_user_id: 'user-1',
+      p_discipline_id: 'disc-crossfit',
+      p_creditos: 4,
+    })
+  })
+
+  it('fijar en 0 -- se manda tal cual, no se convierte en null ni se omite', async () => {
+    mockedRpc.mockResolvedValue({ error: null })
+    await fijarCreditosDisciplina('user-1', 'disc-crossfit', 0)
+    expect(mockedRpc).toHaveBeenCalledWith('admin_fijar_creditos_disciplina', {
+      p_user_id: 'user-1',
+      p_discipline_id: 'disc-crossfit',
+      p_creditos: 0,
+    })
+  })
+
+  it('relanza el error del RPC (ej. socio sin habilitación, guarda de disciplina no-credits) en vez de tragárselo', async () => {
+    const errorRpc = { message: 'admin_fijar_creditos_disciplina() es solo para disciplinas de créditos...' }
+    mockedRpc.mockResolvedValue({ error: errorRpc })
+    await expect(fijarCreditosDisciplina('user-1', 'disc-aparatos', 5)).rejects.toBe(errorRpc)
+  })
+})
+
+describe('ajustarCreditoDisciplina (wrapper de admin_ajustar_credito_disciplina)', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('+1 -- llama al RPC con delta positivo (la fusión/creación de lote es 100% server-side)', async () => {
+    mockedRpc.mockResolvedValue({ error: null })
+    await ajustarCreditoDisciplina('user-1', 'disc-crossfit', 1)
+    expect(mockedRpc).toHaveBeenCalledWith('admin_ajustar_credito_disciplina', {
+      p_user_id: 'user-1',
+      p_discipline_id: 'disc-crossfit',
+      p_delta: 1,
+    })
+  })
+
+  it('-1 -- llama al RPC con delta negativo (el FIFO por expires_at asc es 100% server-side)', async () => {
+    mockedRpc.mockResolvedValue({ error: null })
+    await ajustarCreditoDisciplina('user-1', 'disc-crossfit', -1)
+    expect(mockedRpc).toHaveBeenCalledWith('admin_ajustar_credito_disciplina', {
+      p_user_id: 'user-1',
+      p_discipline_id: 'disc-crossfit',
+      p_delta: -1,
+    })
+  })
+
+  it('relanza el error del RPC en vez de tragárselo', async () => {
+    const errorRpc = { message: 'boom' }
+    mockedRpc.mockResolvedValue({ error: errorRpc })
+    await expect(ajustarCreditoDisciplina('user-1', 'disc-crossfit', -1)).rejects.toBe(errorRpc)
   })
 })

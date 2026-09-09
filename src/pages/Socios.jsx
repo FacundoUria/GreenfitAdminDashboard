@@ -53,22 +53,6 @@ const filtroOptions = [
 
 const filtroPlanOptions = [{ value: 'todos', label: 'Todos los planes' }, ...PLANES_DISPONIBLES.map((p) => ({ value: p, label: p }))]
 
-// Un mensaje distinto por cada `reason` que puede devolver sincronizarCreditosPwa
-// (ver creditosPwa.js) -- antes TODO fallo que no fuera 'sin_cuenta_pwa' caía en
-// el mismo texto genérico, y 'sin_cuenta_pwa' específicamente quedaba en
-// silencio total (sin avisar nada). El cliente pidió explícitamente un aviso
-// claro para el caso "el socio todavía no está registrado en la app".
-const MENSAJES_SYNC_FALLIDO = {
-  sin_cuenta_pwa: (disciplina) =>
-    `Créditos del panel actualizados. El socio todavía no está registrado en la app -- ${disciplina} no se pudo sincronizar todavía (se sincroniza solo apenas cree su cuenta).`,
-  disciplina_no_encontrada: (disciplina) =>
-    `Créditos del panel actualizados, pero "${disciplina}" no existe en el catálogo de Disciplinas -- revisalo en Configuración.`,
-  rls_bloqueo_escritura: (disciplina) =>
-    `Créditos del panel actualizados, pero un permiso (RLS) bloqueó la escritura en la app para ${disciplina}. Revisá supabase_migration_user_credits_rls_admin.sql.`,
-  error_supabase: (disciplina) =>
-    `Créditos del panel actualizados, pero no se pudo sincronizar ${disciplina} con la app (error técnico -- revisá la consola).`,
-}
-
 // Activo (no vencido, no en tolerancia) y con fecha_vencimiento dentro de los
 // próximos DIAS_POR_VENCER días -- mismo criterio que usa el widget del
 // Dashboard, para que el número que ves ahí y lo que filtra acá coincidan.
@@ -303,68 +287,18 @@ function Socios() {
     setModalAbierto(true)
   }
 
-  const handleAjustarCredito = async (socio, delta, disciplina) => {
-    // Bug reportado: un socio importado sin DNI cargado no tenía forma real
-    // de resolverse contra su cuenta PWA (resolverUserId dependía SOLO del
-    // DNI) -- operar sobre "un balance que nunca se inicializó" es lo que
-    // terminaba rompiendo el flujo. Se bloquea acá ANTES de tocar nada, con
-    // el mismo criterio de "avisar y no hacer nada" que el resto del panel,
-    // en vez de dejar que la acción siga a medias.
-    if (!socio.dni || !String(socio.dni).trim()) {
-      window.alert(
-        'No se pueden editar créditos: Este socio no tiene el DNI cargado. Por favor, edite el perfil y agregue el DNI primero.',
-      )
-      return
-    }
-
-    const nuevoValor = Math.max(0, (socio.creditos ?? 0) + delta)
-
-    try {
-      const { data, error: updateError } = await supabase
-        .from('socios')
-        .update({ creditos: nuevoValor })
-        .eq('id', socio.id)
-        .select()
-
-      if (updateError || !data || data.length === 0) {
-        console.error(
-          'Error al ajustar créditos en Supabase:',
-          updateError?.message ?? 'no se actualizó ninguna fila (revisá las políticas RLS)',
-        )
-        window.alert('No se pudo actualizar los créditos. Intentá nuevamente.')
-        return
-      }
-
-      // `disciplina` viene del selector de CreditosCell cuando el socio tiene
-      // más de una actividad de créditos -- con una sola no hace falta elegir.
-      const disciplinaDestino = disciplina ?? planesDeCreditos(socio.plan)[0]
-      if (disciplinaDestino) {
-        const resultado = await sincronizarCreditosPwa({
-          dni: socio.dni,
-          email: socio.email,
-          disciplina: disciplinaDestino,
-          delta,
-        })
-        if (!resultado.synced) {
-          // Log siempre (no solo cuando se muestra el toast) -- `resultado`
-          // trae el motivo exacto (`reason`), clave para depurar un caso
-          // puntual como este sin tener que ir a buscar en creditosPwa.js.
-          console.error('No se pudo sincronizar créditos con la app:', { socio: socio.dni, disciplina: disciplinaDestino, delta, resultado })
-          const mensaje = MENSAJES_SYNC_FALLIDO[resultado.reason]?.(disciplinaDestino) ?? MENSAJES_SYNC_FALLIDO.error_supabase(disciplinaDestino)
-          setToastMessage(mensaje)
-          setTimeout(() => setToastMessage(null), 5000)
-        }
-      }
-
-      fetchSocios()
-    } catch (err) {
-      // Robustez: cualquier excepción inesperada (red caída, respuesta
-      // rara de Supabase) se atrapa acá en vez de escalar sin control --
-      // antes esto podía tirar la pantalla entera si algo fallaba a mitad
-      // de camino.
-      console.error('ERROR inesperado ajustando créditos:', err)
-      window.alert('No se pudo actualizar los créditos. Intentá nuevamente.')
-    }
+  // Reemplaza al viejo ajuste incremental sobre `socios.creditos` (steppers
+  // sueltos en la fila de la tabla, ver handleAjustarCredito -- eliminado):
+  // ahora la edición de créditos vive en CreditosEditablesSocio.jsx, dentro
+  // de "Editar Socio", y llama directo a los RPCs
+  // admin_fijar_creditos_disciplina/admin_ajustar_credito_disciplina (ver
+  // supabase_migration_editar_creditos_disciplina.sql). Esta función solo
+  // refresca lo que la tabla ya tenía: el mismo fetch batch que corre al
+  // cargar la lista, para que el total que se ve en CreditosCell quede al
+  // día apenas se cierra el modal después de un cambio.
+  const refrescarCreditosPwa = () => {
+    if (socios.length === 0) return
+    fetchCreditosPorDisciplina(socios.map((s) => s.dni)).then(setCreditosPorDni)
   }
 
   const handleCambiarBaja = async (socio) => {
@@ -765,7 +699,6 @@ function Socios() {
           socios={sociosFiltrados}
           onRegistrarPago={handleAbrirRegistrarPago}
           onEditar={handleEditar}
-          onAjustarCredito={handleAjustarCredito}
           onAbrirWhatsapp={handleAbrirWhatsappIndividual}
           onCambiarBaja={handleCambiarBaja}
           seleccionados={seleccionados}
@@ -794,6 +727,7 @@ function Socios() {
           onBuscarSocioPorNombre={(nombre, apellido) =>
             buscarCoincidenciaPorNombre(sociosConEstado, nombre, apellido, { excluirId: socioEnEdicion?.id })
           }
+          onCreditosActualizados={refrescarCreditosPwa}
         />
       )}
 

@@ -12,6 +12,7 @@ import {
 import { sincronizarCreditosPwa, sincronizarVencimientoPwa, sincronizarVencimientoCreditoPwa } from '../utils/creditosPwa'
 import { normalizarTexto } from '../utils/coincidenciaSocios'
 import FichaSocioHistorial from './FichaSocioHistorial'
+import CreditosEditablesSocio from './CreditosEditablesSocio'
 
 // Mismo patrón que isValidDni() en greenfit-app/src/lib/dni.ts (PWA) --
 // también es el que usa el trigger handle_socio_dni_upsert() en SQL
@@ -85,6 +86,7 @@ function NuevoSocioModal({
   onBuscarSocioPorDni,
   onEditarSocioExistente,
   onBuscarSocioPorNombre,
+  onCreditosActualizados,
 }) {
   const esEdicion = Boolean(socio)
   const [form, setForm] = useState(() => formInicial(socio))
@@ -631,6 +633,10 @@ function NuevoSocioModal({
                 Cancelar
               </button>
             </div>
+          )}
+
+          {esEdicion && (
+            <CreditosEditablesSocio socio={socio} onCreditosActualizados={onCreditosActualizados} />
           )}
 
           {esEdicion && <FichaSocioHistorial socio={socio} />}

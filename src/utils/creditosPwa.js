@@ -75,7 +75,11 @@ async function resolverUserId({ dni, email } = {}) {
 // la que calza EXACTO (case-sensitive) contra el nombre que vino de
 // socios.plan; si ninguna calza exacto, la más antigua (la fila "real",
 // con historial real detrás, no un duplicado reciente por error de tipeo).
-async function resolverDisciplinaId(nombrePlan) {
+// Exportada (antes privada) -- CreditosEditablesSocio.jsx la necesita para
+// resolver el discipline_id real de cada fila del socio antes de llamar a
+// admin_fijar_creditos_disciplina()/admin_ajustar_credito_disciplina(),
+// mismo criterio robusto de siempre (duplicados por mayúsculas, etc.).
+export async function resolverDisciplinaId(nombrePlan) {
   if (!nombrePlan) return null
   const nombreTrim = nombrePlan.trim()
   const { data, error } = await supabase.from('disciplines').select('id, name, created_at').ilike('name', nombreTrim)
@@ -347,5 +351,42 @@ export async function sincronizarEstadoCuentaPwa({ dni, email, activo }) {
   } catch (err) {
     console.error('[creditosPwa] ERROR inesperado sincronizando estado de cuenta con la PWA:', err)
     return { synced: false, reason: 'error_supabase' }
+  }
+}
+
+// ============================================================
+// Edición directa de créditos por disciplina (CreditosEditablesSocio.jsx,
+// dentro de "Editar Socio") -- reemplaza a los steppers -/+1/+4/+8/+12 que
+// vivían sueltos en SociosTabla.jsx. A diferencia del resto de este
+// archivo, acá NO se resuelve nada del lado del cliente (ni userId por
+// DNI/email, ni disciplineId por nombre con fallback de duplicados) -- el
+// caller (CreditosEditablesSocio.jsx) ya los tiene resueltos de antes, y
+// TODO el trabajo real (consolidar lotes, fusión por día Argentina, FIFO)
+// lo hace el RPC server-side -- ver supabase_migration_editar_creditos_
+// disciplina.sql. Se relanza el error tal cual en vez de devolver un
+// `{synced, reason}` como el resto del archivo: acá el llamador SÍ tiene
+// sentido que trate el fallo como una excepción real (viene de un click
+// puntual con su propio try/catch en la UI, no de un flujo batch).
+export async function fijarCreditosDisciplina(userId, disciplineId, creditos) {
+  const { error } = await supabase.rpc('admin_fijar_creditos_disciplina', {
+    p_user_id: userId,
+    p_discipline_id: disciplineId,
+    p_creditos: creditos,
+  })
+  if (error) {
+    logErrorSupabase(`fijarCreditosDisciplina (userId=${userId}, disciplineId=${disciplineId}, creditos=${creditos})`, error)
+    throw error
+  }
+}
+
+export async function ajustarCreditoDisciplina(userId, disciplineId, delta) {
+  const { error } = await supabase.rpc('admin_ajustar_credito_disciplina', {
+    p_user_id: userId,
+    p_discipline_id: disciplineId,
+    p_delta: delta,
+  })
+  if (error) {
+    logErrorSupabase(`ajustarCreditoDisciplina (userId=${userId}, disciplineId=${disciplineId}, delta=${delta})`, error)
+    throw error
   }
 }
