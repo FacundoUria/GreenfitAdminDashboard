@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import { loginComoAdmin, ADMIN_DEMO } from './support/auth.js'
 import { tablasBase } from './support/fixtures.js'
 import { irASocios } from './support/nav.js'
+import { mockAdminAcreditarCreditosManual } from './support/rpcMocks.js'
 
 // Flujo completo de "Cobro Mostrador": Seba selecciona un socio, toca
 // "Cobrar", le asigna créditos a una disciplina puntual (ej. Kickstrike) y
@@ -124,7 +125,10 @@ test('Cobro mostrador: acreditar créditos a una disciplina se refleja en la tab
     await dialog.dismiss()
   })
 
-  await loginComoAdmin(page, { tables })
+  await loginComoAdmin(page, {
+    tables,
+    rpc: { admin_acreditar_creditos_manual: mockAdminAcreditarCreditosManual(tables) },
+  })
   await mockEmbedUserCredits(page, tables)
 
   await irASocios(page)
@@ -149,10 +153,12 @@ test('Cobro mostrador: acreditar créditos a una disciplina se refleja en la tab
   await expect(page.getByText('Pago registrado correctamente')).toBeVisible({ timeout: 10_000 })
   expect(huboAlerta, 'no debe dispararse ningún alert() de error durante el cobro').toBe(false)
 
-  // La tabla muestra el saldo REAL actualizado (2 + 8 = 10) sin recargar la
-  // página -- fetchSocios() dispara el refetch de créditos por disciplina
-  // automáticamente apenas se confirma el pago.
-  await expect(filaTabla.getByTitle('Créditos reales de Kickstrike en la app')).toHaveText('10', {
+  // FIX (modelo de "plan único") -- ANTES esto sumaba sobre el balance
+  // vigente (2 + 8 = 10, UPSERT en el lugar). Ahora admin_acreditar_
+  // creditos_manual() resetea TODO lo previo del socio a 0 y acredita
+  // exactamente lo que se cargó en este cobro -- el balance nuevo es 8,
+  // no 10 (ver ese RPC, Fase 1, y el reemplazo en Socios.jsx, Fase 2).
+  await expect(filaTabla.getByTitle('Créditos reales de Kickstrike en la app')).toHaveText('8', {
     timeout: 10_000,
   })
 
@@ -175,17 +181,22 @@ test('Cobro mostrador: acreditar créditos a una disciplina se refleja en la tab
   expect(pago.periodo_hasta).not.toBeNull()
   expect(pago.created_by).toBe(ADMIN_DEMO.id)
 
-  // Acreditación directa en user_credits -- UPSERT estricto (ver
+  // FIX (modelo de "plan único") -- ANTES esto era un UPSERT estricto (ver
   // sincronizarCreditosPwa): como Braian YA tenía una fila de Kickstrike
-  // (uc-kick-1), se actualiza EN EL LUGAR en vez de insertar una nueva.
+  // (uc-kick-1), se actualizaba EN EL LUGAR. Ahora admin_acreditar_
+  // creditos_manual() resetea esa fila vieja a 0 (nunca se borra, mismo
+  // criterio de siempre) e inserta una fila NUEVA con lo acreditado en este
+  // cobro -- 2 filas en total, la vieja en 0 y la nueva con el balance real.
   const filasKickstrike = tables.user_credits.filter((f) => f.discipline_id === DISCIPLINA_KICKSTRIKE.id)
-  expect(filasKickstrike).toHaveLength(1)
-  expect(filasKickstrike[0].id).toBe('uc-kick-1')
-  expect(filasKickstrike[0].remaining_credits).toBe(10)
+  expect(filasKickstrike).toHaveLength(2)
+  const filaVieja = filasKickstrike.find((f) => f.id === 'uc-kick-1')
+  expect(filaVieja.remaining_credits).toBe(0)
+  const filaNueva = filasKickstrike.find((f) => f.id !== 'uc-kick-1')
+  expect(filaNueva.remaining_credits).toBe(8)
 
-  // El pozo global legacy (socios.creditos) también queda al día -- lo sigue
-  // usando `esPlanDeCreditos`/`socios.creditos` como fallback en otras vistas.
-  expect(tables.socios[0].creditos).toBe(10)
+  // El pozo global legacy (socios.creditos) también queda al día -- ya no es
+  // aditivo, es exactamente lo que este cobro acreditó.
+  expect(tables.socios[0].creditos).toBe(8)
 })
 
 // Regresión: en producción, cuando el UPDATE de `socios` fallaba (típico:

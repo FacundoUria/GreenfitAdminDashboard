@@ -2,11 +2,13 @@ import { test, expect } from '@playwright/test'
 import { loginComoAdmin } from './support/auth.js'
 import { tablasBase } from './support/fixtures.js'
 import { irASocios } from './support/nav.js'
+import { mockAdminAcreditarCreditosManual } from './support/rpcMocks.js'
 
 // Cubre el checklist del modal "Registrar Pago": captura Monto/Método y
 // persiste en pagos_socio (además del flujo ya existente de socios/créditos).
 test('Registrar Pago carga Monto/Método y confirma sin errores', async ({ page }) => {
-  await loginComoAdmin(page, { tables: tablasBase() })
+  const tables = tablasBase()
+  await loginComoAdmin(page, { tables, rpc: { admin_acreditar_creditos_manual: mockAdminAcreditarCreditosManual(tables) } })
 
   await irASocios(page)
   // Móvil (SocioCard) y desktop (<table>) coexisten en el DOM (CSS

@@ -12,16 +12,11 @@ import {
   Users,
 } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
-import { esDelMesActual, formatFecha, hoyISO } from '../utils/fecha'
+import { diferenciaEnDias, esDelMesActual, formatFecha, hoyISO } from '../utils/fecha'
 import { estadoOperativoSocio, getSocioMetrics } from '../utils/socioMetrics'
-import { formatearPlanes, planesDeCreditos, planesDeVencimiento, PLANES_DISPONIBLES } from '../utils/planes'
+import { formatearPlanes, planesDeVencimiento, PLANES_DISPONIBLES } from '../utils/planes'
 import { buscarCoincidenciaPorNombre } from '../utils/coincidenciaSocios'
-import {
-  sincronizarCreditosPwa,
-  sincronizarVencimientoPwa,
-  sincronizarVencimientoCreditoPwa,
-  sincronizarEstadoCuentaPwa,
-} from '../utils/creditosPwa'
+import { sincronizarEstadoCuentaPwa, resolverDisciplinaId } from '../utils/creditosPwa'
 import { fetchAvataresYNiveles, fetchCreditosPorDisciplina, resolverUserIdPorDni, registrarPago } from '../utils/fichaSocioPwa'
 import SociosTabla from '../components/SociosTabla'
 import NuevoSocioModal from '../components/NuevoSocioModal'
@@ -344,8 +339,17 @@ function Socios() {
     }
 
     if (payload.creditosPorDisciplina) {
-      const total = payload.creditosPorDisciplina.reduce((suma, item) => suma + item.cantidad, 0)
-      cambios.creditos = (socio.creditos ?? 0) + total
+      // FIX (modelo de "plan único") -- ANTES sumaba sobre el pozo global
+      // viejo (`(socio.creditos ?? 0) + total`), el mismo modelo aditivo
+      // que el resto de esta sesión viene reemplazando en todos lados.
+      // Ahora es el total de ESTE pago nada más -- coincide con lo que
+      // admin_acreditar_creditos_manual() (más abajo) va a dejar en
+      // user_credits para un socio CON cuenta PWA (ese RPC recalcula
+      // socios.creditos por su cuenta, así que este valor queda pisado
+      // enseguida ahí); para uno SIN cuenta (no hay ningún RPC que corra,
+      // ver más abajo), este es el único valor posible y queda como
+      // definitivo.
+      cambios.creditos = payload.creditosPorDisciplina.reduce((suma, item) => suma + item.cantidad, 0)
     }
 
     if (payload.vencimiento) {
@@ -358,6 +362,17 @@ function Socios() {
       // verdad acá -- se recalcula reactivamente en todos lados a partir de
       // `fecha_vencimiento` vía `calcularEstadoCuota` (ver utils/fecha.js).
       cambios.fecha_inicio_cuota = payload.vencimiento.fechaInicio
+      // FIX (modelo de "plan único") -- este valor es la fecha que Seba
+      // eligió en el modal, no necesariamente el vencimiento REAL de
+      // Aparatos (ej. un cobro 100% de créditos, sin Aparatos incluido).
+      // Para un socio CON cuenta PWA, admin_acreditar_creditos_manual()
+      // (más abajo) la pisa enseguida con el estado real post-reseteo --
+      // este valor queda como escritura INICIAL/fallback, no la
+      // definitiva. Para un socio SIN cuenta PWA (no hay ningún
+      // user_credits real del que derivar nada -- import masivo de
+      // Crossfy, socio sin DNI, etc.), no hay ningún RPC que corra
+      // después, así que este es el único valor posible y se mantiene tal
+      // cual -- mismo comportamiento de siempre para ese caso.
       cambios.fecha_vencimiento = payload.vencimiento.fechaVencimiento
       cambios.dia_corte = new Date(`${payload.vencimiento.fechaVencimiento}T00:00:00`).getDate()
       cambios.estado = 'Activo'
@@ -366,13 +381,13 @@ function Socios() {
     // Todo el flujo de cobro (socios + créditos/vencimiento + historial)
     // queda envuelto en un único try/catch -- antes, cualquier excepción
     // inesperada (no el `updateError` ya chequeado abajo, sino un fallo real
-    // de red/RLS en sincronizarCreditosPwa/sincronizarVencimientoPwa, que
-    // NO tienen su propio try/catch) se colaba sin capturar: la promesa que
-    // devuelve esta función quedaba rechazada, RegistrarPagoModal nunca
-    // llegaba a su `setGuardando(false)` y el modal quedaba trabado en
-    // "Guardando..." para siempre, sin ningún mensaje para Seba. Acá se
-    // loguea siempre el mensaje EXACTO que devuelve Supabase (nunca un
-    // genérico vacío) y se lo avisa.
+    // de red/RLS en admin_acreditar_creditos_manual, que no tiene su propio
+    // try/catch) se colaba sin capturar: la promesa que devuelve esta
+    // función quedaba rechazada, RegistrarPagoModal nunca llegaba a su
+    // `setGuardando(false)` y el modal quedaba trabado en "Guardando..."
+    // para siempre, sin ningún mensaje para Seba. Acá se loguea siempre el
+    // mensaje EXACTO que devuelve Supabase (nunca un genérico vacío) y se
+    // lo avisa.
     try {
       let { data, error: updateError } = await supabase
         .from('socios')
@@ -432,64 +447,69 @@ function Socios() {
       let mensaje = fechaInicioCuotaSinGuardar
         ? 'Pago registrado, pero la fecha de inicio personalizada no se guardó (falta correr una migración pendiente en Supabase). El resto del cobro se guardó bien.'
         : 'Pago registrado correctamente'
-      // Disciplinas de crédito que ya reciben su propio insert acá abajo --
-      // el loop de vencimiento-de-créditos más adelante las salta a
-      // propósito: si el mismo pago carga créditos Y vencimiento para la
-      // MISMA disciplina, hacerlo en dos inserts separados competía por
-      // cuál quedaba como "la fila más reciente" (ver la nota larga en
-      // sincronizarCreditosPwa) -- un solo insert con los dos datos juntos
-      // (fechaVencimiento pasada acá abajo) lo resuelve de raíz.
-      const disciplinasConCreditosCargados = new Set((payload.creditosPorDisciplina ?? []).map((c) => c.disciplina))
-      if (payload.creditosPorDisciplina) {
-        for (const { disciplina, cantidad } of payload.creditosPorDisciplina) {
-          const resultado = await sincronizarCreditosPwa({
-            dni: socio.dni,
-            email: socio.email,
-            disciplina,
-            delta: cantidad,
-            fechaVencimiento: payload.vencimiento ? cambios.fecha_vencimiento : undefined,
+
+      // Resuelto UNA sola vez -- se reusa tanto para
+      // admin_acreditar_creditos_manual (abajo) como para el historial de
+      // pagos más abajo (antes se resolvía dos veces, con dos consultas
+      // idénticas a `profiles`).
+      const userId = await resolverUserIdPorDni(socio.dni)
+
+      // FIX (Fase 2, modelo de "plan único") -- ANTES esto era
+      // sincronizarCreditosPwa() por disciplina (sumaba un delta sobre el
+      // balance existente) + sincronizarVencimientoPwa()/
+      // sincronizarVencimientoCreditoPwa() por separado para el
+      // vencimiento -- exactamente el sistema aditivo/de lotes que generaba
+      // el bug de doble vencimiento cada vez que se cobraba. Ahora es UN
+      // SOLO RPC atómico (admin_acreditar_creditos_manual, Fase 1, ya en
+      // producción): resetea todo lo previo del socio y acredita
+      // exactamente lo que Seba cargó en este cobro, con una sola fecha de
+      // vencimiento para todo -- mismo criterio que "Nuevo Socio" (ver
+      // NuevoSocioModal.jsx).
+      //
+      // Consecuencia directa: una disciplina de créditos tildada en este
+      // cobro pero SIN cantidad cargada (antes preservaba su balance y solo
+      // extendía la fecha, vía sincronizarVencimientoCreditoPwa) ahora
+      // resetea a 0 igual que cualquier disciplina no tildada -- bajo plan
+      // único ya no existe el concepto de "renovar la fecha sin re-cargar
+      // los créditos", es la MISMA regla que ya rige en todos lados
+      // (acreditar_pack, CreditosEditablesSocio.jsx): lo que no se
+      // re-acredita explícitamente, se pierde.
+      if (userId) {
+        const pCreditos = []
+        for (const { disciplina, cantidad } of payload.creditosPorDisciplina ?? []) {
+          const disciplineId = await resolverDisciplinaId(disciplina)
+          if (!disciplineId) {
+            mensaje = `Pago registrado, pero no se encontró "${disciplina}" en el catálogo de Disciplinas -- sus créditos no se pudieron cargar.`
+            continue
+          }
+          pCreditos.push({ discipline_id: disciplineId, credits: cantidad })
+        }
+
+        // payload.vencimiento SIEMPRE viene poblado en este flujo --
+        // tieneVencimiento (RegistrarPagoModal.jsx) es true apenas hay algún
+        // plan tildado, y el modal ya bloquea el submit con
+        // planes.length===0 -- se asume acá tal cual, mismo criterio que ya
+        // tenía este bloque antes de este cambio.
+        const incluyeAparatos = planesDeVencimiento(payload.plan ?? socio.plan).length > 0
+
+        if (pCreditos.length > 0 || incluyeAparatos) {
+          const diasVigencia = diferenciaEnDias(payload.vencimiento.fechaInicio, payload.vencimiento.fechaVencimiento)
+          const { error: errorAcreditar } = await supabase.rpc('admin_acreditar_creditos_manual', {
+            p_user_id: userId,
+            p_creditos: pCreditos,
+            p_incluye_aparatos: incluyeAparatos,
+            p_dias_vigencia: diasVigencia,
+            p_fecha_inicio: payload.vencimiento.fechaInicio,
           })
-          if (!resultado.synced && resultado.reason !== 'sin_cuenta_pwa') {
+          if (errorAcreditar) {
+            console.error('ERROR admin_acreditar_creditos_manual SUPABASE:', errorAcreditar)
             mensaje = 'Pago registrado, pero no se pudo sincronizar con la app. Revisá la consola.'
           }
         }
       }
-      if (payload.vencimiento) {
-        // Por nombre de plan (igual que los créditos arriba), no "la única
-        // disciplina kind=membership que exista" -- un socio podría tener más
-        // de una etiqueta de vencimiento a la vez (ej. Pase Libre + Aparatos).
-        for (const disciplina of planesDeVencimiento(payload.plan ?? socio.plan)) {
-          const resultado = await sincronizarVencimientoPwa({
-            dni: socio.dni,
-            email: socio.email,
-            disciplina,
-            fechaVencimiento: cambios.fecha_vencimiento,
-          })
-          if (!resultado.synced && resultado.reason !== 'sin_cuenta_pwa') {
-            mensaje = 'Pago registrado, pero no se pudo sincronizar con la app. Revisá la consola.'
-          }
-        }
-        // El calendario de vencimiento ya no está atado exclusivamente a
-        // Aparatos (bug reportado) -- si el cobro es de una disciplina de
-        // CRÉDITOS (CrossFit, Boxeo...) que NO recibió créditos en este
-        // mismo pago, la fecha elegida se sincroniza acá, preservando el
-        // balance real de créditos (sincronizarVencimientoCreditoPwa no pisa
-        // remaining_credits con null como sí hace sincronizarVencimientoPwa
-        // para membresías). Las que SÍ recibieron créditos ya quedaron
-        // cubiertas arriba, en el mismo insert.
-        for (const disciplina of planesDeCreditos(payload.plan ?? socio.plan)) {
-          if (disciplinasConCreditosCargados.has(disciplina)) continue
-          const resultado = await sincronizarVencimientoCreditoPwa({
-            dni: socio.dni,
-            email: socio.email,
-            disciplina,
-            fechaVencimiento: cambios.fecha_vencimiento,
-          })
-          if (!resultado.synced && resultado.reason !== 'sin_cuenta_pwa') {
-            mensaje = 'Pago registrado, pero no se pudo sincronizar con la app. Revisá la consola.'
-          }
-        }
-      }
+      // userId null -- socio sin cuenta PWA todavía: el pago YA quedó
+      // registrado en `socios` arriba, mismo criterio "fail open" de
+      // siempre, solo no hay nada que sincronizar del lado de la app.
 
       // Historial de pagos (Ficha 360°) -- best-effort: si el socio todavía no
       // tiene cuenta PWA, o pagos_socio no está desplegada, el pago YA se
@@ -499,7 +519,6 @@ function Socios() {
       // existe pero el insert falla por una razón real (nombre de campo mal,
       // constraint, RLS), Seba veía igual "Pago registrado correctamente"
       // sin ninguna pista de que el historial no se guardó.
-      const userId = await resolverUserIdPorDni(socio.dni)
       if (userId) {
         try {
           await registrarPago({
@@ -509,9 +528,15 @@ function Socios() {
             metodoPago: payload.metodoPago,
             // Para planes con vencimiento el período es el que Seba eligió en el
             // modal (puede no arrancar hoy); para planes de créditos no hay rango
-            // de fechas, así que el período queda simplemente en "hoy".
-            periodoDesde: cambios.fecha_inicio_cuota ?? hoy,
-            periodoHasta: cambios.fecha_vencimiento ?? null,
+            // de fechas, así que el período queda simplemente en "hoy". Se lee
+            // DIRECTO de payload.vencimiento (no de cambios.fecha_vencimiento --
+            // esa columna ahora la escribe admin_acreditar_creditos_manual con
+            // el estado REAL de Aparatos, que puede no coincidir con la fecha
+            // que Seba eligió acá si este cobro no incluye Aparatos): el
+            // historial tiene que reflejar el período de ESTE pago puntual, no
+            // el vencimiento de Aparatos.
+            periodoDesde: payload.vencimiento?.fechaInicio ?? hoy,
+            periodoHasta: payload.vencimiento?.fechaVencimiento ?? null,
             creadoPor: usuario?.id ?? null,
           })
         } catch (err) {

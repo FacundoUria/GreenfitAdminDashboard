@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test'
 import { loginComoAdmin } from './support/auth.js'
-import { tablasBase } from './support/fixtures.js'
+import { tablasBase, DISCIPLINA_CROSSFIT } from './support/fixtures.js'
 import { irASocios } from './support/nav.js'
+import { mockAdminAcreditarCreditosManual } from './support/rpcMocks.js'
 
 // BUG CRÍTICO (2026-08-07): la fila de un socio en la tabla de Socios tiene
 // que listar ÚNICA Y EXCLUSIVAMENTE las disciplinas que ese socio tiene
@@ -104,4 +105,72 @@ test('crear un socio nuevo marcando SOLO Kickstrike lo guarda con ese único pla
 
   await expect.poll(() => tables.socios.length).toBe(1)
   expect(tables.socios[0].plan).toEqual(['Kickstrike'])
+})
+
+// Fase 2 (NuevoSocioModal.jsx) -- el alta CON créditos iniciales ya no usa
+// sincronizarCreditosPwa()/sincronizarVencimientoPwa() por disciplina
+// suelta, llama a admin_acreditar_creditos_manual() (Fase 1) una sola vez
+// con todo junto.
+const PROFILE_FACUNDO = {
+  id: 'e2e-profile-facundo-alta',
+  dni: '44537978',
+  full_name: 'Facundo Uria',
+  avatar_url: null,
+  created_at: '2026-08-01T00:00:00.000Z',
+  role: 'socio',
+}
+
+test('alta de socio nuevo CON créditos iniciales de 2 disciplinas -- ambas quedan con la misma fecha', async ({ page }) => {
+  const tables = {
+    ...tablasBase(),
+    disciplines: [...tablasBase().disciplines, DISCIPLINA_KICKSTRIKE],
+    socios: [],
+    // Pre-sembrado -- en producción esta fila la crea el trigger
+    // on_socio_dni_upsert de forma asíncrona apenas se inserta el socio
+    // (ver esperarCuentaPwa en NuevoSocioModal.jsx); el mock E2E no simula
+    // ese trigger, así que se simula el caso "la cuenta ya está lista" (el
+    // primer intento de esperarCuentaPwa la encuentra) en vez de la
+    // condición de carrera en sí -- eso ya lo cubre el propio código de
+    // esperarCuentaPwa, no es el foco de este test.
+    profiles: [PROFILE_FACUNDO],
+  }
+  await loginComoAdmin(page, {
+    tables,
+    rpc: { admin_acreditar_creditos_manual: mockAdminAcreditarCreditosManual(tables) },
+  })
+
+  await irASocios(page)
+  await page.getByRole('button', { name: 'Nuevo Socio' }).click()
+
+  await page.getByLabel('Nombre').fill('Facundo')
+  await page.getByLabel('Apellido').fill('Uria')
+  await page.getByLabel('DNI').fill(PROFILE_FACUNDO.dni)
+  await page.getByLabel('Email').fill('facundo@e2e.test')
+  await page.getByRole('checkbox', { name: 'CrossFit' }).check()
+  await page.getByRole('checkbox', { name: 'Kickstrike' }).check()
+  await page.getByLabel('Fecha de Inicio').fill('2026-08-01')
+
+  // Créditos iniciales por actividad -- un input propio por disciplina de
+  // créditos tildada (#credito-<Disciplina>, ver NuevoSocioModal.jsx).
+  await page.locator('#credito-CrossFit').fill('12')
+  await page.locator('#credito-Kickstrike').fill('12')
+
+  await page.getByRole('button', { name: 'Guardar' }).click()
+
+  await expect.poll(() => tables.socios.length).toBe(1)
+  // Ningún aviso de "no se pudieron cargar los créditos" -- si algo hubiera
+  // fallado en el RPC, handleSubmit dispara un window.alert() con ese
+  // mensaje y el test se colgaría esperando el diálogo sin este chequeo.
+  await expect(page.getByRole('heading', { name: 'Nuevo Socio' })).toHaveCount(0)
+
+  const filasCrossfit = tables.user_credits.filter((f) => f.discipline_id === DISCIPLINA_CROSSFIT.id)
+  const filasKickstrike = tables.user_credits.filter((f) => f.discipline_id === DISCIPLINA_KICKSTRIKE.id)
+  expect(filasCrossfit).toHaveLength(1)
+  expect(filasKickstrike).toHaveLength(1)
+  expect(filasCrossfit[0].remaining_credits).toBe(12)
+  expect(filasKickstrike[0].remaining_credits).toBe(12)
+  // Plan único -- una sola fecha para las dos disciplinas de este alta.
+  expect(filasCrossfit[0].expires_at).toBe(filasKickstrike[0].expires_at)
+
+  expect(tables.socios[0].creditos).toBe(24)
 })

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
-import { hoyISO, proximoVencimiento, toISODate } from '../utils/fecha'
+import { diferenciaEnDias, hoyISO, proximoVencimiento, toISODate } from '../utils/fecha'
 import {
   PLANES_DISPONIBLES,
   normalizarPlanes,
@@ -9,7 +9,8 @@ import {
   planesDeVencimiento,
   tienePlanDeVencimiento,
 } from '../utils/planes'
-import { sincronizarCreditosPwa, sincronizarVencimientoPwa, sincronizarVencimientoCreditoPwa } from '../utils/creditosPwa'
+import { sincronizarVencimientoPwa, sincronizarVencimientoCreditoPwa, resolverDisciplinaId } from '../utils/creditosPwa'
+import { resolverUserIdPorDni } from '../utils/fichaSocioPwa'
 import { normalizarTexto } from '../utils/coincidenciaSocios'
 import FichaSocioHistorial from './FichaSocioHistorial'
 import CreditosEditablesSocio from './CreditosEditablesSocio'
@@ -66,17 +67,25 @@ function formInicial(socio) {
 
 // El alta de socio dispara el trigger `on_socio_dni_upsert`, que crea la
 // cuenta de Auth de la PWA de forma ASÍNCRONA (llamada HTTP vía pg_net, sin
-// vuelta síncrona a este cliente) -- si se intenta sincronizar créditos o
+// vuelta síncrona a este cliente) -- si se intenta acreditar créditos o
 // vencimiento apenas el INSERT de `socios` devuelve éxito, lo más probable
 // es que la cuenta todavía no exista. Esperamos a que `profiles` la tenga
 // lista (hasta ~5s) antes de sincronizar.
+//
+// FIX (Fase 2, ver admin_acreditar_creditos_manual): esta condición de
+// carrera SIGUE vigente después de reemplazar sincronizarCreditosPwa/
+// sincronizarVencimientoPwa por ese RPC -- también necesita un user_id ya
+// resuelto (lo recibe como parámetro, no resuelve nada por DNI del lado
+// del servidor), así que el problema que esta función resuelve no cambió
+// en nada. Se devuelve el user_id resuelto directo (antes solo un
+// booleano) -- ahorra una segunda consulta idéntica en el caller.
 async function esperarCuentaPwa(dni, intentos = 6, esperaMs = 800) {
   for (let i = 0; i < intentos; i += 1) {
-    const { data } = await supabase.from('profiles').select('id').eq('dni', dni).maybeSingle()
-    if (data?.id) return true
+    const userId = await resolverUserIdPorDni(dni)
+    if (userId) return userId
     if (i < intentos - 1) await new Promise((resolve) => setTimeout(resolve, esperaMs))
   }
-  return false
+  return null
 }
 
 function NuevoSocioModal({
@@ -192,6 +201,10 @@ function NuevoSocioModal({
 
     let resultado
     let fechaVencimientoNueva = null
+    // Hoisteada igual que fechaVencimientoNueva -- se asigna dentro del
+    // `else` de abajo (alta nueva) pero hace falta más adelante, fuera de
+    // ese bloque, para admin_acreditar_creditos_manual() (p_fecha_inicio).
+    let fechaInicioAlta = null
     // Edición directa del vencimiento -- el admin puede tocar la fecha sin
     // pasar por "Registrar Pago". `dia_corte` se recalcula del día-del-mes
     // de la fecha nueva para que un futuro pago en modo "sugerido" (+1 mes)
@@ -218,6 +231,7 @@ function NuevoSocioModal({
       resultado = await supabase.from('socios').update(cambios).eq('id', socio.id).select()
     } else {
       const fechaInicio = form.fechaInicio || hoyISO()
+      fechaInicioAlta = fechaInicio
       // El día de alta fija el "día de corte" del ciclo de cobro del socio para siempre.
       const diaCorte = new Date(`${fechaInicio}T00:00:00`).getDate()
       fechaVencimientoNueva = toISODate(proximoVencimiento(fechaInicio, diaCorte))
@@ -311,36 +325,60 @@ function NuevoSocioModal({
     // por disciplina y/o el vencimiento de Aparatos en la tabla
     // real que lee la PWA (`user_credits`) -- sin esto el socio recién
     // creado no ve nada en su Home hasta una acción separada posterior.
+    //
+    // FIX (Fase 2, modelo de "plan único") -- ANTES esto llamaba a
+    // sincronizarCreditosPwa()/sincronizarVencimientoPwa() por disciplina
+    // suelta, cada una con su propio INSERT/UPDATE independiente -- en un
+    // alta nueva no generaba el bug de doble vencimiento en la práctica
+    // (el socio no tenía nada previo que resetear), pero dejaba a este
+    // flujo en un sistema aparte del que ya usan acreditar_pack() y
+    // CreditosEditablesSocio.jsx. Ahora llama a
+    // admin_acreditar_creditos_manual() (Fase 1, ya en producción) -- un
+    // solo RPC atómico que arma TODOS los créditos + Aparatos de esta alta
+    // con una sola fecha de vencimiento, mismo criterio que "Cobrar" (ver
+    // handleConfirmarPago en Socios.jsx).
     if (!esEdicion) {
       const disciplinasCredito = planesDeCreditos(form.planes)
       const necesitaVencimiento = tienePlanDeVencimiento(form.planes)
       const avisos = []
 
-      if (disciplinasCredito.length > 0 || necesitaVencimiento) {
-        const cuentaLista = await esperarCuentaPwa(form.dni)
-        if (!cuentaLista) {
+      // Filtrado ACÁ (antes de decidir si hace falta esperar la cuenta) --
+      // si Seba tildó una disciplina de créditos pero dejó la cantidad en
+      // blanco, no hay nada que acreditar en ella y no vale la pena
+      // esperar/llamar a nada por su culpa.
+      const entradasCredito = disciplinasCredito
+        .map((disciplina) => ({ disciplina, cantidad: Number(form.creditosPorDisciplina[disciplina]) || 0 }))
+        .filter((item) => item.cantidad > 0)
+
+      if (entradasCredito.length > 0 || necesitaVencimiento) {
+        const userId = await esperarCuentaPwa(form.dni)
+        if (!userId) {
           avisos.push(
             'La cuenta de la app todavía se está generando: cargá los créditos/vencimiento en unos segundos desde "Registrar Pago".',
           )
         } else {
-          for (const disciplina of disciplinasCredito) {
-            const cantidad = Number(form.creditosPorDisciplina[disciplina]) || 0
-            if (cantidad <= 0) continue
-            const resultadoSync = await sincronizarCreditosPwa({ dni: form.dni, email: form.email, disciplina, delta: cantidad })
-            if (!resultadoSync.synced) avisos.push(`No se pudieron cargar los créditos de ${disciplina} en la app.`)
+          const pCreditos = []
+          for (const { disciplina, cantidad } of entradasCredito) {
+            const disciplineId = await resolverDisciplinaId(disciplina)
+            if (!disciplineId) {
+              avisos.push(`No se encontró "${disciplina}" en el catálogo de Disciplinas -- no se pudieron cargar sus créditos.`)
+              continue
+            }
+            pCreditos.push({ discipline_id: disciplineId, credits: cantidad })
           }
 
-          if (necesitaVencimiento) {
-            for (const disciplina of planesDeVencimiento(form.planes)) {
-              const resultadoSync = await sincronizarVencimientoPwa({
-                dni: form.dni,
-                email: form.email,
-                disciplina,
-                fechaVencimiento: fechaVencimientoNueva,
-              })
-              if (!resultadoSync.synced) {
-                avisos.push(`No se pudo cargar el vencimiento de ${disciplina} en la app.`)
-              }
+          if (pCreditos.length > 0 || necesitaVencimiento) {
+            const diasVigencia = diferenciaEnDias(fechaInicioAlta, fechaVencimientoNueva)
+            const { error: errorAcreditar } = await supabase.rpc('admin_acreditar_creditos_manual', {
+              p_user_id: userId,
+              p_creditos: pCreditos,
+              p_incluye_aparatos: necesitaVencimiento,
+              p_dias_vigencia: diasVigencia,
+              p_fecha_inicio: fechaInicioAlta,
+            })
+            if (errorAcreditar) {
+              console.error('Error al acreditar créditos/Aparatos iniciales (admin_acreditar_creditos_manual):', errorAcreditar)
+              avisos.push('No se pudieron cargar los créditos/vencimiento iniciales en la app. Revisá la consola.')
             }
           }
         }

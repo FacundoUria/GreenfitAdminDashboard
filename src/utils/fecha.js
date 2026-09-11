@@ -66,6 +66,23 @@ export function toISODate(valor) {
   return `${anio}-${mes}-${dia}`
 }
 
+// Diferencia en días de CALENDARIO entre dos fechas (string YYYY-MM-DD o
+// Date) -- mismo patrón "zerear la hora, restar timestamps, redondear" que
+// ya usa calcularEstadoCuota() más abajo, para que un huso horario con DST
+// (no es el caso de Argentina, pero por las dudas) no corra el resultado en
+// +/-1. Usado para convertir un rango [fechaInicio, fechaVencimiento]
+// elegido a mano (NuevoSocioModal.jsx, RegistrarPagoModal.jsx) en los
+// `p_dias_vigencia` que espera admin_acreditar_creditos_manual() -- ver ese
+// RPC (supabase_migration_admin_acreditar_creditos_manual.sql).
+export function diferenciaEnDias(fechaInicio, fechaFin) {
+  const inicio = fechaInicio instanceof Date ? new Date(fechaInicio) : new Date(`${fechaInicio}T00:00:00`)
+  const fin = fechaFin instanceof Date ? new Date(fechaFin) : new Date(`${fechaFin}T00:00:00`)
+  inicio.setHours(0, 0, 0, 0)
+  fin.setHours(0, 0, 0, 0)
+  const msPorDia = 1000 * 60 * 60 * 24
+  return Math.round((fin.getTime() - inicio.getTime()) / msPorDia)
+}
+
 // Avanza 1 mes desde `fechaBase`, ajustando siempre al mismo `diaCorte` (ciclo fijo).
 // Así, si pagan tarde, el próximo vencimiento no se calcula desde HOY sino desde el
 // vencimiento anterior, evitando que el ciclo de cobro se corra mes a mes.
