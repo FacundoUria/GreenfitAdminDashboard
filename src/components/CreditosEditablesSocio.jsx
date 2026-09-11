@@ -1,23 +1,37 @@
 import { useEffect, useState } from 'react'
 import { Loader2, Minus, Plus } from 'lucide-react'
-import { planesDeCreditos } from '../utils/planes'
 import { formatFecha } from '../utils/fecha'
 import { resolverUserIdPorDni, fetchCreditosPorDisciplina } from '../utils/fichaSocioPwa'
-import { resolverDisciplinaId, fijarCreditosDisciplina, ajustarCreditoDisciplina } from '../utils/creditosPwa'
+import { fijarCreditosDisciplina, ajustarCreditoDisciplina } from '../utils/creditosPwa'
 
 // Reemplaza a los steppers -/+1/+4/+8/+12 que vivían sueltos en cada fila
 // de SociosTabla.jsx -- con datos sucios de la migración de CrossFy,
 // corregir a alguien con muchos créditos de más obligaba a tocar "-1"
 // decenas de veces. Acá, dentro de "Editar Socio": una fila por disciplina
-// de créditos del plan, con el TOTAL editable a mano (número exacto) +
-// +1/-1 para el ajuste rápido de siempre. La fecha de vencimiento
-// (la más próxima entre los lotes activos) es solo informativa en esta
-// versión -- no editable acá.
+// de créditos, con el TOTAL editable a mano (número exacto) + +1/-1 para
+// el ajuste rápido de siempre. La fecha de vencimiento (la más próxima
+// entre los lotes activos) es solo informativa en esta versión -- no
+// editable acá.
 //
-// A diferencia del resto de creditosPwa.js (que resuelve todo por DNI/
-// nombre de disciplina, con fallbacks para datos sucios), acá se resuelve
-// UNA vez al cargar y se reusa -- no hay ningún flujo batch de por medio,
-// es una sola ficha a la vez.
+// FIX (modelo de "plan único", caso real Facundo Uria DNI 44537978) --
+// ANTES las filas venían de planesDeCreditos(socio.plan) (el checkbox de
+// "Editar Socio"), resolviendo cada nombre contra el catálogo aparte. Eso
+// tenía dos problemas bajo el modelo nuevo: (1) una disciplina con
+// créditos reales y vigentes pero SIN tildar en el plan (comprada por
+// pack, nunca tildada a mano -- caso Kickstrike) no aparecía; (2) una
+// disciplina tildada pero sin nada vigente (residuo viejo -- caso Boxeo)
+// sí aparecía, con 0. Ahora las filas salen DIRECTO de
+// fetchCreditosPorDisciplina() (ya filtra a "tiene al menos un lote
+// activo", ver fichaSocioPwa.js) -- el `disciplineId` de cada fila ya
+// viene resuelto real desde ahí (el join contra user_credits), así que ya
+// no hace falta resolverDisciplinaId() por nombre acá tampoco.
+//
+// Trade-off conocido: como ya no se recorre socios.plan, esta sección ya
+// NO puede usarse para darle a un socio créditos de una disciplina que
+// TODAVÍA no tiene ningún lote activo (ej. su primera vez en una
+// disciplina nueva) -- para eso sigue estando "Registrar Pago"
+// (acreditar_pack), que sí crea el lote inicial. Esto es sobre AJUSTAR lo
+// que ya existe, no sobre dar de alta una disciplina nueva.
 function CreditosEditablesSocio({ socio, onCreditosActualizados }) {
   const [userId, setUserId] = useState(null)
   const [filas, setFilas] = useState([])
@@ -29,15 +43,10 @@ function CreditosEditablesSocio({ socio, onCreditosActualizados }) {
   const [valores, setValores] = useState({})
   // Disciplina en vuelo -- deshabilita SOLO esa fila, no el resto. Clave
   // por `fila.disciplina` (nombre, siempre truthy) y NO por
-  // `fila.disciplineId`: una disciplina que todavía no matchea ninguna
-  // fila del catálogo (ver resolverDisciplinaId) tiene disciplineId=null
-  // -- si se usara ESE como clave, coincidiría con el valor inicial de
-  // `procesando` (también null) y esa fila nacería con los botones
-  // deshabilitados sin que nada esté realmente en vuelo, bloqueando incluso
-  // el aviso de "no se encontró en el catálogo".
+  // `fila.disciplineId`: aunque hoy todo `disciplineId` viene resuelto
+  // real (ver más abajo), usar el nombre es más robusto igual -- no
+  // depende de que ese invariante se mantenga para siempre.
   const [procesando, setProcesando] = useState(null)
-
-  const disciplinas = planesDeCreditos(socio.plan)
 
   // Contador que se bumpea después de guardar/ajustar para volver a pedir
   // los datos -- mismo criterio que FichaSocioHistorial.jsx: `cargar()`
@@ -52,41 +61,28 @@ function CreditosEditablesSocio({ socio, onCreditosActualizados }) {
     let cancelado = false
 
     async function cargar() {
-      // Nada que cargar (socio sin ninguna disciplina de créditos en el
-      // plan, ej. solo Aparatos) -- el componente ni siquiera se renderiza
-      // en ese caso (ver el `if (disciplinas.length === 0) return null`
-      // más abajo), así que cortar acá evita 2 llamadas de red al pedo.
-      if (disciplinas.length === 0) {
-        setCargando(false)
-        return
-      }
       setCargando(true)
       setError(null)
       try {
-        const [idResuelto, mapaCreditos, disciplineIds] = await Promise.all([
+        const [idResuelto, mapaCreditos] = await Promise.all([
           resolverUserIdPorDni(socio.dni),
           fetchCreditosPorDisciplina([socio.dni]),
-          Promise.all(disciplinas.map((d) => resolverDisciplinaId(d))),
         ])
         if (cancelado) return
         setUserId(idResuelto)
 
-        const porNombre = new Map(
-          (mapaCreditos.get(socio.dni) ?? []).map((c) => [(c.disciplineName ?? '').trim().toLowerCase(), c]),
-        )
-        const nuevasFilas = disciplinas.map((nombre, i) => {
-          const entrada = porNombre.get(nombre.trim().toLowerCase())
-          return {
-            disciplina: nombre,
-            // Si la disciplina nunca tuvo ninguna fila real en user_credits
-            // (ej. recién tildada en el plan, sin ningún pago todavía),
-            // `entrada` no existe -- se resuelve igual el id desde el
-            // catálogo, para que +1/fijar funcionen desde el primer momento.
-            disciplineId: entrada?.disciplineId ?? disciplineIds[i] ?? null,
-            remainingCredits: entrada?.remainingCredits ?? 0,
-            proximoVencimiento: entrada?.lotes?.[0]?.expiresAt ?? null,
-          }
-        })
+        // Las filas salen DIRECTO de lo que fetchCreditosPorDisciplina ya
+        // trae -- esa función filtra a "tiene al menos un lote activo" (ver
+        // fichaSocioPwa.js), y el disciplineId de cada entrada ya es el
+        // real (viene del join contra user_credits, no de resolver un
+        // nombre de plan contra el catálogo).
+        const entradas = mapaCreditos.get(socio.dni) ?? []
+        const nuevasFilas = entradas.map((entrada) => ({
+          disciplina: entrada.disciplineName,
+          disciplineId: entrada.disciplineId,
+          remainingCredits: entrada.remainingCredits,
+          proximoVencimiento: entrada.lotes?.[0]?.expiresAt ?? null,
+        }))
         setFilas(nuevasFilas)
         setValores(Object.fromEntries(nuevasFilas.map((f) => [f.disciplineId, String(f.remainingCredits)])))
       } catch (err) {
@@ -101,7 +97,6 @@ function CreditosEditablesSocio({ socio, onCreditosActualizados }) {
     return () => {
       cancelado = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socio.dni, refrescarTick])
 
   const handleChangeValor = (disciplineId) => (event) => {
@@ -163,7 +158,13 @@ function CreditosEditablesSocio({ socio, onCreditosActualizados }) {
     }
   }
 
-  if (disciplinas.length === 0) return null
+  // Antes esto era un chequeo síncrono sobre socios.plan (se sabía sin
+  // esperar ninguna respuesta de red) -- ahora "¿hay algo que mostrar?"
+  // depende de la carga real, así que solo se puede decidir DESPUÉS de
+  // que termine (mientras carga, se muestra igual el spinner de abajo).
+  // Sin nada que mostrar y sin error, la sección entera desaparece --
+  // mismo criterio de siempre, resuelto en el momento correcto.
+  if (!cargando && !error && filas.length === 0) return null
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-white/10 bg-greenfit-dark/40 p-4 sm:col-span-2">

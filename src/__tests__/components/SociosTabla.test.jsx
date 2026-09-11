@@ -111,21 +111,27 @@ describe('CreditosCell -- de solo lectura tras sacar los steppers (rediseño "Ed
     expect(seises.every((el) => el.textContent === '6')).toBe(true)
   })
 
-  // Caso real reportado: la grilla mostraba 0 créditos de Kickstrike aunque
-  // la PWA sí tuviera un balance real -- socios.plan decía "Kickstrike"
-  // pero disciplineName (que sale de disciplines.name, el catálogo real)
-  // podía diferir solo en mayúsculas ("kickstrike") por una fila duplicada
-  // de catálogo. Antes el Map de balances usaba la clave EXACTA -- ese
-  // desfase de tipeo alcanzaba para que nunca matcheara.
-  it('el balance real matchea aunque disciplineName difiera en mayúsculas/minúsculas de socios.plan', () => {
-    const socioKickstrike = {
+  // Caso real reportado (bug del modelo de "plan único", Facundo Uria DNI
+  // 44537978): esta celda dependía de planesDeCreditos(socio.plan) para
+  // decidir QUÉ disciplinas mostrar -- una con créditos reales y vigentes
+  // pero SIN tildar en el plan (comprada por pack, nunca marcada a mano)
+  // no aparecía acá. FIX -- ahora se itera directo
+  // socio.creditosPwaPorDisciplina, sin mirar el plan para nada (ver
+  // CreditosCell) -- el disciplineName que se muestra ya es el real, así
+  // que tampoco puede haber desfase de mayúsculas/minúsculas contra el
+  // plan: ese problema quedó estructuralmente eliminado, no solo tapado.
+  it('una disciplina con créditos reales, aunque NO esté tildada en socios.plan, aparece igual (caso Kickstrike de Facundo)', () => {
+    const socioKickstrikeSinPlan = {
       ...SOCIO_MULTI_DISCIPLINA,
-      plan: ['Kickstrike'],
-      creditosPwaPorDisciplina: [{ disciplineId: 'd-kickstrike', disciplineName: 'kickstrike', remainingCredits: 11 }],
+      plan: ['CrossFit', 'Boxeo'], // Kickstrike NO está en el plan
+      creditosPwaPorDisciplina: [
+        { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6 },
+        { disciplineId: 'd-kickstrike', disciplineName: 'Kickstrike', remainingCredits: 12 },
+      ],
     }
-    render(<SociosTabla socios={[socioKickstrike]} {...HANDLERS} />)
+    render(<SociosTabla socios={[socioKickstrikeSinPlan]} {...HANDLERS} />)
     const celdas = screen.getAllByTitle('Créditos reales de Kickstrike en la app')
-    expect(celdas.every((el) => el.textContent === '11')).toBe(true)
+    expect(celdas.every((el) => el.textContent === '12')).toBe(true)
   })
 
   it('no renderiza ningún stepper -- ni +/-1, ni +4/+8/+12 -- en la fila de créditos', () => {
@@ -141,12 +147,17 @@ describe('CreditosCell -- de solo lectura tras sacar los steppers (rediseño "Ed
     expect(screen.queryByText('CrossFit:')).toBeNull()
   })
 
-  it('sin fetchCreditosPorDisciplina resuelto todavía (creditosPwaPorDisciplina ausente), muestra 0 en vez de romper', () => {
+  it('sin creditosPwaPorDisciplina (batch todavía no resuelto, o ausente) -- estado vacío en vez de romper', () => {
+    // Ya no hay ningún dato de socio.plan para "adivinar" qué disciplina
+    // mostrar en 0 mientras el batch no resolvió -- sin nada real todavía,
+    // la celda de Créditos directamente no tiene ninguna fila (mismo
+    // criterio que CreditosEditablesSocio.jsx: sin datos reales, nada que
+    // mostrar). No rompe -- ver el guard `entradas.length === 0` en
+    // CreditosCell.
     const socioSinBatchTodavia = { ...SOCIO_CON_FOTO }
     delete socioSinBatchTodavia.creditosPwaPorDisciplina
     render(<SociosTabla socios={[socioSinBatchTodavia]} {...HANDLERS} />)
-    const celdas = screen.getAllByTitle('Créditos reales de CrossFit en la app')
-    expect(celdas.every((el) => el.textContent === '0')).toBe(true)
+    expect(screen.queryByTitle(/Créditos reales de/)).toBeNull()
   })
 })
 
@@ -383,6 +394,25 @@ describe('VencimientoCell -- agrupa por FECHA, no por disciplina (rediseño)', (
     const lineas = screen.getAllByText('Vence el 31/12/2026')
     expect(lineas.length).toBeGreaterThan(0)
     expect(lineas.every((el) => el.className.includes('text-xs') && el.className.includes('text-gray-400'))).toBe(true)
+  })
+
+  // FIX (modelo de "plan único", caso real Facundo Uria DNI 44537978) --
+  // este loop iteraba antes planesDeCreditos(socio.plan) para decidir QUÉ
+  // disciplinas de créditos buscar -- una con lotes activos pero SIN
+  // tildar en el plan (Kickstrike) nunca se llegaba a buscar, así que
+  // faltaba de esta celda igual que le faltaba a CreditosCell. Ahora
+  // itera directo creditosPwaPorDisciplina.
+  it('disciplina con lote activo, aunque NO esté tildada en socios.plan, aparece igual en el desglose (caso Kickstrike de Facundo)', () => {
+    const socio = {
+      ...SOCIO_CON_FOTO,
+      plan: ['CrossFit', 'Boxeo'], // Kickstrike NO está en el plan
+      creditosPwaPorDisciplina: [
+        { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 12, lotes: [{ id: 'l1', remainingCredits: 12, expiresAt: '2026-10-08T12:00:00.000Z' }] },
+        { disciplineId: 'd-kickstrike', disciplineName: 'Kickstrike', remainingCredits: 12, lotes: [{ id: 'l2', remainingCredits: 12, expiresAt: '2026-10-08T12:00:00.000Z' }] },
+      ],
+    }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('Ambos vencen el 08/10/2026').length).toBeGreaterThan(0)
   })
 })
 

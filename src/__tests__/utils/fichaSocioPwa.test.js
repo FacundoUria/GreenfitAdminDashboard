@@ -99,7 +99,7 @@ describe('fetchAvataresYNiveles (tabla principal -- avatar + badge de nivel en b
 describe('fetchCreditosPorDisciplina (fix del bug de sincronización: fuente de verdad = user_credits real, no el pozo global socios.creditos)', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('un socio con dos disciplinas de créditos (CrossFit + Boxeo), cada una con 1 solo lote activo, devuelve el balance real de CADA UNA por separado', async () => {
+  it('un socio con dos disciplinas de créditos (CrossFit activo + Boxeo agotado) -- devuelve SOLO la que tiene lote activo', async () => {
     mockedFrom.mockImplementation((tabla) => {
       if (tabla === 'profiles') {
         return makeChain({ data: [{ id: 'u1', dni: '20111222' }], error: null })
@@ -108,6 +108,12 @@ describe('fetchCreditosPorDisciplina (fix del bug de sincronización: fuente de 
         return makeChain({
           data: [
             { id: 'uc-1', user_id: 'u1', remaining_credits: 6, expires_at: '2099-01-01T00:00:00.000Z', discipline: { id: 'd-crossfit', name: 'CrossFit', kind: 'credits' } },
+            // Boxeo: remaining_credits=0 -- no es un lote activo (residuo
+            // agotado). FIX -- sin ningún lote activo, la disciplina no se
+            // agrega, ni con remainingCredits=0 (ver el guard más abajo en
+            // fetchCreditosPorDisciplina). Antes esto se agregaba igual, lo
+            // que reaparecía como "Boxeo, 0" en CreditosEditablesSocio.jsx
+            // (caso real Facundo Uria, DNI 44537978).
             { id: 'uc-2', user_id: 'u1', remaining_credits: 0, expires_at: '2099-01-01T00:00:00.000Z', discipline: { id: 'd-boxeo', name: 'Boxeo', kind: 'credits' } },
           ],
           error: null,
@@ -119,7 +125,6 @@ describe('fetchCreditosPorDisciplina (fix del bug de sincronización: fuente de 
     const mapa = await fetchCreditosPorDisciplina(['20111222'])
     expect(mapa.get('20111222')).toEqual([
       { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6, lotes: [{ id: 'uc-1', remainingCredits: 6, expiresAt: '2099-01-01T00:00:00.000Z' }] },
-      { disciplineId: 'd-boxeo', disciplineName: 'Boxeo', remainingCredits: 0, lotes: [] },
     ])
   })
 

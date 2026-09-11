@@ -1,5 +1,5 @@
 import { CreditCard, MessageCircle, Pencil, UserX, UserCheck } from 'lucide-react'
-import { esPlanDeCreditos, formatearPlanes, planesDeCreditos, planesDeVencimiento, tienePlanDeVencimiento } from '../utils/planes'
+import { esPlanDeCreditos, formatearPlanes, planesDeVencimiento, tienePlanDeVencimiento } from '../utils/planes'
 import { formatFecha } from '../utils/fecha'
 
 const estadoStyles = {
@@ -106,37 +106,38 @@ function EstadoBadge({ socio }) {
 // créditos de más obligaba a tocar "-1" decenas de veces. El ajuste ahora
 // vive en "Editar Socio" (CreditosEditablesSocio.jsx), con un input para
 // escribir el número exacto -- acá la celda queda de solo lectura.
+//
+// FIX (modelo de "plan único", caso real Facundo Uria DNI 44537978) --
+// hasta acá esta celda seguía iterando planesDeCreditos(socio.plan) (el
+// checkbox de "Editar Socio") para decidir QUÉ disciplinas mostrar, y
+// recién ahí buscaba el real de cada una (con `?? 0` si no encontraba
+// nada). Mismos dos problemas que tenía CreditosEditablesSocio.jsx (ver
+// ese componente): una disciplina con créditos reales pero SIN tildar en
+// el plan no aparecía acá (caso Kickstrike), y una tildada en el plan pero
+// sin ningún lote activo mostraba "0" en vez de desaparecer (caso Boxeo).
+// Ahora se itera DIRECTO socio.creditosPwaPorDisciplina -- ya no hace
+// falta resolver nada por nombre contra el plan: fetchCreditosPorDisciplina
+// ya filtra a "al menos un lote activo" (ver fichaSocioPwa.js) y ya trae el
+// disciplineName real (del join contra `disciplines`), así que tampoco
+// hace falta el matching case-insensitive de antes.
 function CreditosCell({ socio }) {
-  const disciplinas = planesDeCreditos(socio.plan)
-  if (disciplinas.length === 0) {
+  const entradas = socio.creditosPwaPorDisciplina ?? []
+  if (entradas.length === 0) {
     return <span className="text-gray-600">—</span>
   }
 
-  // Clave normalizada (minúsculas + trim) -- mismo criterio que
-  // planesDeCreditos/esPlanDeCreditos en utils/planes.js. `socio.plan`
-  // (texto libre cargado por el staff) y `disciplines.name` (el catálogo
-  // real, de donde sale disciplineName acá) pueden diferir en mayúsculas
-  // sin ser "el mismo error" -- una unique constraint case-sensitive deja
-  // convivir "Kickstrike" y "kickstrike" como filas DISTINTAS del
-  // catálogo. Con una clave exacta, esa diferencia de tipeo alcanzaba para
-  // que el balance real nunca matcheara y la grilla mostrara 0 siempre,
-  // aunque la PWA sí tuviera créditos de verdad.
-  const realPorDisciplina = new Map(
-    (socio.creditosPwaPorDisciplina ?? []).map((c) => [(c.disciplineName ?? '').trim().toLowerCase(), c.remainingCredits]),
-  )
-
   return (
     <div className="flex flex-col gap-1.5">
-      {disciplinas.map((disciplina) => (
-        <div key={disciplina} className="flex items-center gap-1.5">
-          {disciplinas.length > 1 && (
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{disciplina}:</span>
+      {entradas.map((entrada) => (
+        <div key={entrada.disciplineId ?? entrada.disciplineName} className="flex items-center gap-1.5">
+          {entradas.length > 1 && (
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{entrada.disciplineName}:</span>
           )}
           <span
             className="text-sm font-semibold text-white"
-            title={`Créditos reales de ${disciplina} en la app`}
+            title={`Créditos reales de ${entrada.disciplineName} en la app`}
           >
-            {realPorDisciplina.get(disciplina.trim().toLowerCase()) ?? 0}
+            {entrada.remainingCredits ?? 0}
           </span>
         </div>
       ))}
@@ -292,11 +293,18 @@ function VencimientoCell({ socio }) {
     entradasSimples.push({ nombre: etiquetaMembresia, fechaISO: socio.fechaVencimiento })
   }
 
-  for (const disciplina of planesDeCreditos(socio.plan)) {
-    const entrada = (socio.creditosPwaPorDisciplina ?? []).find(
-      (c) => (c.disciplineName ?? '').trim().toLowerCase() === disciplina.trim().toLowerCase(),
-    )
-    const lotes = entrada?.lotes ?? []
+  // FIX (modelo de "plan único", caso real Facundo Uria DNI 44537978) --
+  // ANTES este loop era `for (const disciplina of planesDeCreditos(socio.plan))`
+  // y recién ahí buscaba las filas reales de esa disciplina -- una
+  // disciplina con lotes activos pero SIN tildar en el plan (caso
+  // Kickstrike) nunca se llegaba a buscar, así que faltaba directamente de
+  // esta celda. Ahora se itera DIRECTO socio.creditosPwaPorDisciplina
+  // (mismo criterio que ya tiene CreditosCell arriba) -- el guard de abajo
+  // (`lotes.length === 0`) ya cubría el caso contrario (disciplina tildada
+  // sin nada vigente, caso Boxeo), eso no cambia.
+  for (const entrada of socio.creditosPwaPorDisciplina ?? []) {
+    const disciplina = entrada.disciplineName
+    const lotes = entrada.lotes ?? []
     if (lotes.length === 0) continue
     const agrupados = agruparLotesPorDiaArgentina(lotes)
     if (agrupados.length === 1) {

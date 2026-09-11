@@ -151,6 +151,19 @@ export async function fetchCreditosPorDisciplina(dnis) {
       .sort((a, b) => new Date(a.expires_at) - new Date(b.expires_at))
 
     const lotes = lotesActivos.map((f) => ({ id: f.id, remainingCredits: f.remaining_credits ?? 0, expiresAt: f.expires_at }))
+
+    // FIX -- sin ningún lote activo, esta disciplina no se agrega, punto
+    // (mismo criterio que fetchUserBalances() de la PWA). Antes esto
+    // empujaba igual una entrada con remainingCredits=0 para CUALQUIER
+    // disciplina que alguna vez tuviera una fila en user_credits -- no
+    // rompía nada en SociosTabla.jsx (que ya hacía `?? 0` sobre una
+    // búsqueda que podía no encontrar nada), pero sí en
+    // CreditosEditablesSocio.jsx al dejar de depender de socios.plan para
+    // decidir qué filas mostrar (ver ese componente): sin este guard,
+    // volvía a aparecer una disciplina sin nada real (caso Boxeo de
+    // Facundo Uria, DNI 44537978).
+    if (lotes.length === 0) continue
+
     const remainingCredits = lotes.reduce((suma, lote) => suma + lote.remainingCredits, 0)
 
     const lista = resultado.get(dni) ?? []

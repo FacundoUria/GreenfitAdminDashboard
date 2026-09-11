@@ -59,6 +59,14 @@ const PROFILE_MULTI = {
 // esto siempre está poblado (sincronizarCreditosPwa lo setea en cada
 // escritura) -- acá se declara explícito para que el fixture represente un
 // lote real, no uno inválido/legacy.
+//
+// Boxeo arranca en 2 (no 0): desde el fix de "plan único", tanto
+// CreditosCell (SociosTabla.jsx) como CreditosEditablesSocio.jsx solo
+// muestran disciplinas con al menos un lote ACTIVO real -- con 0, Boxeo
+// directamente no aparecería en ningún lado y no habría nada que ajustar
+// ni ninguna fila que leer. Se usa 2 (distinto de los 6 de CrossFit) para
+// seguir pudiendo distinguir "balance real por disciplina" de "pozo
+// global" (ver el test de abajo).
 const EN_30_DIAS = new Date(Date.now() + 30 * 86_400_000).toISOString()
 
 function userCreditsIniciales() {
@@ -76,7 +84,7 @@ function userCreditsIniciales() {
       id: 'uc-2',
       user_id: PROFILE_MULTI.id,
       discipline_id: 'disc-boxeo',
-      remaining_credits: 0,
+      remaining_credits: 2,
       expires_at: EN_30_DIAS,
       created_at: '2026-08-01T00:00:00.000Z',
       discipline: { id: 'disc-boxeo', name: 'Boxeo', kind: 'credits' },
@@ -104,10 +112,10 @@ test('un socio con CrossFit + Boxeo muestra el balance REAL de cada disciplina, 
   await expect(filaTabla.getByLabel('Disciplina a ajustar')).toHaveCount(0)
 
   // El balance real de cada disciplina se ve por separado -- CrossFit=6,
-  // Boxeo=0 (si mostrara el pozo global de socios.creditos, Boxeo también
+  // Boxeo=2 (si mostrara el pozo global de socios.creditos, Boxeo también
   // mostraría 6, que es exactamente el bug reportado).
   await expect(filaTabla.getByTitle('Créditos reales de CrossFit en la app')).toHaveText('6')
-  await expect(filaTabla.getByTitle('Créditos reales de Boxeo en la app')).toHaveText('0')
+  await expect(filaTabla.getByTitle('Créditos reales de Boxeo en la app')).toHaveText('2')
 })
 
 // Simula server-side lo mínimo indispensable de
@@ -158,6 +166,12 @@ function rpcAjustarCredito(tables) {
 // vive en "Editar Socio" -> sección Créditos (CreditosEditablesSocio.jsx),
 // no en la fila de la tabla -- mismo título de botón de siempre
 // ("Sumar 1 crédito a Boxeo"), solo cambia DÓNDE vive.
+//
+// FIX de "plan único" (ver CreditosEditablesSocio.jsx): esa sección ya no
+// lee socio.plan -- solo muestra disciplinas con al menos un lote ACTIVO
+// real. userCreditsIniciales() ya le da a Boxeo un balance inicial > 0
+// (ver el comentario junto a esa función): sin ningún lote activo, el
+// botón "Sumar 1 crédito a Boxeo" directamente no existiría.
 test('sumar créditos en la fila de Boxeo NUNCA impacta a CrossFit -- cada disciplina tiene su propio +1/-1', async ({ page }) => {
   const tables = {
     ...tablasBase(),
@@ -175,12 +189,12 @@ test('sumar créditos en la fila de Boxeo NUNCA impacta a CrossFit -- cada disci
 
   await page.getByTitle('Sumar 1 crédito a Boxeo').click()
 
-  // Boxeo (balance previo real: 0) suma a 1 -- CrossFit no se toca.
+  // Boxeo (balance previo real: 2) suma a 3 -- CrossFit no se toca.
   await expect.poll(() =>
     tables.user_credits
       .filter((f) => f.user_id === PROFILE_MULTI.id && f.discipline_id === 'disc-boxeo')
       .reduce((total, f) => total + (f.remaining_credits ?? 0), 0),
-  ).toBe(1)
+  ).toBe(3)
   expect(tables.user_credits.find((f) => f.id === 'uc-1').remaining_credits).toBe(6) // CrossFit intacto
 })
 
@@ -220,7 +234,16 @@ const PROFILE_AIXA = {
   role: 'socio',
 }
 
-test('caso Aixa: sumar créditos en una disciplina que el socio NUNCA tuvo inicializada en la app crea la fila en vez de romper la sincronización', async ({
+// FIX de "plan único" (ver CreditosEditablesSocio.jsx): esa sección ya no
+// lee socio.plan para decidir qué mostrar -- SOLO disciplinas con al menos
+// un lote activo real. Consecuencia directa e inevitable: ya no se puede
+// inicializar desde acá el crédito de una disciplina que el socio nunca
+// tuvo (sin fila en user_credits, no hay ninguna fila que mostrar, así que
+// no hay ningún botón que clickear). Para eso sigue estando "Registrar
+// Pago" (acreditar_pack), que sí crea el lote inicial -- este test ahora
+// verifica que la sección de Créditos directamente no aparece en ese caso,
+// en vez de mostrar un botón que ya no existe.
+test('caso Aixa: una disciplina que el socio NUNCA tuvo inicializada en la app no aparece en "Editar Socio" -- no hay nada que romper', async ({
   page,
 }) => {
   const tables = {
@@ -230,21 +253,13 @@ test('caso Aixa: sumar créditos en una disciplina que el socio NUNCA tuvo inici
     profiles: [PROFILE_AIXA],
     user_credits: [], // Ninguna fila todavía para Aixa -- ni siquiera de CrossFit.
   }
-  await loginComoAdmin(page, { tables, rpc: { admin_ajustar_credito_disciplina: rpcAjustarCredito(tables) } })
+  await loginComoAdmin(page, { tables })
 
   await irASocios(page)
   const filaTabla = page.getByRole('table').getByRole('row', { name: /Aixa Gómez/ })
   await filaTabla.getByTitle('Editar').click()
   await expect(page.getByRole('heading', { name: 'Editar Socio' })).toBeVisible()
 
-  await page.getByTitle('Sumar 1 crédito a Kickstrike').click()
-
-  // Antes del fix histórico esto rompía la sincronización -- ahora
-  // admin_ajustar_credito_disciplina() crea el lote nuevo sin problema.
-  await expect.poll(() => tables.user_credits.length).toBe(1)
-
-  const filaNueva = tables.user_credits[0]
-  expect(filaNueva.discipline_id).toBe('disc-kickstrike')
-  expect(filaNueva.remaining_credits).toBe(1)
-  expect(filaNueva.user_id).toBe(PROFILE_AIXA.id)
+  await expect(page.getByRole('heading', { name: 'Créditos', exact: true })).toHaveCount(0)
+  expect(tables.user_credits).toHaveLength(0)
 })
