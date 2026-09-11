@@ -162,13 +162,31 @@ const MAX_LOTES_EN_DESGLOSE = 2
 // Puramente para AGRUPAR EL TEXTO acá -- no toca ninguna fila real de
 // user_credits. Mismo agrupamiento que fetchCreditosPorDisciplina() aplica
 // del lado de la PWA (creditsApi.ts) -- tienen que verse coherentes.
+//
+// `socio.fechaVencimiento` llega como "YYYY-MM-DD" puro (columna `date`,
+// sin hora) -- pasado tal cual a `Date`, se interpreta como medianoche
+// UTC, que en Argentina (UTC-3) cae en el día ANTERIOR (mismo bug que ya
+// resolvió formatFecha() en utils/fecha.js). Los `expiresAt` de los lotes
+// de créditos ya vienen con hora real embebida (mediodía UTC de siempre),
+// así que este ajuste no les cambia nada -- es solo para que
+// VencimientoCell pueda agrupar la fecha de Aparatos junto con las de
+// créditos sin ese corrimiento de un día.
 function claveDiaArgentina(isoString) {
+  const esSoloFecha = /^\d{4}-\d{2}-\d{2}$/.test(isoString)
+  const valor = esSoloFecha ? `${isoString}T12:00:00` : isoString
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Argentina/Mendoza',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).format(new Date(isoString))
+  }).format(new Date(valor))
+}
+
+// "A, B y C" -- listado en español sin coma de Oxford, para las líneas de
+// vencimiento agrupadas por fecha ("Aparatos y CrossFit vencen el...").
+function listarConY(nombres) {
+  if (nombres.length <= 1) return nombres[0] ?? ''
+  return `${nombres.slice(0, -1).join(', ')} y ${nombres[nombres.length - 1]}`
 }
 
 // Socios con 2+ lotes que vencen el MISMO día calendario (típico en datos
@@ -207,13 +225,18 @@ function formatVencimientoLotes(lotes) {
   return partes.join(' · ')
 }
 
-// Una fecha de vencimiento pasada solo tiene sentido mostrarla mientras la
-// cuota sigue "activa" (todavía no llegó el día) -- una vez vencida (aunque
-// esté en tolerancia) o si el socio no está realmente activo, mostrar la
-// fecha vieja es más confuso que útil. Esto es SOLO para Aparatos/membresía
-// -- las líneas de créditos de abajo no dependen de `socio.estado` (ese
-// campo es del ciclo de cuota por vencimiento, no tiene sentido para
-// créditos, que se rigen por sus propios lotes).
+// Tope de líneas de fecha ANTES de recortar con "y N más" -- Aparatos +
+// las 3 disciplinas de créditos que existen hoy (CrossFit/Boxeo/
+// Kickstrike) es el máximo real de "grupos de fecha" posibles (4, si cada
+// una vence un día distinto) -- mismo espíritu que MAX_LOTES_EN_DESGLOSE,
+// pero acá el techo real ya es bajo, así que 3 alcanza sin sentirse recortado.
+const MAX_GRUPOS_FECHA_EN_DESGLOSE = 3
+
+// Una fecha de vencimiento pasada nunca se muestra -- si Aparatos ya no
+// está vigente, esa línea directamente no aparece (ver `mostrarAparatos`
+// más abajo). Esto es SOLO para Aparatos/membresía -- las líneas de
+// créditos de abajo no dependen de nada de esto (se rigen por sus propios
+// lotes, ver `agrupados`/`entradasMultiFecha`).
 //
 // BUG REAL (caso Agustina Barbero, DNI 43151174, plan=solo CrossFit):
 // esto mostraba `socios.fecha_vencimiento` SIEMPRE que hubiera un valor y
@@ -226,58 +249,127 @@ function formatVencimientoLotes(lotes) {
 // etiquetas que usan esta misma columna, ver utils/planes.js) antes de
 // mostrar nada.
 //
-// Etiquetado (2+ disciplinas con vencimiento propio, sea Aparatos/Pase
-// Libre + créditos, o 2+ de créditos entre sí): antes esto solo miraba la
-// cantidad de disciplinas de CRÉDITOS (`disciplinasCredito.length > 1`),
-// ignorando si Aparatos también se estaba mostrando -- un socio con
-// Aparatos + 1 sola disciplina de créditos veía 2 fechas SIN etiquetar,
-// indistinguibles entre sí. Ahora se cuenta el total de líneas que se van
-// a mostrar (Aparatos/Pase Libre + cada disciplina de créditos con lotes)
-// y se etiqueta TODO si ese total es 2 o más -- con 1 sola línea, se sigue
-// mostrando sin etiqueta (caso simple, sin cambios).
+// REDISEÑO -- agrupar por FECHA, no por disciplina (antes: una línea POR
+// DISCIPLINA, cada una con su propio texto -- si 2 disciplinas vencían el
+// mismo día, la fecha se repetía dos veces con etiquetas distintas en vez
+// de unificarse en una sola línea). También unifica el estilo visual: la
+// línea de Aparatos vivía en un <span> sin clases (más grande, blanco),
+// distinto del <span className="text-xs text-gray-400"> de créditos --
+// ahora TODAS las líneas de esta celda comparten el mismo estilo.
+//
+// Cada disciplina de créditos aporta UNA fecha al agrupamiento solo si sus
+// lotes ya colapsan a un único día (agruparLotesPorDiaArgentina) -- si
+// genuinamente tiene lotes activos en 2+ días distintos (raro), no hay una
+// sola fecha suya para agrupar con las demás: se muestra en su propia
+// línea, con su desglose de lotes de siempre (formatVencimientoLotes),
+// etiquetada con su nombre apenas haya algo más en la celda.
 function VencimientoCell({ socio }) {
-  const tieneMembresia = tienePlanDeVencimiento(socio.plan)
-  const mostrarAparatos = tieneMembresia && socio.estado === 'activo' && !!socio.fechaVencimiento
-
-  const disciplinasCredito = planesDeCreditos(socio.plan)
-  const lineasCreditos = disciplinasCredito
-    .map((disciplina) => {
-      const entrada = (socio.creditosPwaPorDisciplina ?? []).find(
-        (c) => (c.disciplineName ?? '').trim().toLowerCase() === disciplina.trim().toLowerCase(),
-      )
-      const texto = formatVencimientoLotes(entrada?.lotes)
-      if (!texto) return null
-      return { disciplina, texto }
-    })
-    .filter(Boolean)
-
-  const totalLineas = (mostrarAparatos ? 1 : 0) + lineasCreditos.length
-  const necesitaEtiqueta = totalLineas > 1
+  // FIX -- antes dependía de `socio.estado === 'activo'` como proxy de "¿la
+  // fecha de Aparatos sigue vigente?". `socio.estado` se deriva de
+  // estadoOperativoSocio() (Socios.jsx), que le da una ventana de
+  // tolerancia de varios días (dias_tolerancia, default 5) antes de pasar
+  // a 'vencido' -- bajo el modelo VIEJO, donde fecha_vencimiento era LA
+  // cuota general del socio, esa ventana de gracia tenía sentido. Bajo el
+  // modelo nuevo (acreditar_pack -- un solo plan activo), fecha_vencimiento
+  // pasó a representar específicamente la vigencia de Aparatos del ÚLTIMO
+  // pack -- comparar la fecha directo (mismo patrón que ya usa
+  // tieneAparatosVigente(), reusada acá tal cual) es lo único que
+  // realmente contesta "¿esto sigue vigente ahora mismo?", sin la ventana
+  // de gracia de varios días de por medio (caso real: Facundo Uria, DNI
+  // 44537978 -- con `estado==='activo'` seguía mostrando Aparatos "Vence
+  // el ..." con una fecha ya reseteada).
+  const mostrarAparatos = tieneAparatosVigente(socio)
   // "Aparatos" y "Pase Libre" son las dos etiquetas posibles de la misma
   // columna (fecha_vencimiento) -- en el caso real (uno de los dos
   // tildado) esto da un solo nombre; el `join` es solo para el caso
   // teórico de tener ambos tildados a la vez, sin perder ningún dato.
   const etiquetaMembresia = planesDeVencimiento(socio.plan).join(' + ')
 
-  if (!mostrarAparatos && lineasCreditos.length === 0) {
+  const entradasSimples = [] // { nombre, fechaISO } -- una fecha única por disciplina
+  const entradasMultiFecha = [] // { nombre, texto } -- disciplinas con 2+ fechas propias
+
+  if (mostrarAparatos) {
+    entradasSimples.push({ nombre: etiquetaMembresia, fechaISO: socio.fechaVencimiento })
+  }
+
+  for (const disciplina of planesDeCreditos(socio.plan)) {
+    const entrada = (socio.creditosPwaPorDisciplina ?? []).find(
+      (c) => (c.disciplineName ?? '').trim().toLowerCase() === disciplina.trim().toLowerCase(),
+    )
+    const lotes = entrada?.lotes ?? []
+    if (lotes.length === 0) continue
+    const agrupados = agruparLotesPorDiaArgentina(lotes)
+    if (agrupados.length === 1) {
+      entradasSimples.push({ nombre: disciplina, fechaISO: agrupados[0].expiresAt })
+    } else {
+      entradasMultiFecha.push({ nombre: disciplina, texto: formatVencimientoLotes(lotes) })
+    }
+  }
+
+  if (entradasSimples.length === 0 && entradasMultiFecha.length === 0) {
     return <span className="text-gray-600">—</span>
   }
 
-  // BUG VISUAL (caso real: Agustina Ochoa -- solo Aparatos -- mostraba
-  // "04/10/2026" pelada, mientras Agustina Alvarez -- Aparatos + CrossFit
-  // -- mostraba "Vence el 08/10/2026" con prefijo): la línea de créditos
-  // SIEMPRE pasa por formatVencimientoLotes/formatFecha con el prefijo
-  // "Vence el " (o "X vencen el ") ya incluido, pero la de Aparatos se
-  // armaba con formatFecha() a secas, sin ese prefijo. Unificado -- "Vence
-  // el " va SIEMPRE, con o sin etiqueta de disciplina.
-  const textoAparatos = `Vence el ${formatFecha(socio.fechaVencimiento)}`
+  // Agrupar las entradas de fecha única por día calendario Argentina --
+  // preserva el orden de primera aparición (Aparatos siempre primero,
+  // después créditos en el orden de PLANES_DE_CREDITOS).
+  const porDia = new Map()
+  const ordenDias = []
+  for (const { nombre, fechaISO } of entradasSimples) {
+    const clave = claveDiaArgentina(fechaISO)
+    const existente = porDia.get(clave)
+    if (existente) {
+      existente.nombres.push(nombre)
+    } else {
+      porDia.set(clave, { fechaISO, nombres: [nombre] })
+      ordenDias.push(clave)
+    }
+  }
+  const grupos = ordenDias.map((clave) => porDia.get(clave))
+
+  // UNA sola línea (sea 1 fecha o varias) -- mismo criterio que
+  // formatVencimientoLotes con varios lotes: se listan los grupos
+  // separados por " · ", no una línea por grupo.
+  let textoFechas = null
+  if (grupos.length === 1 && entradasMultiFecha.length === 0) {
+    // TODO cae en una sola fecha -- sin importar cuántas disciplinas sean.
+    const { fechaISO } = grupos[0]
+    const cantidad = entradasSimples.length
+    if (cantidad === 1) {
+      textoFechas = `Vence el ${formatFecha(fechaISO)}`
+    } else if (cantidad === 2) {
+      textoFechas = `Ambos vencen el ${formatFecha(fechaISO)}`
+    } else {
+      textoFechas = `Las ${cantidad} disciplinas vencen el ${formatFecha(fechaISO)}`
+    }
+  } else if (grupos.length > 0) {
+    // 2+ fechas distintas -- "Aparatos y CrossFit vencen el dd/mm · Boxeo
+    // vence el dd/mm", tope de MAX_GRUPOS_FECHA_EN_DESGLOSE grupos antes
+    // de recortar con "y N más" (mismo espíritu que el desglose de lotes).
+    const visibles = grupos.slice(0, MAX_GRUPOS_FECHA_EN_DESGLOSE)
+    const partes = visibles.map(({ fechaISO, nombres }) => {
+      const verbo = nombres.length === 1 ? 'vence' : 'vencen'
+      return `${listarConY(nombres)} ${verbo} el ${formatFecha(fechaISO)}`
+    })
+    const restantes = grupos.length - visibles.length
+    if (restantes > 0) partes.push(`y ${restantes} fecha${restantes > 1 ? 's' : ''} más`)
+    textoFechas = partes.join(' · ')
+  }
+  // grupos.length === 0 (ninguna disciplina con fecha única, ej. cuando lo
+  // único que hay es una disciplina multi-fecha) deja textoFechas en null
+  // -- no hay ninguna línea de fecha-agrupada que armar.
+
+  // Las disciplinas multi-fecha (caso raro) solo llevan su propio nombre
+  // como etiqueta cuando hay algo más en la celda -- si son lo único que
+  // hay, quedan igual que el caso de 1 sola disciplina de siempre.
+  const necesitaEtiquetaMultiFecha = textoFechas !== null || entradasMultiFecha.length > 1
 
   return (
     <div className="flex flex-col gap-0.5">
-      {mostrarAparatos && <span>{necesitaEtiqueta ? `${etiquetaMembresia}: ${textoAparatos}` : textoAparatos}</span>}
-      {lineasCreditos.map(({ disciplina, texto }) => (
-        <span key={disciplina} className="text-xs text-gray-400">
-          {necesitaEtiqueta ? `${disciplina}: ${texto}` : texto}
+      {textoFechas && <span className="text-xs text-gray-400">{textoFechas}</span>}
+      {entradasMultiFecha.map(({ nombre, texto }) => (
+        <span key={nombre} className="text-xs text-gray-400">
+          {necesitaEtiquetaMultiFecha ? `${nombre}: ${texto}` : texto}
         </span>
       ))}
     </div>

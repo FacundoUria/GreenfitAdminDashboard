@@ -188,7 +188,11 @@ describe('VencimientoCell -- desglose de vencimiento por lote de créditos (fix 
     expect(screen.getAllByText('8 vencen el 20/09/2026 · 1 vencen el 15/10/2026').length).toBeGreaterThan(0)
   })
 
-  it('con 2+ disciplinas de créditos, cada línea antepone el nombre de la disciplina', () => {
+  // Rediseño (agrupar por FECHA, no por disciplina): con 2 disciplinas en
+  // fechas DISTINTAS, ya no es "una línea por disciplina" -- es UNA sola
+  // línea con los 2 grupos de fecha unidos por " · " (mismo criterio que
+  // el desglose de lotes de una sola disciplina, ver formatVencimientoLotes).
+  it('con 2+ disciplinas de créditos en fechas distintas, arma una sola línea "X vence el dd/mm · Y vence el dd/mm"', () => {
     const socio = {
       ...SOCIO_CON_FOTO,
       plan: ['CrossFit', 'Boxeo'],
@@ -198,8 +202,7 @@ describe('VencimientoCell -- desglose de vencimiento por lote de créditos (fix 
       ],
     }
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
-    expect(screen.getAllByText('CrossFit: Vence el 05/10/2026').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Boxeo: Vence el 01/11/2026').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('CrossFit vence el 05/10/2026 · Boxeo vence el 01/11/2026').length).toBeGreaterThan(0)
   })
 
   it('Aparatos (membresía) lleva el mismo prefijo "Vence el " que las líneas de créditos', () => {
@@ -288,21 +291,20 @@ describe('VencimientoCell -- fecha_vencimiento solo se muestra si el socio tiene
     expect(screen.queryByText(/CrossFit:/)).toBeNull() // 1 sola línea -- sin etiqueta
   })
 
-  it('socio con Aparatos + 1 disciplina de créditos: 2 fechas, las DOS etiquetadas', () => {
+  it('socio con Aparatos + 1 disciplina de créditos en fechas distintas: una sola línea con las 2 fechas', () => {
     const socio = {
       ...SOCIO_CON_FOTO,
       plan: ['CrossFit', 'Aparatos'],
-      fechaVencimiento: '2026-08-10',
+      fechaVencimiento: '2026-11-10', // vigente -- ver fix de mostrarAparatos, ya compara contra la fecha real
       creditosPwaPorDisciplina: [
         { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 12, lotes: [{ id: 'l1', remainingCredits: 12, expiresAt: '2026-09-23T12:00:00.000Z' }] },
       ],
     }
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
-    expect(screen.getAllByText('Aparatos: Vence el 10/08/2026').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('CrossFit: Vence el 23/09/2026').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Aparatos vence el 10/11/2026 · CrossFit vence el 23/09/2026').length).toBeGreaterThan(0)
   })
 
-  it('socio con 2 disciplinas de créditos y SIN Aparatos: 2 fechas etiquetadas, sin fecha_vencimiento', () => {
+  it('socio con 2 disciplinas de créditos en fechas distintas y SIN Aparatos: una sola línea, sin fecha_vencimiento residual', () => {
     const socio = {
       ...SOCIO_CON_FOTO,
       plan: ['CrossFit', 'Boxeo'],
@@ -313,8 +315,7 @@ describe('VencimientoCell -- fecha_vencimiento solo se muestra si el socio tiene
       ],
     }
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
-    expect(screen.getAllByText('CrossFit: Vence el 05/10/2026').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Boxeo: Vence el 01/11/2026').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('CrossFit vence el 05/10/2026 · Boxeo vence el 01/11/2026').length).toBeGreaterThan(0)
     expect(screen.queryByText(/11\/09\/2026/)).toBeNull()
   })
 
@@ -323,6 +324,108 @@ describe('VencimientoCell -- fecha_vencimiento solo se muestra si el socio tiene
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
     expect(screen.getAllByText('Vence el 31/12/2026').length).toBeGreaterThan(0)
     expect(screen.queryByText(/Aparatos:/)).toBeNull()
+  })
+})
+
+// Rediseño (agrupar Vencimiento por FECHA, no por disciplina): antes,
+// 2 disciplinas que vencían el MISMO día se mostraban en líneas separadas
+// con etiquetas distintas, repitiendo la fecha dos veces. Ahora se agrupa
+// primero por fecha exacta (día calendario Argentina) y recién ahí se
+// decide el texto -- "Ambos vencen"/"Las N disciplinas vencen" cuando
+// TODO cae en una sola fecha, sin importar cuántas disciplinas sean.
+describe('VencimientoCell -- agrupa por FECHA, no por disciplina (rediseño)', () => {
+  it('2 disciplinas el MISMO día -- "Ambos vencen el dd/mm/yyyy"', () => {
+    const socio = {
+      ...SOCIO_CON_FOTO,
+      plan: ['CrossFit', 'Aparatos'],
+      fechaVencimiento: '2026-10-08',
+      creditosPwaPorDisciplina: [
+        { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 4, lotes: [{ id: 'l1', remainingCredits: 4, expiresAt: '2026-10-08T12:00:00.000Z' }] },
+      ],
+    }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('Ambos vencen el 08/10/2026').length).toBeGreaterThan(0)
+  })
+
+  it('3 disciplinas, todas el MISMO día -- "Las 3 disciplinas vencen el dd/mm/yyyy"', () => {
+    const socio = {
+      ...SOCIO_CON_FOTO,
+      plan: ['CrossFit', 'Boxeo', 'Aparatos'],
+      fechaVencimiento: '2026-10-08',
+      creditosPwaPorDisciplina: [
+        { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 4, lotes: [{ id: 'l1', remainingCredits: 4, expiresAt: '2026-10-08T12:00:00.000Z' }] },
+        { disciplineId: 'd-boxeo', disciplineName: 'Boxeo', remainingCredits: 2, lotes: [{ id: 'l2', remainingCredits: 2, expiresAt: '2026-10-08T15:00:00.000Z' }] },
+      ],
+    }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('Las 3 disciplinas vencen el 08/10/2026').length).toBeGreaterThan(0)
+  })
+
+  // Caso del ticket -- 3 disciplinas, 2 fechas: Aparatos y CrossFit
+  // comparten un día, Boxeo vence otro día distinto.
+  it('3 disciplinas con 2+1 -- "Aparatos y CrossFit vencen el dd/mm · Boxeo vence el dd/mm"', () => {
+    const socio = {
+      ...SOCIO_CON_FOTO,
+      plan: ['CrossFit', 'Boxeo', 'Aparatos'],
+      fechaVencimiento: '2026-10-08',
+      creditosPwaPorDisciplina: [
+        { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 4, lotes: [{ id: 'l1', remainingCredits: 4, expiresAt: '2026-10-08T12:00:00.000Z' }] },
+        { disciplineId: 'd-boxeo', disciplineName: 'Boxeo', remainingCredits: 2, lotes: [{ id: 'l2', remainingCredits: 2, expiresAt: '2026-10-15T12:00:00.000Z' }] },
+      ],
+    }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('Aparatos y CrossFit vencen el 08/10/2026 · Boxeo vence el 15/10/2026').length).toBeGreaterThan(0)
+  })
+
+  it('estilo visual unificado -- la línea de Aparatos usa la MISMA clase que la de créditos (sin distinción de tamaño/color)', () => {
+    const socio = { ...SOCIO_SIN_FOTO, fechaVencimiento: '2026-12-31' } // plan: ['Aparatos']
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    const lineas = screen.getAllByText('Vence el 31/12/2026')
+    expect(lineas.length).toBeGreaterThan(0)
+    expect(lineas.every((el) => el.className.includes('text-xs') && el.className.includes('text-gray-400'))).toBe(true)
+  })
+})
+
+// Modelo de "un solo plan activo" (acreditar_pack): antes, mostrarAparatos
+// dependía de `socio.estado === 'activo'` como proxy de "¿Aparatos sigue
+// vigente?" -- `socio.estado` viene de estadoOperativoSocio(), que da una
+// ventana de tolerancia de varios días antes de pasar a 'vencido'. Con
+// fecha_vencimiento representando ahora específicamente la vigencia de
+// Aparatos del ÚLTIMO pack (no la cuota general de siempre), esa ventana
+// de gracia ya no tiene sentido -- si Aparatos no está genuinamente
+// vigente, no se muestra nada, punto. Caso real: Facundo Uria, DNI
+// 44537978 (compró un pack sin Aparatos, pero seguía viendo "Aparatos:
+// Vence el ...").
+describe('VencimientoCell -- Aparatos solo se muestra si está VIGENTE de verdad (fix Facundo Uria)', () => {
+  it('Aparatos con fecha claramente pasada (reseteado por un pack sin Aparatos) -- NO se muestra nada de Aparatos', () => {
+    const socio = { ...SOCIO_SIN_FOTO, estado: 'activo', fechaVencimiento: '2020-01-01' } // plan: ['Aparatos']
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.queryByText(/Vence el/)).toBeNull()
+    expect(screen.queryByText(/2020/)).toBeNull()
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0)
+  })
+
+  it('Aparatos con fecha reseteada, aunque socio.estado siga en "activo" (ventana de tolerancia) -- sigue sin mostrarse', () => {
+    // Simula el caso real exacto: estadoOperativoSocio() todavía no pasó a
+    // 'vencido' (dentro de dias_tolerancia), pero la fecha ya es pasada --
+    // antes esto alcanzaba para seguir mostrando Aparatos.
+    const ayer = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    const fechaAyer = `${ayer.getFullYear()}-${String(ayer.getMonth() + 1).padStart(2, '0')}-${String(ayer.getDate()).padStart(2, '0')}`
+    const socio = { ...SOCIO_SIN_FOTO, estado: 'activo', fechaVencimiento: fechaAyer }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.queryByText(/Vence el/)).toBeNull()
+  })
+
+  it('Aparatos genuinamente vigente -- sigue mostrándose normal', () => {
+    const socio = { ...SOCIO_SIN_FOTO, estado: 'activo', fechaVencimiento: '2099-01-01' }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('Vence el 01/01/2099').length).toBeGreaterThan(0)
+  })
+
+  it('socio.plan tildado en "Aparatos" pero sin ninguna fecha vigente -- tampoco se muestra (ya no depende de socio.plan/estado)', () => {
+    const socio = { ...SOCIO_SIN_FOTO, plan: ['Aparatos'], estado: 'tolerancia', fechaVencimiento: '2020-06-15' }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.queryByText(/Vence el/)).toBeNull()
   })
 })
 
