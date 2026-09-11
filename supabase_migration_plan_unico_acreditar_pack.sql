@@ -125,9 +125,19 @@ begin
 
   -- Aparatos -- cualquier fila todavía vigente deja de estarlo ya mismo,
   -- sin importar si el pack nuevo la va a reemplazar o no.
+  --
+  -- BUG REAL (encontrado probando la Fase 1): `expires_at = now()` deja
+  -- una fecha que, espejada en socios.fecha_vencimiento (una columna
+  -- `date`, sin hora), da EXACTAMENTE hoy. esta_habilitado_para_disciplina()
+  -- compara `fecha_vencimiento >= current_date` -- por DÍA completo, no
+  -- por instante -- así que un reseteo hecho a cualquier hora del día de
+  -- hoy seguía leyendo como "vigente" hasta la medianoche, aunque
+  -- técnicamente ya se había apagado. `now() - interval '1 day'` deja la
+  -- fecha SIEMPRE claramente anterior a hoy, sin ambigüedad para ningún
+  -- chequeo por día completo, sin importar a qué hora se ejecute esto.
   if v_aparatos_discipline_id is not null then
     update user_credits
-    set expires_at = now()
+    set expires_at = now() - interval '1 day'
     where user_id = p_user_id
       and discipline_id = v_aparatos_discipline_id
       and expires_at > now();
@@ -249,9 +259,12 @@ grant execute on function public.acreditar_pack(uuid, uuid, text, text) to authe
 -- 2c) Verificar:
 -- select discipline_id, remaining_credits, expires_at, created_at from user_credits
 -- where user_id = '<USER_ID_PRUEBA>' and discipline_id = '<DISCIPLINE_ID_APARATOS>' order by created_at desc;
--- -- esperado: la fila de Aparatos (la sembrada en 2a) con expires_at <= now() (ya no vigente) -- NINGUNA fila nueva de Aparatos.
--- select fecha_vencimiento from socios where dni = '<DNI_PRUEBA>';
--- -- esperado: fecha_vencimiento = HOY (refleja que Aparatos se apagó), NO la fecha futura vieja.
+-- -- esperado: la fila de Aparatos (la sembrada en 2a) con expires_at = ~ayer (now() - 1 día) -- NINGUNA fila nueva de Aparatos.
+-- select fecha_vencimiento, current_date from socios where dni = '<DNI_PRUEBA>';
+-- -- esperado: fecha_vencimiento = AYER (current_date - 1), claramente pasada -- NO la fecha futura vieja, NI la de hoy.
+-- select esta_habilitado_para_disciplina('<USER_ID_PRUEBA>', '<DISCIPLINE_ID_APARATOS>');
+-- -- esperado: false -- INMEDIATAMENTE después del reseteo, sin importar a qué hora del día se corrió esto (el bug real que este
+-- -- fix cierra: con expires_at=now() esto daba true hasta la medianoche).
 
 -- ── CASO 3: socio con Aparatos vigente, compra un combo que SÍ incluye
 -- Aparatos -- la fecha nueva es hoy+dias_vigencia del pack NUEVO, no una
