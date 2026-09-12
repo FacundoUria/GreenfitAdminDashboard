@@ -1,5 +1,5 @@
 import { CreditCard, MessageCircle, Pencil, UserX, UserCheck } from 'lucide-react'
-import { esPlanDeCreditos, formatearPlanes, planesDeVencimiento, tienePlanDeVencimiento } from '../utils/planes'
+import { esPlanDeCreditos, planesDeVencimiento, tienePlanDeVencimiento } from '../utils/planes'
 import { formatFecha } from '../utils/fecha'
 
 const estadoStyles = {
@@ -46,6 +46,36 @@ function tieneAparatosVigente(socio) {
   if (!socio.fechaVencimiento) return false
   const vencimiento = new Date(`${socio.fechaVencimiento}T00:00:00`)
   return vencimiento.getTime() > Date.now()
+}
+
+// FIX (checkboxes/columna "reflejan la realidad", caso real Valentina
+// Ramon) -- Aparatos vigente = fecha_vencimiento en el futuro, PUNTO --
+// sin el gate `tienePlanDeVencimiento(socio.plan)` que sí tiene
+// tieneAparatosVigente() (usada por VencimientoCell/EstadoBadge, fuera de
+// alcance de este ticket). Pase Libre es un alias de la misma columna/
+// disciplina -- no se distingue, se trata idéntico a Aparatos.
+function aparatosActivoReal(socio) {
+  if (!socio.fechaVencimiento) return false
+  return new Date(`${socio.fechaVencimiento}T00:00:00`).getTime() > Date.now()
+}
+
+// FIX (modelo de "plan único") -- ANTES esta columna mostraba
+// formatearPlanes(socio.plan) tal cual: un campo de texto que Seba edita a
+// mano en "Editar Socio" y que se desincroniza de la realidad con el
+// tiempo -- caso real: Valentina Ramon figuraba con CrossFit activo en
+// esta columna sin tenerlo tildado en el plan (el error inverso del que ya
+// resolvimos en CreditosCell/VencimientoCell: acá el plan mentía por
+// EXCESO, no por defecto). Ahora se calcula en vivo, mismo criterio que
+// esas dos celdas: una disciplina de créditos cuenta si tiene al menos un
+// lote activo (socio.creditosPwaPorDisciplina, ya viene filtrado a eso),
+// Aparatos cuenta si fecha_vencimiento sigue vigente -- socio.plan ya no
+// se lee para nada acá.
+function PlanCell({ socio }) {
+  const nombres = (socio.creditosPwaPorDisciplina ?? []).map((entrada) => entrada.disciplineName)
+  if (aparatosActivoReal(socio)) nombres.unshift('Aparatos')
+
+  if (nombres.length === 0) return <span className="text-gray-600">—</span>
+  return <>{nombres.join(', ')}</>
 }
 
 function EstadoBadge({ socio }) {
@@ -526,7 +556,9 @@ function SocioCard({
         </div>
         <div>
           <p className="text-xs text-gray-500">Plan / Membresía</p>
-          <p className="text-gray-300">{formatearPlanes(socio.plan)}</p>
+          <p className="text-gray-300">
+            <PlanCell socio={socio} />
+          </p>
         </div>
         <div>
           <p className="text-xs text-gray-500">Vencimiento</p>
@@ -653,7 +685,9 @@ function SociosTabla({
                 <td className="px-5 py-3">
                   <EstadoBadge socio={socio} />
                 </td>
-                <td className="px-5 py-3 text-gray-300">{formatearPlanes(socio.plan)}</td>
+                <td className="px-5 py-3 text-gray-300">
+                  <PlanCell socio={socio} />
+                </td>
                 <td className="px-5 py-3">
                   <CreditosCell socio={socio} />
                 </td>

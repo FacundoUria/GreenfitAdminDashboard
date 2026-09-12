@@ -68,6 +68,65 @@ describe('SociosTabla -- avatar sincronizado con la PWA + badge de nivel (Ficha 
   })
 })
 
+// FIX (checkboxes/columna "reflejan la realidad", caso real Valentina
+// Ramon): la columna "Plan / Membresía" mostraba socio.plan tal cual --
+// un campo editado a mano en "Editar Socio" que se desincroniza de la
+// realidad con el tiempo. Valentina figuraba con CrossFit activo en esta
+// columna sin tenerlo tildado en el plan -- el error inverso del que ya
+// resolvió CreditosCell/VencimientoCell (ahí el plan mentía por defecto,
+// acá por exceso). Ahora se calcula en vivo, mismo criterio que esas dos
+// celdas: créditos con al menos un lote activo, o Aparatos con
+// fecha_vencimiento en el futuro -- socio.plan ya no se lee para nada acá.
+describe('PlanCell -- "Plan / Membresía" calculado en vivo, no socios.plan (fix Valentina Ramon)', () => {
+  it('créditos reales en una disciplina NO tildada en el plan -- aparece igual (caso Valentina/Facundo)', () => {
+    const socio = {
+      ...SOCIO_CON_FOTO,
+      plan: ['Boxeo'], // Kickstrike no está acá -- no debería importar
+      creditosPwaPorDisciplina: [{ disciplineId: 'd-kickstrike', disciplineName: 'Kickstrike', remainingCredits: 12 }],
+    }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('Kickstrike').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Boxeo')).toBeNull()
+  })
+
+  it('disciplina tildada en el plan pero SIN ningún lote activo -- no aparece', () => {
+    const socio = { ...SOCIO_CON_FOTO, plan: ['CrossFit'], creditosPwaPorDisciplina: [] }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.queryByText('CrossFit')).toBeNull()
+  })
+
+  it('Aparatos vigente (fecha_vencimiento futura) -- aparece, aunque el plan no tenga Aparatos tildado', () => {
+    const socio = { ...SOCIO_CON_FOTO, plan: ['Boxeo'], fechaVencimiento: '2099-01-01', creditosPwaPorDisciplina: [] }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('Aparatos').length).toBeGreaterThan(0)
+  })
+
+  it('Aparatos tildado en el plan pero con fecha_vencimiento vencida -- no aparece', () => {
+    const socio = { ...SOCIO_CON_FOTO, plan: ['Aparatos'], fechaVencimiento: '2020-01-01', creditosPwaPorDisciplina: [] }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.queryByText('Aparatos')).toBeNull()
+  })
+
+  it('créditos y Aparatos vigentes juntos -- las dos aparecen', () => {
+    const socio = {
+      ...SOCIO_CON_FOTO,
+      plan: [],
+      fechaVencimiento: '2099-01-01',
+      creditosPwaPorDisciplina: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6 }],
+    }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    // PlanCell junta todo en un solo texto ("Aparatos" siempre primero) --
+    // no son 2 nodos separados.
+    expect(screen.getAllByText('Aparatos, CrossFit').length).toBeGreaterThan(0)
+  })
+
+  it('sin nada activo (ni créditos ni Aparatos) -- muestra "—"', () => {
+    const socio = { ...SOCIO_CON_FOTO, plan: ['CrossFit', 'Aparatos'], fechaVencimiento: null, creditosPwaPorDisciplina: [] }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0)
+  })
+})
+
 // Rediseño (sacar los steppers de la tabla): CreditosCell pasó de tener
 // steppers -/+1/+4/+8/+12 por disciplina a ser de SOLO LECTURA -- el ajuste
 // ahora vive en "Editar Socio" (CreditosEditablesSocio.jsx), con un input

@@ -14,7 +14,12 @@ const SOCIO_APARATOS = {
   telefono: '2610000001',
   plan: ['Aparatos'],
   estado: 'Activo',
-  fecha_vencimiento: '2026-08-10',
+  // FIX (checkboxes/vencimiento "reflejan la realidad") -- tiene que ser
+  // una fecha VIGENTE (futura): la sección de vencimiento de "Editar
+  // Socio" ahora depende de que Aparatos esté realmente activo (no de que
+  // esté tildado en socio.plan), así que una fecha ya pasada la ocultaría
+  // entera y este test no encontraría el campo que quiere editar.
+  fecha_vencimiento: '2099-01-01',
   dia_corte: 10,
   created_at: '2025-02-01T00:00:00.000Z',
   ultimo_pago: '2026-07-10',
@@ -46,7 +51,7 @@ test.describe('Admin -- Edición directa de vencimiento (sin pasar por "Cobrar")
     // aclara explícitamente a qué disciplina corresponde -- "Fecha de
     // vencimiento (Aparatos)", no un genérico ambiguo.
     const inputFecha = page.getByLabel('Fecha de vencimiento (Aparatos)')
-    await expect(inputFecha).toHaveValue('2026-08-10')
+    await expect(inputFecha).toHaveValue('2099-01-01')
 
     await inputFecha.fill('2026-09-15')
     await page.getByRole('button', { name: 'Guardar' }).click()
@@ -82,7 +87,13 @@ test.describe('Admin -- Edición directa de vencimiento (sin pasar por "Cobrar")
           user_id: PROFILE_MARTINA.id,
           discipline_id: DISCIPLINA_CROSSFIT.id,
           remaining_credits: 9,
-          expires_at: null,
+          // FIX (checkboxes/vencimiento "reflejan la realidad") -- tiene que
+          // ser un lote realmente ACTIVO (expires_at futuro): la sección de
+          // vencimiento ahora depende de que el socio tenga al menos una
+          // disciplina de créditos con un lote vigente -- con expires_at
+          // null (como antes) fetchCreditosPorDisciplina la descarta entera
+          // y este test no encontraría el campo que quiere editar.
+          expires_at: '2099-01-01T00:00:00.000Z',
           created_at: '2026-07-01T00:00:00.000Z',
         },
       ],

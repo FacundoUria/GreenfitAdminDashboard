@@ -50,12 +50,48 @@ const SOCIO_CROSSFIT = {
   activo: true,
 }
 
+// FIX (checkboxes/columna "reflejan la realidad") -- la columna Plan/
+// Membresía (PlanCell) y Créditos (CreditosCell) ya no leen socio.plan --
+// necesitan un lote ACTIVO real en user_credits para mostrar la
+// disciplina, no alcanza con que esté tildada en el plan.
+const PROFILE_KICKSTRIKE = {
+  id: 'e2e-profile-kick',
+  dni: SOCIO_KICKSTRIKE.dni,
+  full_name: 'Valentina Cruz',
+  avatar_url: null,
+  created_at: '2025-01-01T00:00:00.000Z',
+  role: 'socio',
+}
+
+const PROFILE_CROSSFIT = {
+  id: 'e2e-profile-xfit',
+  dni: SOCIO_CROSSFIT.dni,
+  full_name: 'Nico Paz',
+  avatar_url: null,
+  created_at: '2025-01-01T00:00:00.000Z',
+  role: 'socio',
+}
+
+const EN_30_DIAS = new Date(Date.now() + 30 * 86_400_000).toISOString()
+
 test('un socio con solo Kickstrike no muestra "Aparatos" ni en Plan/Membresía ni en Créditos', async ({ page }) => {
   await loginComoAdmin(page, {
     tables: {
       ...tablasBase(),
       disciplines: [...tablasBase().disciplines, DISCIPLINA_KICKSTRIKE],
       socios: [SOCIO_KICKSTRIKE],
+      profiles: [PROFILE_KICKSTRIKE],
+      user_credits: [
+        {
+          id: 'uc-kick-1',
+          user_id: PROFILE_KICKSTRIKE.id,
+          discipline_id: DISCIPLINA_KICKSTRIKE.id,
+          remaining_credits: 6,
+          expires_at: EN_30_DIAS,
+          created_at: '2026-08-01T00:00:00.000Z',
+          discipline: DISCIPLINA_KICKSTRIKE,
+        },
+      ],
     },
   })
 
@@ -70,7 +106,22 @@ test('un socio con solo Kickstrike no muestra "Aparatos" ni en Plan/Membresía n
 
 test('un socio con solo CrossFit no muestra "Aparatos" ni en Plan/Membresía ni en Créditos', async ({ page }) => {
   await loginComoAdmin(page, {
-    tables: { ...tablasBase(), socios: [SOCIO_CROSSFIT] },
+    tables: {
+      ...tablasBase(),
+      socios: [SOCIO_CROSSFIT],
+      profiles: [PROFILE_CROSSFIT],
+      user_credits: [
+        {
+          id: 'uc-xfit-1',
+          user_id: PROFILE_CROSSFIT.id,
+          discipline_id: DISCIPLINA_CROSSFIT.id,
+          remaining_credits: 3,
+          expires_at: EN_30_DIAS,
+          created_at: '2026-08-01T00:00:00.000Z',
+          discipline: DISCIPLINA_CROSSFIT,
+        },
+      ],
+    },
   })
 
   await irASocios(page)

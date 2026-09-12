@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { X } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { diferenciaEnDias, hoyISO, proximoVencimiento, toISODate } from '../utils/fecha'
@@ -88,8 +88,21 @@ async function esperarCuentaPwa(dni, intentos = 6, esperaMs = 800) {
   return null
 }
 
+// FIX (checkboxes "reflejan la realidad", caso real Valentina Ramon) --
+// Aparatos vigente = fecha_vencimiento en el futuro, sin depender de
+// socio.plan -- mismo criterio que aparatosActivoReal() en SociosTabla.jsx
+// (PlanCell), duplicado acá a propósito: son dos componentes sin relación
+// de import entre sí, y la función es una sola comparación de fecha, no
+// vale la pena crear un módulo compartido por esto. Pase Libre es un alias
+// de la misma columna/disciplina -- se trata idéntico a Aparatos.
+function aparatosActivoReal(socio) {
+  if (!socio?.fechaVencimiento) return false
+  return new Date(`${socio.fechaVencimiento}T00:00:00`).getTime() > Date.now()
+}
+
 function NuevoSocioModal({
   socio,
+  disciplinasActivas = [],
   onClose,
   onSaved,
   onBuscarSocioPorDni,
@@ -108,6 +121,75 @@ function NuevoSocioModal({
   const [coincidenciaNombre, setCoincidenciaNombre] = useState(null)
   const [nombreDescartado, setNombreDescartado] = useState(null)
   const [socioAUnificar, setSocioAUnificar] = useState(null)
+  // FIX (checkboxes "reflejan la realidad") -- en edición, los checkboxes
+  // de Planes/Actividades ya no son un `form.planes` libremente tildable:
+  // se calculan en vivo desde lo que el socio tiene REALMENTE activo hoy
+  // (ver checkboxesEdicion abajo), y la ÚNICA interacción posible es
+  // destildar una disciplina activa -- este set guarda cuáles quedaron
+  // destildadas en esta sesión de edición, sin tocar nada todavía (eso
+  // pasa recién al confirmar y guardar, ver handleSubmit).
+  const [disciplinasDestildadas, setDisciplinasDestildadas] = useState(() => new Set())
+
+  // Filas para los checkboxes en modo edición -- una por disciplina de
+  // créditos del catálogo activo (más cualquiera con crédito activo real
+  // que por algún motivo ya no esté en ese catálogo, para que nunca quede
+  // una disciplina real oculta) + una fila fija de Aparatos. `activo` es
+  // el único criterio real: créditos con al menos un lote vigente, o
+  // Aparatos con fecha_vencimiento en el futuro -- socio.plan no se lee
+  // para nada acá.
+  const checkboxesEdicion = useMemo(() => {
+    if (!esEdicion) return []
+
+    const creditosPorNombre = new Map((socio.creditosPwaPorDisciplina ?? []).map((e) => [e.disciplineName, e]))
+    const catalogoCreditos = new Map(
+      disciplinasActivas.filter((d) => d.kind === 'credits').map((d) => [d.name, d.id]),
+    )
+    for (const [nombre, entrada] of creditosPorNombre) {
+      if (!catalogoCreditos.has(nombre)) catalogoCreditos.set(nombre, entrada.disciplineId)
+    }
+
+    const filas = Array.from(catalogoCreditos.entries()).map(([nombre, disciplineId]) => {
+      const entrada = creditosPorNombre.get(nombre)
+      return {
+        disciplina: nombre,
+        disciplineId,
+        kind: 'credits',
+        activo: !!entrada,
+        remainingCredits: entrada?.remainingCredits ?? 0,
+      }
+    })
+
+    const aparatosDisciplina = disciplinasActivas.find((d) => d.kind === 'membership')
+    filas.push({
+      disciplina: 'Aparatos',
+      disciplineId: aparatosDisciplina?.id ?? null,
+      kind: 'membership',
+      activo: aparatosActivoReal(socio),
+      remainingCredits: null,
+    })
+
+    return filas
+  }, [esEdicion, socio, disciplinasActivas])
+
+  // El plan "efectivo" en edición -- lo que está REALMENTE activo, menos lo
+  // que se destildó en esta sesión (todavía sin guardar). Se usa para el
+  // guard de "algo para guardar" y para lo que termina escribiéndose en
+  // socios.plan -- OJO: la sección de fecha de vencimiento de más abajo
+  // (ticket aparte, Agustina Barbero) sigue leyendo form.planes a
+  // propósito, no esto -- ver el comentario ahí. form.planes sigue siendo
+  // la fuente real en el alta, que no cambia con este ticket.
+  const planesActuales = esEdicion
+    ? checkboxesEdicion.filter((f) => f.activo && !disciplinasDestildadas.has(f.disciplina)).map((f) => f.disciplina)
+    : form.planes
+
+  const handleToggleEdicion = (disciplina) => {
+    setDisciplinasDestildadas((prev) => {
+      const siguiente = new Set(prev)
+      if (siguiente.has(disciplina)) siguiente.delete(disciplina)
+      else siguiente.add(disciplina)
+      return siguiente
+    })
+  }
 
   const handleChange = (field) => (event) => {
     setForm((prev) => ({ ...prev, [field]: event.target.value }))
@@ -176,9 +258,39 @@ function NuevoSocioModal({
       return
     }
 
-    if (form.planes.length === 0) {
+    // Solo en alta -- en edición, quedarse sin ninguna disciplina activa es
+    // un resultado válido de sacarle la última que tenía (ver CAMBIO 2:
+    // "Destildar Aparatos" cuando es lo único activo tiene que poder
+    // guardarse, no bloquearse acá).
+    if (!esEdicion && planesActuales.length === 0) {
       setError('Seleccioná al menos un plan/actividad.')
       return
+    }
+
+    // FIX (CAMBIO 2, checkboxes "reflejan la realidad") -- destildar una
+    // disciplina activa en edición no es un cambio de texto: le saca al
+    // socio créditos reales o el acceso a Aparatos. Se confirma ANTES de
+    // aplicar nada -- si cancela, se deshacen los destildes pendientes (el
+    // checkbox vuelve a mostrarse tildado) y no se guarda nada de nada,
+    // ni siquiera el resto de los cambios del formulario (nombre/teléfono/
+    // etc.) -- más simple y más seguro que un guardado parcial.
+    const disciplinasARemover = esEdicion
+      ? checkboxesEdicion.filter((f) => f.activo && disciplinasDestildadas.has(f.disciplina))
+      : []
+    if (disciplinasARemover.length > 0) {
+      const lineas = disciplinasARemover.map((f) =>
+        f.kind === 'membership'
+          ? 'Perderá el acceso a Aparatos.'
+          : `Perderá sus ${f.remainingCredits} créditos activos de ${f.disciplina}.`,
+      )
+      const nombres = disciplinasARemover.map((f) => f.disciplina).join(', ')
+      const confirmado = window.confirm(
+        `¿Confirmás sacarle ${nombres} a ${socio.nombre} ${socio.apellido}?\n${lineas.join('\n')}`,
+      )
+      if (!confirmado) {
+        setDisciplinasDestildadas(new Set())
+        return
+      }
     }
 
     // Red de seguridad si el aviso en vivo todavía no llegó a dispararse
@@ -199,6 +311,35 @@ function NuevoSocioModal({
     setError(null)
     setSocioDuplicado(null)
 
+    // Se aplica ANTES del UPDATE de `socios` a propósito -- si el RPC
+    // falla acá, se corta sin dejar socios.plan reflejando una
+    // disciplina que en realidad no se pudo sacar de user_credits.
+    if (disciplinasARemover.length > 0) {
+      const userId = await resolverUserIdPorDni(form.dni)
+      if (!userId) {
+        setError('Este socio todavía no tiene cuenta en la app -- no se le puede sacar ninguna disciplina desde acá.')
+        setGuardando(false)
+        return
+      }
+      for (const fila of disciplinasARemover) {
+        if (!fila.disciplineId) {
+          setError(`No se encontró "${fila.disciplina}" en el catálogo de Disciplinas -- revisalo en Configuración.`)
+          setGuardando(false)
+          return
+        }
+        const { error: errorQuitar } = await supabase.rpc('admin_quitar_disciplina_socio', {
+          p_user_id: userId,
+          p_discipline_id: fila.disciplineId,
+        })
+        if (errorQuitar) {
+          console.error('Error al sacar disciplina (admin_quitar_disciplina_socio):', errorQuitar)
+          setError(`No se pudo sacarle ${fila.disciplina} a ${socio.nombre}. Intentá nuevamente.`)
+          setGuardando(false)
+          return
+        }
+      }
+    }
+
     let resultado
     let fechaVencimientoNueva = null
     // Hoisteada igual que fechaVencimientoNueva -- se asigna dentro del
@@ -212,6 +353,14 @@ function NuevoSocioModal({
     // Bug reportado: antes solo se detectaba una edición de vencimiento si
     // había algún plan de Aparatos/Pase Libre tildado -- un socio de
     // CrossFit/Boxeo puro nunca podía cargar/renovar su vencimiento acá.
+    // form.planes acá a propósito, NO planesActuales -- este campo es un
+    // fix aparte (ticket Agustina Barbero), independiente de si el socio
+    // tiene algo REALMENTE activo hoy: existe justamente para poder
+    // corregir a mano la fecha de un socio sin nada vigente (ver el test
+    // "Editar Socio sigue mostrando la fecha_vencimiento REAL y vencida"
+    // en fecha-inteligente-cobro.spec.js) -- con planesActuales ese socio
+    // no tendría ninguna disciplina "activa" y el campo entero
+    // desaparecería, rompiendo esa vía de corrección manual.
     const vencimientoEditado =
       esEdicion && form.planes.length > 0 && !!form.fechaVencimiento && form.fechaVencimiento !== (socio?.fechaVencimiento ?? '')
 
@@ -222,7 +371,12 @@ function NuevoSocioModal({
         dni: form.dni,
         email: form.email,
         telefono: form.telefono,
-        plan: form.planes,
+        // FIX (checkboxes "reflejan la realidad") -- ya no es form.planes
+        // (el estado libremente tildable de siempre) sino planesActuales:
+        // lo que está REALMENTE activo hoy, menos lo que se acaba de sacar
+        // arriba -- socios.plan queda reflejando la realidad post-cambios,
+        // no lo que Seba haya tildado a mano en algún momento anterior.
+        plan: planesActuales,
       }
       if (vencimientoEditado) {
         cambios.fecha_vencimiento = form.fechaVencimiento
@@ -393,6 +547,10 @@ function NuevoSocioModal({
     // el próximo "Registrar Pago" (exactamente el desfase que se pidió cerrar).
     if (esEdicion && vencimientoEditado) {
       const avisos = []
+      // form.planes acá también -- mismo motivo que vencimientoEditado más
+      // arriba: este bloque sincroniza según lo que el campo de fecha
+      // significa (etiquetado desde form.planes), no según qué esté
+      // realmente activo hoy.
       for (const disciplina of planesDeVencimiento(form.planes)) {
         const resultadoSync = await sincronizarVencimientoPwa({
           dni: form.dni,
@@ -522,26 +680,73 @@ function NuevoSocioModal({
 
           <div className="flex flex-col gap-1.5 sm:col-span-2">
             <span className="text-xs font-medium text-gray-400">Planes / Actividades</span>
-            <div className="flex flex-wrap gap-2">
-              {PLANES_DISPONIBLES.map((plan) => (
-                <label
-                  key={plan}
-                  className={`flex min-h-[44px] cursor-pointer items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
-                    form.planes.includes(plan)
-                      ? 'border-greenfit-primary bg-greenfit-primary/10 text-white'
-                      : 'border-white/10 text-gray-300 hover:bg-white/5'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={form.planes.includes(plan)}
-                    onChange={() => handleTogglePlan(plan)}
-                    className="accent-greenfit-primary"
-                  />
-                  {plan}
-                </label>
-              ))}
-            </div>
+            {esEdicion ? (
+              <>
+                {/* FIX (checkboxes "reflejan la realidad", caso real
+                    Valentina Ramon) -- ya no son libremente tildables: cada
+                    uno refleja lo que el socio tiene REALMENTE activo hoy
+                    (créditos con al menos un lote vigente, o Aparatos con
+                    fecha_vencimiento en el futuro). Una disciplina sin nada
+                    activo aparece destildada y DESHABILITADA -- tildarla acá
+                    no acredita nada, para eso está "Registrar Pago". La
+                    única acción posible es destildar una activa, que le
+                    saca esa disciplina al socio al guardar (con
+                    confirmación, ver handleSubmit). */}
+                <div className="flex flex-wrap gap-2">
+                  {checkboxesEdicion.map((fila) => {
+                    const tildado = fila.activo && !disciplinasDestildadas.has(fila.disciplina)
+                    return (
+                      <label
+                        key={fila.disciplina}
+                        title={
+                          fila.activo
+                            ? undefined
+                            : `${fila.disciplina} no tiene ningún lote activo -- para darlo de alta, usá "Registrar Pago"`
+                        }
+                        className={`flex min-h-[44px] items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                          tildado ? 'border-greenfit-primary bg-greenfit-primary/10 text-white' : 'border-white/10 text-gray-300'
+                        } ${fila.activo ? 'cursor-pointer hover:bg-white/5' : 'cursor-not-allowed opacity-50'}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={tildado}
+                          disabled={!fila.activo}
+                          onChange={() => handleToggleEdicion(fila.disciplina)}
+                          className="accent-greenfit-primary"
+                        />
+                        {fila.disciplina}
+                      </label>
+                    )
+                  })}
+                </div>
+                <p className="text-[11px] text-gray-500">
+                  Reflejan lo que el socio tiene activo ahora mismo en la app -- créditos reales o Aparatos vigente,
+                  nunca lo que esté tildado a mano. Destildar una disciplina activa se la saca al socio (con
+                  confirmación); una sin nada activo no se puede tildar desde acá.
+                </p>
+              </>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {PLANES_DISPONIBLES.map((plan) => (
+                  <label
+                    key={plan}
+                    className={`flex min-h-[44px] cursor-pointer items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                      form.planes.includes(plan)
+                        ? 'border-greenfit-primary bg-greenfit-primary/10 text-white'
+                        : 'border-white/10 text-gray-300 hover:bg-white/5'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={form.planes.includes(plan)}
+                      onChange={() => handleTogglePlan(plan)}
+                      className="accent-greenfit-primary"
+                    />
+                    {plan}
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
 
           {esEdicion &&
@@ -557,6 +762,13 @@ function NuevoSocioModal({
               // esconderlo, se aclara explícitamente a qué disciplina(s)
               // se aplica, para que no se confunda con "el vencimiento de
               // Aparatos" cuando el socio no lo tiene.
+              //
+              // form.planes acá a propósito, NO planesActuales -- este
+              // campo (ticket Agustina Barbero) es independiente de si el
+              // socio tiene algo REALMENTE activo hoy: existe justamente
+              // para poder corregir a mano la fecha de un socio sin nada
+              // vigente. Gatearlo con planesActuales lo ocultaría
+              // exactamente en el caso que más lo necesita.
               const membresias = planesDeVencimiento(form.planes)
               const creditos = planesDeCreditos(form.planes)
               const tieneMembresia = membresias.length > 0

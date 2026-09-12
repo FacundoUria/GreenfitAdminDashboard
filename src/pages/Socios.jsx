@@ -736,6 +736,7 @@ function Socios() {
         <NuevoSocioModal
           key={socioEnEdicion?.id ?? 'nuevo'}
           socio={socioEnEdicion}
+          disciplinasActivas={disciplinasActivas}
           onClose={() => {
             setModalAbierto(false)
             setSocioEnEdicion(null)
