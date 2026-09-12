@@ -95,12 +95,19 @@ export function proximoVencimiento(fechaBase, diaCorte) {
   return new Date(anio, mesSiguiente, dia)
 }
 
-// Estado visual de la cuota según la fecha de vencimiento fija. `diasTolerancia`
-// viene de la Configuración del gimnasio (por defecto 5, igual que en la base).
+// Estado visual de la cuota según la fecha de vencimiento fija.
 // `fechaReferencia` permite evaluar "¿cómo estaba esta cuota en tal fecha?" en vez
 // de siempre comparar contra hoy — lo usan los reportes históricos, ya que no
 // guardamos un historial de vencimientos pasados, solo el ciclo vigente.
-export function calcularEstadoCuota(fechaVencimiento, diasTolerancia = 5, fechaReferencia = new Date()) {
+//
+// CAMBIO 1 (sacar "En Tolerancia" del todo, Admin y PWA, sin excepción) --
+// ANTES esto devolvía 'tolerancia' cuando el vencimiento estaba pasado pero
+// todavía dentro de `diasTolerancia` (ventana de gracia configurable en
+// Configuración, default 5 días). Se sacó por completo: pasado el
+// vencimiento, es 'vencido' de inmediato, sin ningún margen. `dias_tolerancia`
+// sigue existiendo como columna en `configuracion` (no se borró de la base),
+// pero ya no se lee acá ni en ningún otro cálculo de estado.
+export function calcularEstadoCuota(fechaVencimiento, fechaReferencia = new Date()) {
   if (!fechaVencimiento) return null
 
   const vencimiento = fechaVencimiento instanceof Date ? fechaVencimiento : new Date(`${fechaVencimiento}T00:00:00`)
@@ -113,7 +120,5 @@ export function calcularEstadoCuota(fechaVencimiento, diasTolerancia = 5, fechaR
   const msPorDia = 1000 * 60 * 60 * 24
   const diasVencido = Math.round((referencia.getTime() - vencimiento.getTime()) / msPorDia)
 
-  if (diasVencido <= 0) return 'activo'
-  if (diasVencido <= diasTolerancia) return 'tolerancia'
-  return 'vencido'
+  return diasVencido <= 0 ? 'activo' : 'vencido'
 }

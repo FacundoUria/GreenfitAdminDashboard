@@ -16,7 +16,7 @@ import { supabase } from '../lib/supabaseClient'
 import { colorOcupacion } from '../utils/ocupacion'
 import { diaActualPorDefecto, fechaDeEstaSemana, mapearClasesDesdeBookings } from '../utils/clases'
 import { getSocioMetrics, estadoOperativoSocio } from '../utils/socioMetrics'
-import { useConfiguracion } from '../context/useConfiguracion'
+import { fetchCreditosPorDisciplina } from '../utils/fichaSocioPwa'
 import ActividadReciente from '../components/ActividadReciente'
 
 const usuario = 'Seba'
@@ -42,12 +42,17 @@ function diasHastaVencimiento(socio) {
 
 function Home() {
   const navigate = useNavigate()
-  const { configuracion } = useConfiguracion()
-  const diasTolerancia = configuracion?.dias_tolerancia ?? 5
   const [socios, setSocios] = useState([])
   const [clasesHoy, setClasesHoy] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  // Créditos REALES de la PWA por disciplina (user_credits), en batch --
+  // mismo dato/mismo criterio que Socios.jsx (fetchCreditosPorDisciplina).
+  // CAMBIO 3 (bug real: "Activo" sin nada real): estadoOperativoSocio()
+  // necesita esto para decidir bien un socio 100% créditos, sin
+  // fecha_vencimiento -- sin este merge, Home volvería a mostrar más
+  // "Socios Activos" de los que realmente hay, igual que el bug original.
+  const [creditosPorDni, setCreditosPorDni] = useState(new Map())
 
   const fetchDatos = async () => {
     setLoading(true)
@@ -98,13 +103,25 @@ function Home() {
     fetchDatos()
   }, [])
 
+  // Aparte del fetch principal -- si falla o tarda no debe bloquear el
+  // resto del Dashboard, mismo criterio que Socios.jsx.
+  useEffect(() => {
+    if (socios.length === 0) return
+    fetchCreditosPorDisciplina(socios.map((s) => s.dni)).then(setCreditosPorDni)
+  }, [socios])
+
+  const sociosConCreditos = useMemo(
+    () => socios.map((s) => ({ ...s, creditosPwaPorDisciplina: creditosPorDni.get(s.dni) ?? [] })),
+    [socios, creditosPorDni],
+  )
+
   // getSocioMetrics() es la MISMA función que usa Socios.jsx para sus
   // tarjetas de KPI -- fuente única de verdad, así los números de acá y los
   // de Socios coinciden siempre (antes no: acá se ignoraba a los socios sin
   // fecha_vencimiento, en Socios cualquiera de esos caía a un texto legacy).
-  const { activos: sociosActivos, vencidos: cuotasVencidas, tolerancia: sociosTolerancia } = useMemo(
-    () => getSocioMetrics(socios, diasTolerancia),
-    [socios, diasTolerancia],
+  const { activos: sociosActivos, vencidos: cuotasVencidas } = useMemo(
+    () => getSocioMetrics(sociosConCreditos),
+    [sociosConCreditos],
   )
 
   const proximasClases = useMemo(() => {
@@ -115,18 +132,18 @@ function Home() {
     return (restantes.length > 0 ? restantes : clasesHoy).slice(0, 4)
   }, [clasesHoy])
 
-  // "Por vencer" = ACTIVO (no vencido, no en tolerancia) y con fecha_vencimiento
-  // dentro de los próximos DIAS_POR_VENCER días. El chequeo de estado es
-  // explícito (no alcanza con diasRestantes >= 0) para que quede claro que
-  // esto excluye a propósito a los que ya están vencidos o en tolerancia.
+  // "Por vencer" = ACTIVO (no vencido) y con fecha_vencimiento dentro de los
+  // próximos DIAS_POR_VENCER días. El chequeo de estado es explícito (no
+  // alcanza con diasRestantes >= 0) para que quede claro que esto excluye a
+  // propósito a los que ya están vencidos.
   const sociosPorVencerCompleto = useMemo(
     () =>
-      socios
-        .filter((s) => estadoOperativoSocio(s, diasTolerancia) === 'activo')
+      sociosConCreditos
+        .filter((s) => estadoOperativoSocio(s) === 'activo')
         .map((s) => ({ id: s.id, nombre: s.nombre, apellido: s.apellido, diasRestantes: diasHastaVencimiento(s) }))
         .filter((s) => s.diasRestantes !== null && s.diasRestantes >= 0 && s.diasRestantes <= DIAS_POR_VENCER)
         .sort((a, b) => a.diasRestantes - b.diasRestantes),
-    [socios, diasTolerancia],
+    [sociosConCreditos],
   )
   const sociosPorVencer = useMemo(() => sociosPorVencerCompleto.slice(0, 5), [sociosPorVencerCompleto])
 
@@ -156,16 +173,6 @@ function Home() {
       value: `${cuotasVencidas}`,
       icon: AlertCircle,
       alerta: cuotasVencidas > 0,
-    },
-    {
-      testId: 'kpi-tolerancia',
-      label: 'En Tolerancia',
-      // Aclara explícitamente cuántos días de gracia contempla -- antes
-      // decía solo "En Tolerancia" sin indicar el rango, y `diasTolerancia`
-      // es configurable (Configuración > días de tolerancia), no siempre 5.
-      subtitulo: `1 a ${diasTolerancia} día${diasTolerancia === 1 ? '' : 's'} vencido`,
-      value: `${sociosTolerancia}`,
-      icon: Clock,
     },
     {
       testId: 'kpi-por-vencer',

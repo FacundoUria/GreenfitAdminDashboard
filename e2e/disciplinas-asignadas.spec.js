@@ -184,6 +184,11 @@ test('alta de socio nuevo CON créditos iniciales de 2 disciplinas -- ambas qued
     // condición de carrera en sí -- eso ya lo cubre el propio código de
     // esperarCuentaPwa, no es el foco de este test.
     profiles: [PROFILE_FACUNDO],
+    // Explícito en [] -- sin esto, se heredaría la fila real de Martina que
+    // trae tablasBase() (CAMBIO 3, ver fixtures.js), que comparte
+    // discipline_id='disc-crossfit' con Facundo y falseaba el conteo de
+    // abajo (esperaba 1 fila de CrossFit, encontraba 2).
+    user_credits: [],
   }
   await loginComoAdmin(page, {
     tables,

@@ -37,6 +37,29 @@ export const XP_EVENTS_MARTINA = [
 export const DISCIPLINA_CROSSFIT = { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' }
 export const DISCIPLINA_APARATOS = { id: 'disc-aparatos', name: 'Aparatos', kind: 'membership' }
 
+// CAMBIO 3 (bug real: "Activo" sin nada real) -- Martina es un socio de
+// CrossFit puro (fecha_vencimiento: null a propósito, nunca tuvo Aparatos).
+// ANTES, sin fecha_vencimiento, estadoOperativoSocio() la daba "Activo" a
+// ciegas -- ahora exige un crédito REAL vigente en user_credits. `creditos:
+// 4` en SOCIO_MARTINA ya "decía" que tenía 4 créditos (el pozo global
+// legacy) -- esta fila es la contraparte real que respalda ese número bajo
+// el modelo nuevo, para que TODA la suite que usa tablasBase() sin tocar
+// `user_credits` (Ficha 360°, tabla de Socios, etc.) la siga viendo
+// "Activa" por defecto, igual que siempre.
+export const USER_CREDITS_MARTINA = [
+  {
+    id: 'uc-martina-crossfit',
+    user_id: PROFILE_MARTINA.id,
+    discipline_id: DISCIPLINA_CROSSFIT.id,
+    remaining_credits: 4,
+    expires_at: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+    created_at: '2026-07-01T00:00:00.000Z',
+    // `discipline: {...}` embebido a mano -- el mock (supabaseMock.js) no
+    // resuelve joins reales.
+    discipline: DISCIPLINA_CROSSFIT,
+  },
+]
+
 export function tablasBase() {
   return {
     socios: [SOCIO_MARTINA],
@@ -44,6 +67,7 @@ export function tablasBase() {
     xp_events: [...XP_EVENTS_MARTINA],
     disciplines: [DISCIPLINA_CROSSFIT, DISCIPLINA_APARATOS],
     configuracion: [{ id: 1, dias_tolerancia: 5, limite_cancelacion_minutos: 120, alias_cvu: null, titular_cuenta: null }],
+    user_credits: [...USER_CREDITS_MARTINA],
     bookings: [],
     classes: [],
     routines: [],

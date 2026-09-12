@@ -10,11 +10,11 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { AlertCircle, Clock, Download, Loader2, UserPlus, Users } from 'lucide-react'
+import { AlertCircle, Download, Loader2, UserPlus, Users } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { esDelMesActual } from '../utils/fecha'
 import { estadoOperativoSocio, getSocioMetrics } from '../utils/socioMetrics'
-import { useConfiguracion } from '../context/useConfiguracion'
+import { fetchCreditosPorDisciplina } from '../utils/fichaSocioPwa'
 
 const DIAS_SEMANA_LABELS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
 
@@ -173,12 +173,15 @@ function ChartCard({ title, data, exportFilename, tipo = 'line', dataKeyX = 'mes
 }
 
 function Reportes() {
-  const { configuracion } = useConfiguracion()
-  const diasTolerancia = configuracion?.dias_tolerancia ?? 5
   const [socios, setSocios] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [rango, setRango] = useState('6m')
+  // Créditos REALES de la PWA por disciplina, en batch -- mismo dato/mismo
+  // criterio que Home.jsx/Socios.jsx. CAMBIO 3 (bug real: "Activo" sin nada
+  // real): estadoOperativoSocio() lo necesita para decidir bien un socio
+  // 100% créditos, sin fecha_vencimiento.
+  const [creditosPorDni, setCreditosPorDni] = useState(new Map())
 
   const fetchSocios = async () => {
     setLoading(true)
@@ -202,21 +205,31 @@ function Reportes() {
     fetchSocios()
   }, [])
 
+  // Aparte del fetch principal -- mismo criterio que Home.jsx/Socios.jsx.
+  useEffect(() => {
+    if (socios.length === 0) return
+    fetchCreditosPorDisciplina(socios.map((s) => s.dni)).then(setCreditosPorDni)
+  }, [socios])
+
+  const sociosConCreditos = useMemo(
+    () => socios.map((s) => ({ ...s, creditosPwaPorDisciplina: creditosPorDni.get(s.dni) ?? [] })),
+    [socios, creditosPorDni],
+  )
+
   // Mismo criterio EXACTO que ya usan Home.jsx y Socios.jsx -- antes acá se
   // llamaba a calcularEstadoCuota() directo, que solo mira fecha_vencimiento
   // y no sabe nada de `socio.activo`. Un socio dado de baja con
   // fecha_vencimiento todavía futura contaba como "Activo" en Reportes,
   // mientras Home/Socios ya lo excluían (lo cuentan aparte, como
-  // "inactivo"). getSocioMetrics() es la fuente única para estos 3 números
+  // "inactivo"). getSocioMetrics() es la fuente única para estos números
   // en todo el panel -- si cambia el criterio de negocio en el futuro,
   // alcanza con tocarlo ahí una sola vez.
-  const metricasVigentes = useMemo(() => getSocioMetrics(socios, diasTolerancia), [socios, diasTolerancia])
+  const metricasVigentes = useMemo(() => getSocioMetrics(sociosConCreditos), [sociosConCreditos])
 
   const kpis = useMemo(
     () => [
       { label: 'Socios Activos', value: metricasVigentes.activos, icon: Users },
       { label: 'Cuota Vencida', value: metricasVigentes.vencidos, icon: AlertCircle },
-      { label: 'En Tolerancia', value: metricasVigentes.tolerancia, icon: Clock },
       {
         label: 'Nuevos del mes',
         value: socios.filter((s) => esDelMesActual(s.created_at)).length,
@@ -266,17 +279,17 @@ function Reportes() {
       meses.map((fecha) => {
         const finDeMes = new Date(fecha.getFullYear(), fecha.getMonth() + 1, 0, 23, 59, 59)
 
-        const valor = socios.filter((s) => {
+        const valor = sociosConCreditos.filter((s) => {
           if (!s.created_at) return false
           const alta = new Date(s.created_at)
           if (alta > finDeMes) return false
 
-          return estadoOperativoSocio(s, diasTolerancia, finDeMes) === 'activo'
+          return estadoOperativoSocio(s, finDeMes) === 'activo'
         }).length
 
         return { mes: formatearMes(fecha, conAnio), valor }
       }),
-    [socios, meses, conAnio, diasTolerancia],
+    [sociosConCreditos, meses, conAnio],
   )
 
   const sociosNuevosData = useMemo(

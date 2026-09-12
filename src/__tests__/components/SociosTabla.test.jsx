@@ -494,10 +494,10 @@ describe('VencimientoCell -- Aparatos solo se muestra si está VIGENTE de verdad
     expect(screen.getAllByText('—').length).toBeGreaterThan(0)
   })
 
-  it('Aparatos con fecha reseteada, aunque socio.estado siga en "activo" (ventana de tolerancia) -- sigue sin mostrarse', () => {
-    // Simula el caso real exacto: estadoOperativoSocio() todavía no pasó a
-    // 'vencido' (dentro de dias_tolerancia), pero la fecha ya es pasada --
-    // antes esto alcanzaba para seguir mostrando Aparatos.
+  it('Aparatos con fecha reseteada, aunque socio.estado siga en "activo" (dato desactualizado) -- sigue sin mostrarse', () => {
+    // Simula un `socio.estado` desactualizado (calculado en otro momento),
+    // con la fecha ya pasada -- antes esto alcanzaba para seguir mostrando
+    // Aparatos.
     const ayer = new Date(Date.now() - 24 * 60 * 60 * 1000)
     const fechaAyer = `${ayer.getFullYear()}-${String(ayer.getMonth() + 1).padStart(2, '0')}-${String(ayer.getDate()).padStart(2, '0')}`
     const socio = { ...SOCIO_SIN_FOTO, estado: 'activo', fechaVencimiento: fechaAyer }
@@ -512,78 +512,92 @@ describe('VencimientoCell -- Aparatos solo se muestra si está VIGENTE de verdad
   })
 
   it('socio.plan tildado en "Aparatos" pero sin ninguna fecha vigente -- tampoco se muestra (ya no depende de socio.plan/estado)', () => {
-    const socio = { ...SOCIO_SIN_FOTO, plan: ['Aparatos'], estado: 'tolerancia', fechaVencimiento: '2020-06-15' }
+    const socio = { ...SOCIO_SIN_FOTO, plan: ['Aparatos'], estado: 'vencido', fechaVencimiento: '2020-06-15' }
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
     expect(screen.queryByText(/Vence el/)).toBeNull()
   })
 })
 
-// Bug real detectado en la auditoría de Socios: EstadoBadge ("Con
-// Créditos"/"Sin Créditos") leía `socio.creditos` -- el pozo global viejo,
-// que no se siembra al alta (sincronizarCreditosPwa solo escribe
-// user_credits) ni baja con el consumo real (book_class/cancel_booking
-// tampoco lo tocan). Ahora usa la misma fuente real que CreditosCell/
-// VencimientoCell -- `socio.creditosPwaPorDisciplina` (suma de lotes
-// activos) + `socio.fechaVencimiento` para Aparatos.
-describe('EstadoBadge -- "Con/Sin Créditos" migrado a la fuente real (lotes activos), no socios.creditos', () => {
-  it('caso "alta nueva": créditos reales pero socios.creditos=0 -- ahora muestra "Con Créditos"', () => {
+// CAMBIO 2/3/4 (simplificar estados de Socios + arreglar "Activo" sin nada
+// real + sacar el gate por socio.plan) -- reescritura completa de
+// EstadoBadge. ANTES eran 3+ variantes: "Con/Sin Créditos" (gateado por
+// esPlanDeCreditos(socio.plan), el mismo campo STALE que PlanCell/
+// CreditosCell ya habían dejado de leer) para unos socios, "Activo"/"Cuota
+// Vencida"/"En Tolerancia"/"Pendiente" (leyendo socio.estado) para el
+// resto. Ahora es UNA sola regla para TODOS: "Activo" exige un lote de
+// créditos real vigente en cualquier disciplina, O Aparatos con
+// fecha_vencimiento futura -- sin mirar socio.plan ni socio.estado para
+// nada. Cualquier otro caso (incluida la cuota vencida) muestra "Inactivo",
+// con el MISMO estilo que el dado de baja.
+describe('EstadoBadge -- "Activo"/"Inactivo" sobre datos reales, sin gate por socio.plan (CAMBIO 2/3/4)', () => {
+  it('créditos reales vigentes en alguna disciplina -- "Activo"', () => {
     const socio = {
       ...SOCIO_CON_FOTO,
-      creditos: 0, // el pozo global nunca se sembró al alta
       creditosPwaPorDisciplina: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 12, lotes: [{ id: 'l1', remainingCredits: 12, expiresAt: '2099-01-01T12:00:00.000Z' }] }],
     }
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
-    expect(screen.getAllByText('Con Créditos').length).toBeGreaterThan(0)
-    expect(screen.queryByText('Sin Créditos')).toBeNull()
+    expect(screen.getAllByText('Activo').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Inactivo')).toBeNull()
   })
 
-  it('caso "gastó todo": socios.creditos>0 pero sin ningún lote activo real -- ahora muestra "Sin Créditos"', () => {
+  it('sin ningún lote activo real (gastó todo) y sin Aparatos vigente -- "Inactivo"', () => {
     const socio = {
       ...SOCIO_CON_FOTO,
-      creditos: 8, // el pozo global nunca bajó con el consumo real
       creditosPwaPorDisciplina: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 0, lotes: [] }],
     }
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
-    expect(screen.getAllByText('Sin Créditos').length).toBeGreaterThan(0)
-    expect(screen.queryByText('Con Créditos')).toBeNull()
+    expect(screen.getAllByText('Inactivo').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Activo')).toBeNull()
   })
 
-  it('Aparatos vigente sin créditos de otras disciplinas -- muestra "Con Créditos" (plan combinado)', () => {
+  it('Aparatos vigente sin créditos de otras disciplinas -- "Activo" (plan combinado)', () => {
     const socio = {
       ...SOCIO_CON_FOTO,
       plan: ['CrossFit', 'Aparatos'],
-      creditos: 0,
       creditosPwaPorDisciplina: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 0, lotes: [] }],
       fechaVencimiento: '2099-01-01',
     }
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
-    expect(screen.getAllByText('Con Créditos').length).toBeGreaterThan(0)
-    expect(screen.queryByText('Sin Créditos')).toBeNull()
+    expect(screen.getAllByText('Activo').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Inactivo')).toBeNull()
   })
 
-  it('sin créditos activos y sin Aparatos vigente -- sigue "Sin Créditos"', () => {
+  it('sin créditos activos y sin Aparatos vigente -- "Inactivo"', () => {
     const socio = {
       ...SOCIO_CON_FOTO,
-      creditos: 0,
       creditosPwaPorDisciplina: [],
     }
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
-    expect(screen.getAllByText('Sin Créditos').length).toBeGreaterThan(0)
-    expect(screen.queryByText('Con Créditos')).toBeNull()
+    expect(screen.getAllByText('Inactivo').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Activo')).toBeNull()
   })
 
-  // Caso real (Agustina Barbero, DNI 43151174, plan=solo CrossFit): una
-  // fecha_vencimiento residual (sin Aparatos real en el plan) NO tiene que
-  // poder disfrazar a un socio sin créditos reales como "Con Créditos".
-  it('fecha_vencimiento residual (futura) SIN Aparatos en el plan -- NO cuenta como "vigente", sigue "Sin Créditos"', () => {
+  // CAMBIO 4 -- antes, una fecha_vencimiento futura SIN Aparatos tildado en
+  // socio.plan no contaba como "vigente" (el gate esPlanDeCreditos/
+  // tienePlanDeVencimiento). Ahora EstadoBadge ya NO mira socio.plan para
+  // nada (mismo criterio que PlanCell/aparatosActivoReal): una fecha
+  // futura SIEMPRE cuenta como Aparatos vigente, sin importar el plan.
+  it('CAMBIO 4 -- fecha_vencimiento futura SIN Aparatos en el plan SÍ cuenta como vigente ahora (ya no depende de socio.plan)', () => {
     const socio = {
       ...SOCIO_CON_FOTO, // plan: ['CrossFit']
-      creditos: 0,
-      fechaVencimiento: '2099-01-01', // stray -- no le corresponde a nada de su plan actual
+      fechaVencimiento: '2099-01-01',
       creditosPwaPorDisciplina: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 0, lotes: [] }],
     }
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
-    expect(screen.getAllByText('Sin Créditos').length).toBeGreaterThan(0)
-    expect(screen.queryByText('Con Créditos')).toBeNull()
+    expect(screen.getAllByText('Activo').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Inactivo')).toBeNull()
+  })
+
+  // CAMBIO 2 -- "Cuota Vencida" y "dado de baja" ya no se distinguen en el
+  // badge: los dos muestran "Inactivo", con el MISMO estilo visual.
+  it('CAMBIO 2 -- cuota vencida (socio.activo=true, sin nada vigente) y dado de baja muestran el MISMO "Inactivo"', () => {
+    const socioVencido = { ...SOCIO_CON_FOTO, activo: true, creditosPwaPorDisciplina: [] }
+    const socioBaja = { ...SOCIO_CON_FOTO, id: 's2', activo: false, creditosPwaPorDisciplina: [] }
+    render(<SociosTabla socios={[socioVencido, socioBaja]} {...HANDLERS} />)
+
+    const badges = screen.getAllByText('Inactivo')
+    expect(badges.length).toBeGreaterThan(0)
+    const clasesUnicas = new Set(badges.map((el) => el.className))
+    expect(clasesUnicas.size).toBe(1) // un solo estilo, sin distinguir la razón
   })
 })

@@ -1,20 +1,6 @@
 import { CreditCard, MessageCircle, Pencil, UserX, UserCheck } from 'lucide-react'
-import { esPlanDeCreditos, planesDeVencimiento, tienePlanDeVencimiento } from '../utils/planes'
+import { planesDeVencimiento, tienePlanDeVencimiento } from '../utils/planes'
 import { formatFecha } from '../utils/fecha'
-
-const estadoStyles = {
-  activo: 'bg-greenfit-primary/15 text-greenfit-primary',
-  vencido: 'bg-red-500/15 text-red-400',
-  tolerancia: 'bg-amber-500/15 text-amber-400',
-  pendiente: 'bg-amber-500/15 text-amber-400',
-}
-
-const estadoLabels = {
-  activo: 'Activo',
-  vencido: 'Cuota Vencida',
-  tolerancia: 'En Tolerancia',
-  pendiente: 'Pendiente',
-}
 
 // Créditos por LOTES (ver supabase_migration_lotes_creditos_fase1/2.sql):
 // `socio.creditosPwaPorDisciplina` (batch vía fetchCreditosPorDisciplina en
@@ -78,48 +64,50 @@ function PlanCell({ socio }) {
   return <>{nombres.join(', ')}</>
 }
 
+// Estilo/label ÚNICO para "no tiene nada real vigente" -- lo comparten el
+// dado de baja y el que simplemente no tiene crédito/Aparatos activo (ver
+// EstadoBadge). Antes eran 3+ variantes visuales distintas (gris para baja,
+// rojo para "Cuota Vencida"/"Sin Créditos", ámbar para "En Tolerancia"/
+// "Pendiente") -- CAMBIO 2 las unifica: una sola apariencia para "Inactivo".
+const CLASES_INACTIVO = 'bg-white/10 text-gray-400'
+const CLASES_ACTIVO = 'bg-greenfit-primary/15 text-greenfit-primary'
+
+// CAMBIO 2/3/4 (simplificar estados de Socios + arreglar el bug de
+// "Activo" sin nada real + sacar el gate por socio.plan) -- reescritura
+// completa. Antes esto era 3 ramas separadas: dado de baja ("Inactivo"),
+// `esPlanDeCreditos(socio.plan)` ("Con/Sin Créditos", gateado por un campo
+// STALE que el resto de la tabla -- PlanCell/CreditosCell -- ya había
+// dejado de leer, mismo bug ya resuelto ahí) y el resto (Activo/Vencido/
+// Tolerancia/Pendiente, leyendo el `estado` calculado por
+// estadoOperativoSocio). Ahora es UNA sola pregunta, sobre datos reales,
+// sin mirar socio.plan ni socio.estado para nada:
+//
+//   ¿tiene ALGO vigente hoy? (un lote de créditos activo en cualquier
+//   disciplina, O Aparatos con fecha_vencimiento futura -- aparatosActivoReal,
+//   la misma función SIN gate por plan que ya usa PlanCell más abajo).
+//
+// Sí -> "Activo". No -> "Inactivo" -- con el MISMO estilo/label para el
+// dado de baja, el que tiene la cuota vencida y el que simplemente nunca
+// tuvo nada real: la razón de fondo sigue viva en estadoOperativoSocio()/
+// getSocioMetrics() (Home/Reportes siguen contando "vencido" aparte de
+// "dado de baja"), acá es puramente una etiqueta de presentación.
 function EstadoBadge({ socio }) {
-  // La baja de cuenta es más fundamental que el estado de pago -- un socio
-  // dado de baja se marca así sin importar si tiene créditos o la cuota al día.
   if (socio.activo === false) {
     return (
-      <span className="inline-flex shrink-0 items-center rounded-full bg-white/10 px-2.5 py-1 text-xs font-medium text-gray-400">
+      <span className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium ${CLASES_INACTIVO}`}>
         Inactivo
       </span>
     )
   }
 
-  if (esPlanDeCreditos(socio.plan)) {
-    // BUG REAL (ver auditoría de Socios): esto leía `socio.creditos`, el
-    // pozo global viejo -- nunca se siembra al alta (sincronizarCreditosPwa
-    // solo escribe user_credits) ni baja con el consumo real (book_class/
-    // cancel_booking tampoco lo tocan), así que podía mostrar "Sin
-    // Créditos" a un socio recién dado de alta con créditos reales, o "Con
-    // Créditos" a uno que ya gastó todo. Ahora usa la MISMA fuente real que
-    // las columnas Créditos/Vencimiento: al menos un lote activo en
-    // cualquier disciplina de créditos, O Aparatos vigente (un socio con
-    // plan combinado -- ej. CrossFit + Aparatos -- sigue "Con Créditos" si
-    // le queda Aparatos, aunque los créditos de CrossFit se hayan agotado).
-    const sinCreditos = !tieneCreditosActivos(socio.creditosPwaPorDisciplina) && !tieneAparatosVigente(socio)
-    return (
-      <span
-        className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium ${
-          sinCreditos ? 'bg-red-500/15 text-red-400' : 'bg-greenfit-primary/15 text-greenfit-primary'
-        }`}
-      >
-        {sinCreditos ? 'Sin Créditos' : 'Con Créditos'}
-      </span>
-    )
-  }
-
-  const clave = (socio.estado ?? '').toLowerCase()
+  const tieneAlgoActivo = tieneCreditosActivos(socio.creditosPwaPorDisciplina) || aparatosActivoReal(socio)
   return (
     <span
       className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium ${
-        estadoStyles[clave] ?? 'bg-white/10 text-gray-300'
+        tieneAlgoActivo ? CLASES_ACTIVO : CLASES_INACTIVO
       }`}
     >
-      {estadoLabels[clave] ?? socio.estado ?? 'Sin estado'}
+      {tieneAlgoActivo ? 'Activo' : 'Inactivo'}
     </span>
   )
 }
@@ -297,7 +285,7 @@ const MAX_GRUPOS_FECHA_EN_DESGLOSE = 3
 function VencimientoCell({ socio }) {
   // FIX -- antes dependía de `socio.estado === 'activo'` como proxy de "¿la
   // fecha de Aparatos sigue vigente?". `socio.estado` se deriva de
-  // estadoOperativoSocio() (Socios.jsx), que le da una ventana de
+  // estadoOperativoSocio() (Socios.jsx), que ANTES le daba una ventana de
   // tolerancia de varios días (dias_tolerancia, default 5) antes de pasar
   // a 'vencido' -- bajo el modelo VIEJO, donde fecha_vencimiento era LA
   // cuota general del socio, esa ventana de gracia tenía sentido. Bajo el
@@ -305,10 +293,12 @@ function VencimientoCell({ socio }) {
   // pasó a representar específicamente la vigencia de Aparatos del ÚLTIMO
   // pack -- comparar la fecha directo (mismo patrón que ya usa
   // tieneAparatosVigente(), reusada acá tal cual) es lo único que
-  // realmente contesta "¿esto sigue vigente ahora mismo?", sin la ventana
-  // de gracia de varios días de por medio (caso real: Facundo Uria, DNI
-  // 44537978 -- con `estado==='activo'` seguía mostrando Aparatos "Vence
-  // el ..." con una fecha ya reseteada).
+  // realmente contesta "¿esto sigue vigente ahora mismo?", sin ninguna
+  // ventana de gracia de por medio (caso real: Facundo Uria, DNI 44537978
+  // -- con `estado==='activo'` seguía mostrando Aparatos "Vence el ..." con
+  // una fecha ya reseteada). CAMBIO 1 (ticket aparte) sacó la tolerancia
+  // del todo -- este comentario documenta por qué VencimientoCell nunca la
+  // necesitó ni siquiera cuando existía.
   const mostrarAparatos = tieneAparatosVigente(socio)
   // "Aparatos" y "Pase Libre" son las dos etiquetas posibles de la misma
   // columna (fecha_vencimiento) -- en el caso real (uno de los dos

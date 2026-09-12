@@ -40,7 +40,10 @@ const SOCIO_SIN_DNI = {
 
 test.describe('Admin -- Socios sin DNI cargado (import masivo de Crossfy)', () => {
   test('un socio sin DNI cargado no muestra la sección de Créditos en "Editar Socio" -- no hay nada que tocar', async ({ page }) => {
-    const tablas = { ...tablasBase(), socios: [SOCIO_SIN_DNI] }
+    // user_credits explícito en [] -- sin esto, se heredaría la fila real
+    // de Martina que trae tablasBase() (CAMBIO 3, ver fixtures.js), ajena a
+    // este socio y a este test.
+    const tablas = { ...tablasBase(), socios: [SOCIO_SIN_DNI], user_credits: [] }
     await loginComoAdmin(page, { tables: tablas })
 
     await irASocios(page)
@@ -49,11 +52,12 @@ test.describe('Admin -- Socios sin DNI cargado (import masivo de Crossfy)', () =
     await expect(page.getByRole('heading', { name: 'Editar Socio' })).toBeVisible()
 
     // Sin DNI, fetchCreditosPorDisciplina no resuelve ningún user_id -- no
-    // hay ninguna disciplina con lotes que mostrar, así que la sección
-    // entera de Créditos no aparece (nada que clickear, ningún RPC que
-    // pueda dispararse por accidente).
+    // hay ninguna disciplina con lotes que mostrar, y sin userId tampoco se
+    // puede ofrecer "+ Agregar Aparatos" (destinado a fallar siempre) --
+    // la sección entera de Créditos no aparece (nada que clickear, ningún
+    // RPC que pueda dispararse por accidente).
     await expect(page.getByRole('heading', { name: 'Créditos', exact: true })).toHaveCount(0)
-    expect(tablas.user_credits ?? []).toHaveLength(0)
+    expect(tablas.user_credits).toHaveLength(0)
   })
 
   test('un socio CON DNI sigue pudiendo sumar créditos normalmente desde "Editar Socio" (no se rompió el caso sano)', async ({

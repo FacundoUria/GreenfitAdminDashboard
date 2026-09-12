@@ -9,10 +9,6 @@ import Reportes from '../../pages/Reportes'
 // unificados con estadoOperativoSocio()/getSocioMetrics()) lo excluían
 // correctamente. Fix: mismo criterio en los 3 lugares.
 
-vi.mock('../../context/useConfiguracion', () => ({
-  useConfiguracion: () => ({ configuracion: { dias_tolerancia: 5 } }),
-}))
-
 // recharts necesita dimensiones reales del DOM (ResponsiveContainer) que
 // jsdom no provee -- se mockea a algo simple que expone `data` como
 // atributo inspeccionable, en vez de pelear contra el layout real del SVG.
@@ -44,8 +40,28 @@ import { supabase } from '../../lib/supabaseClient'
 
 const mockedFrom = supabase.from
 
-function makeChain(socios) {
-  return { select: vi.fn().mockResolvedValue({ data: socios, error: null }) }
+// Thenable CON `.in()` -- Reportes.jsx hace `supabase.from('socios').select('*')`
+// (awaited directo), pero desde CAMBIO 3 también llama a
+// fetchCreditosPorDisciplina() (utils/fichaSocioPwa.js), que encadena
+// `.select(...).in(...)` sobre `profiles`/`user_credits`. Un solo objeto que
+// sea awaitable Y tenga `.in()` (ambos resolviendo al mismo resultado) cubre
+// los dos patrones sin duplicar el mock.
+function makeChain(data) {
+  const resultado = { data, error: null }
+  return {
+    select: vi.fn().mockReturnValue({
+      then: (resolve) => resolve(resultado),
+      in: vi.fn().mockResolvedValue(resultado),
+    }),
+  }
+}
+
+// Los fixtures de este archivo no dependen de créditos reales (todos tienen
+// fecha_vencimiento propia o activo=false) -- `profiles`/`user_credits`
+// vacíos alcanza; fetchCreditosPorDisciplina() simplemente no encuentra
+// ninguna cuenta PWA y devuelve un Map vacío, sin afectar ningún assert.
+function mockSupabaseTables(socios) {
+  mockedFrom.mockImplementation((tabla) => (tabla === 'socios' ? makeChain(socios) : makeChain([])))
 }
 
 // Alta bien antigua -- cae dentro de CUALQUIER mes del rango por defecto (6
@@ -85,19 +101,27 @@ const SOCIO_BAJA_VENCIMIENTO_FUTURO = {
 describe('Reportes -- KPIs y "Socios Activos (mensual)" excluyen a los dados de baja (mismo criterio que Home/Socios)', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('un socio dado de baja con fecha_vencimiento futura NO cuenta como "Socios Activos", ni como Vencida ni Tolerancia', async () => {
-    mockedFrom.mockReturnValue(makeChain([SOCIO_ACTIVO_NORMAL, SOCIO_BAJA_VENCIMIENTO_FUTURO]))
+  it('un socio dado de baja con fecha_vencimiento futura NO cuenta como "Socios Activos", ni como Cuota Vencida', async () => {
+    mockSupabaseTables([SOCIO_ACTIVO_NORMAL, SOCIO_BAJA_VENCIMIENTO_FUTURO])
     render(<Reportes />)
 
     const activos = await screen.findByText('Socios Activos')
     expect(activos.nextElementSibling).toHaveTextContent('1') // solo el normal -- el dado de baja queda afuera
 
     expect(screen.getByText('Cuota Vencida').nextElementSibling).toHaveTextContent('0')
-    expect(screen.getByText('En Tolerancia').nextElementSibling).toHaveTextContent('0')
+  })
+
+  // CAMBIO 1 -- la tarjeta "En Tolerancia" se sacó del todo.
+  it('CAMBIO 1 -- ya no muestra ninguna tarjeta "En Tolerancia"', async () => {
+    mockSupabaseTables([SOCIO_ACTIVO_NORMAL])
+    render(<Reportes />)
+
+    await screen.findByText('Socios Activos')
+    expect(screen.queryByText('En Tolerancia')).toBeNull()
   })
 
   it('el gráfico "Socios Activos (mensual)" tampoco cuenta al dado de baja en NINGÚN mes del rango', async () => {
-    mockedFrom.mockReturnValue(makeChain([SOCIO_ACTIVO_NORMAL, SOCIO_BAJA_VENCIMIENTO_FUTURO]))
+    mockSupabaseTables([SOCIO_ACTIVO_NORMAL, SOCIO_BAJA_VENCIMIENTO_FUTURO])
     render(<Reportes />)
 
     // El primer <LineChart> renderizado es "Socios Activos (mensual)" --
@@ -110,11 +134,32 @@ describe('Reportes -- KPIs y "Socios Activos (mensual)" excluyen a los dados de 
   })
 
   it('un socio activo normal (sin baja) sigue contando en "Socios Activos" -- sin cambios', async () => {
-    mockedFrom.mockReturnValue(makeChain([SOCIO_ACTIVO_NORMAL]))
+    mockSupabaseTables([SOCIO_ACTIVO_NORMAL])
     render(<Reportes />)
 
     const activos = await screen.findByText('Socios Activos')
     expect(activos.nextElementSibling).toHaveTextContent('1')
+  })
+
+  // CAMBIO 3 (bug real: "Activo" sin nada real) -- un socio 100% créditos
+  // (sin fecha_vencimiento) que ya gastó todo NO debe contar como "Socios
+  // Activos" en Reportes, mismo criterio que Home/Socios.
+  it('CAMBIO 3 -- socio de créditos sin fecha_vencimiento y sin ningún crédito real vigente NO cuenta como "Socios Activos"', async () => {
+    const socioSinNadaReal = {
+      id: 's4',
+      nombre: 'Cristian',
+      apellido: 'Créditos',
+      dni: '30444555',
+      activo: true,
+      estado: 'Vencido',
+      fecha_vencimiento: null,
+      created_at: ALTA_ANTIGUA,
+    }
+    mockSupabaseTables([socioSinNadaReal])
+    render(<Reportes />)
+
+    const activos = await screen.findByText('Socios Activos')
+    expect(activos.nextElementSibling).toHaveTextContent('0')
   })
 
   it('regresión -- "Nuevos del mes" sigue contando altas de este mes sin importar activo/baja (no se tocó ese criterio)', async () => {
@@ -122,7 +167,7 @@ describe('Reportes -- KPIs y "Socios Activos (mensual)" excluyen a los dados de 
     const creadoEsteMes = new Date(hoy.getFullYear(), hoy.getMonth(), 5).toISOString()
     const socioBajaNuevo = { ...SOCIO_BAJA_VENCIMIENTO_FUTURO, id: 's3', created_at: creadoEsteMes }
 
-    mockedFrom.mockReturnValue(makeChain([socioBajaNuevo]))
+    mockSupabaseTables([socioBajaNuevo])
     render(<Reportes />)
 
     const nuevos = await screen.findByText('Nuevos del mes')
@@ -134,7 +179,7 @@ describe('Reportes -- KPIs y "Socios Activos (mensual)" excluyen a los dados de 
     const creadoEsteMes = new Date(hoy.getFullYear(), hoy.getMonth(), 5).toISOString()
     const socioBajaNuevo = { ...SOCIO_BAJA_VENCIMIENTO_FUTURO, id: 's3', created_at: creadoEsteMes }
 
-    mockedFrom.mockReturnValue(makeChain([socioBajaNuevo]))
+    mockSupabaseTables([socioBajaNuevo])
     render(<Reportes />)
 
     const barChart = await screen.findByTestId('bar-chart')

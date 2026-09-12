@@ -3,7 +3,6 @@ import { useSearchParams } from 'react-router-dom'
 import {
   AlertCircle,
   CheckCircle2,
-  Clock,
   Loader2,
   MessageCircle,
   Plus,
@@ -22,7 +21,6 @@ import SociosTabla from '../components/SociosTabla'
 import NuevoSocioModal from '../components/NuevoSocioModal'
 import RegistrarPagoModal from '../components/RegistrarPagoModal'
 import WhatsAppModal from '../components/WhatsAppModal'
-import { useConfiguracion } from '../context/useConfiguracion'
 import { useAuth } from '../context/useAuth'
 
 function Toast({ message }) {
@@ -36,21 +34,28 @@ function Toast({ message }) {
 
 const DIAS_POR_VENCER = 5
 
+// CAMBIO 2 (simplificar estados de Socios) -- ANTES había 2 opciones
+// separadas para "no está al día": 'vencido' (cuota vencida, socio.activo
+// sigue true) e 'inactivo_cuenta' (dado de baja, socio.activo=false). Se
+// unifican en una sola 'inactivo' -- ambos casos se ven y filtran igual,
+// sin distinguir la razón (ver coincideEstado más abajo y EstadoBadge en
+// SociosTabla.jsx). La distinción interna sigue viva en getSocioMetrics()/
+// estadoOperativoSocio() -- Home/Reportes siguen contando bien "Cuota
+// Vencida" aparte de "dados de baja"; acá solo se simplificó QUÉ se puede
+// elegir en el desplegable.
 const filtroOptions = [
   { value: 'activo', label: 'Activo' },
-  { value: 'vencido', label: 'Cuota Vencida' },
   { value: 'por_vencer', label: `Por Vencer (${DIAS_POR_VENCER} días)` },
-  { value: 'tolerancia', label: 'En Tolerancia' },
+  { value: 'inactivo', label: 'Inactivo' },
   { value: 'nuevo', label: 'Nuevos del Mes' },
-  { value: 'inactivo_cuenta', label: 'Inactivos (dados de baja)' },
   { value: 'todos', label: 'Todos' },
 ]
 
 const filtroPlanOptions = [{ value: 'todos', label: 'Todos los planes' }, ...PLANES_DISPONIBLES.map((p) => ({ value: p, label: p }))]
 
-// Activo (no vencido, no en tolerancia) y con fecha_vencimiento dentro de los
-// próximos DIAS_POR_VENCER días -- mismo criterio que usa el widget del
-// Dashboard, para que el número que ves ahí y lo que filtra acá coincidan.
+// Activo (no vencido) y con fecha_vencimiento dentro de los próximos
+// DIAS_POR_VENCER días -- mismo criterio que usa el widget del Dashboard,
+// para que el número que ves ahí y lo que filtra acá coincidan.
 function estaPorVencer(socio) {
   if (socio.estado !== 'activo' || !socio.fechaVencimiento) return false
   const vencimiento = new Date(`${socio.fechaVencimiento}T00:00:00`)
@@ -70,7 +75,7 @@ function mapearSocio(row) {
     plan: row.plan,
     // Texto libre guardado en `estado`, usado solo como fallback si todavía no
     // tiene fecha_vencimiento. El estado visual real se calcula reactivamente
-    // más abajo, porque depende de `dias_tolerancia` (Configuración).
+    // más abajo (estadoOperativoSocio), a partir de datos reales.
     estadoDb: (row.estado ?? '').toLowerCase(),
     fechaVencimiento: row.fecha_vencimiento,
     diaCorte: row.dia_corte,
@@ -85,9 +90,7 @@ function mapearSocio(row) {
 }
 
 function Socios() {
-  const { configuracion } = useConfiguracion()
   const { usuario } = useAuth()
-  const diasTolerancia = configuracion?.dias_tolerancia ?? 5
   const [searchParams] = useSearchParams()
 
   const [socios, setSocios] = useState([])
@@ -194,46 +197,46 @@ function Socios() {
     () =>
       socios.map((socio) => {
         const gamificacion = gamificacionPorDni.get(socio.dni)
+        // CAMBIO 3 (bug real: "Activo" sin nada real) -- estadoOperativoSocio()
+        // necesita `creditosPwaPorDisciplina` YA mergeado para poder decidir
+        // bien un socio 100% créditos, sin fecha_vencimiento -- se arma el
+        // objeto completo ANTES de llamarla, no después.
+        const creditosPwaPorDisciplina = creditosPorDni.get(socio.dni) ?? []
         return {
           ...socio,
-          estado: estadoOperativoSocio(socio, diasTolerancia),
+          estado: estadoOperativoSocio({ ...socio, creditosPwaPorDisciplina }),
           avatarUrl: gamificacion?.avatarUrl ?? null,
           nivelXp: gamificacion?.nivel ?? null,
-          creditosPwaPorDisciplina: creditosPorDni.get(socio.dni) ?? [],
+          creditosPwaPorDisciplina,
         }
       }),
-    [socios, diasTolerancia, gamificacionPorDni, creditosPorDni],
+    [socios, gamificacionPorDni, creditosPorDni],
   )
 
   const counts = useMemo(() => {
-    const metrics = getSocioMetrics(sociosConEstado, diasTolerancia)
+    const metrics = getSocioMetrics(sociosConEstado)
     return {
       activo: metrics.activos,
       vencido: metrics.vencidos,
-      tolerancia: metrics.tolerancia,
       nuevo: sociosConEstado.filter((s) => esDelMesActual(s.fechaInicio)).length,
     }
-  }, [sociosConEstado, diasTolerancia])
+  }, [sociosConEstado])
 
   // testId comparte prefijo con las tarjetas equivalentes de Home.jsx
-  // (kpi-activos/kpi-vencidos/kpi-tolerancia) a propósito -- permite a un
-  // test E2E leer "el mismo número" en las dos pantallas sin depender del
-  // texto exacto de la etiqueta (que además difiere: "Cuotas Vencidas" en
-  // Home vs "Cuota Vencida" acá).
+  // (kpi-activos/kpi-vencidos) a propósito -- permite a un test E2E leer
+  // "el mismo número" en las dos pantallas sin depender del texto exacto de
+  // la etiqueta (que además difiere: "Cuotas Vencidas" en Home vs "Cuota
+  // Vencida" acá).
+  //
+  // CAMBIO 2 -- la tarjeta "Cuota Vencida" sigue mostrando el conteo
+  // PRECISO de vencidos (counts.vencido, sin dados de baja mezclados), pero
+  // al hacer click filtra por 'inactivo' -- el desplegable ya no tiene una
+  // opción 'vencido' separada (ver filtroOptions), así que no hay a qué
+  // filtro exacto apuntarla; 'inactivo' es la opción que más se acerca (la
+  // incluye) sin dejar el <select> en un valor que ninguna <option> matchea.
   const kpis = [
     { key: 'activo', testId: 'kpi-activos', label: 'Socios Activos', value: counts.activo, icon: Users },
-    { key: 'vencido', testId: 'kpi-vencidos', label: 'Cuota Vencida', value: counts.vencido, icon: AlertCircle },
-    {
-      key: 'tolerancia',
-      testId: 'kpi-tolerancia',
-      label: 'En Tolerancia',
-      // Mismo criterio de claridad que la tarjeta equivalente de Home --
-      // aclara el rango de días de gracia configurado en vez de un genérico
-      // "En Tolerancia" sin contexto.
-      subtitulo: `1 a ${diasTolerancia} día${diasTolerancia === 1 ? '' : 's'} vencido`,
-      value: counts.tolerancia,
-      icon: Clock,
-    },
+    { key: 'inactivo', testId: 'kpi-vencidos', label: 'Cuota Vencida', value: counts.vencido, icon: AlertCircle },
     { key: 'nuevo', testId: 'kpi-nuevos', label: 'Nuevos del Mes', value: counts.nuevo, icon: UserPlus },
   ]
 
@@ -246,21 +249,23 @@ function Socios() {
         `${socio.nombre} ${socio.apellido}`.toLowerCase().includes(termino) ||
         (socio.dni ?? '').toLowerCase().includes(termino)
 
-      // La baja de cuenta es un estado aparte del estado de pago -- un socio
-      // dado de baja no debe mezclarse en Activo/Vencido/etc, solo aparece
-      // en "Inactivos" o en "Todos".
+      // CAMBIO 2 -- 'inactivo' agrupa TANTO al dado de baja (socio.activo
+      // === false) COMO al de cuota vencida (estadoOperativoSocio ya
+      // devuelve 'inactivo' para el primer caso y 'vencido' para el
+      // segundo, ver socioMetrics.js) -- ya no son dos opciones separadas
+      // del desplegable (antes 'inactivo_cuenta' y 'vencido').
       const coincideEstado =
         filtroEstado === 'todos'
           ? true
-          : filtroEstado === 'inactivo_cuenta'
-            ? socio.activo === false
+          : filtroEstado === 'inactivo'
+            ? socio.estado === 'inactivo' || socio.estado === 'vencido'
             : socio.activo === false
               ? false
               : filtroEstado === 'nuevo'
                 ? esDelMesActual(socio.fechaInicio)
                 : filtroEstado === 'por_vencer'
                   ? estaPorVencer(socio)
-                  : (socio.estado ?? '').toLowerCase() === filtroEstado
+                  : socio.estado === filtroEstado // 'activo'
 
       const coincidePlan = filtroPlan === 'todos' || (socio.plan ?? []).includes(filtroPlan)
 

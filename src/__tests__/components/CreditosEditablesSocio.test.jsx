@@ -9,10 +9,11 @@ vi.mock('../../utils/fichaSocioPwa', () => ({
 vi.mock('../../utils/creditosPwa', () => ({
   fijarCreditosDisciplina: vi.fn(),
   ajustarCreditoDisciplina: vi.fn(),
+  agregarAparatosSocio: vi.fn(),
 }))
 
 import { resolverUserIdPorDni, fetchCreditosPorDisciplina } from '../../utils/fichaSocioPwa'
-import { fijarCreditosDisciplina, ajustarCreditoDisciplina } from '../../utils/creditosPwa'
+import { fijarCreditosDisciplina, ajustarCreditoDisciplina, agregarAparatosSocio } from '../../utils/creditosPwa'
 import CreditosEditablesSocio from '../../components/CreditosEditablesSocio'
 
 // DNI real del ticket (Facundo Uria) -- caso que expuso el bug del modelo de
@@ -37,10 +38,29 @@ describe('CreditosEditablesSocio (reemplaza a los steppers sueltos de SociosTabl
     vi.spyOn(window, 'alert').mockImplementation(() => {})
   })
 
-  it('sin ninguna disciplina con lotes activos, no renderiza nada (una vez resuelta la carga)', async () => {
+  // CAMBIO 5 -- ANTES (sin "+ Agregar Aparatos" todavía) esto no renderizaba
+  // nada: sin lotes activos y sin `disciplinasActivas`, no había nada que
+  // agregar. Ahora Aparatos SIEMPRE es addable si no está vigente (no
+  // depende de `disciplinasActivas`, que es solo el catálogo de créditos) --
+  // la sección se muestra igual, con el botón "+ Agregar Aparatos".
+  it('sin ninguna disciplina con lotes activos y sin Aparatos vigente -- igual muestra "+ Agregar Aparatos"', async () => {
     mockearCarga({ entradas: [] })
 
-    const { container } = render(<CreditosEditablesSocio socio={{ id: 's2', dni: DNI_FACUNDO, plan: ['Aparatos'] }} />)
+    render(<CreditosEditablesSocio socio={{ id: 's2', dni: DNI_FACUNDO, plan: ['Aparatos'] }} />)
+
+    await waitFor(() => expect(fetchCreditosPorDisciplina).toHaveBeenCalled())
+    expect(await screen.findByRole('button', { name: /Agregar Aparatos/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Agregar disciplina/ })).toBeNull()
+  })
+
+  // Caso genuinamente vacío: sin lotes, sin disciplinas de créditos para
+  // agregar Y con Aparatos YA vigente -- ahí sí no queda nada que mostrar.
+  it('sin nada activo, sin disciplinas para agregar Y con Aparatos ya vigente -- no renderiza nada', async () => {
+    mockearCarga({ entradas: [] })
+
+    const { container } = render(
+      <CreditosEditablesSocio socio={{ id: 's2', dni: DNI_FACUNDO, plan: ['Aparatos'], fechaVencimiento: '2099-01-01' }} />,
+    )
 
     await waitFor(() => expect(fetchCreditosPorDisciplina).toHaveBeenCalled())
     await waitFor(() => expect(container.innerHTML).toBe(''))
@@ -395,5 +415,116 @@ describe('CreditosEditablesSocio -- "+ Agregar disciplina" (CAMBIO 2)', () => {
     expect(screen.queryByLabelText('Disciplina a agregar')).toBeNull()
     expect(screen.getByRole('button', { name: /Agregar disciplina/ })).toBeTruthy()
     expect(fijarCreditosDisciplina).not.toHaveBeenCalled()
+  })
+})
+
+// CAMBIO 5 -- "+ Agregar Aparatos": camino corto para volver a darle
+// Aparatos a un socio al que se le sacó (admin_quitar_disciplina_socio),
+// sin pasar por "Registrar Pago" completo. Sin cantidad -- solo confirmar.
+describe('CreditosEditablesSocio -- "+ Agregar Aparatos" (CAMBIO 5)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.spyOn(window, 'confirm')
+    vi.spyOn(window, 'alert').mockImplementation(() => {})
+  })
+
+  it('Aparatos NO vigente (sin fechaVencimiento) -- muestra el botón "+ Agregar Aparatos"', async () => {
+    mockearCarga({
+      entradas: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6, lotes: [] }],
+    })
+
+    render(<CreditosEditablesSocio socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit'] }} />)
+
+    await screen.findByText('CrossFit')
+    expect(screen.getByRole('button', { name: /Agregar Aparatos/ })).toBeTruthy()
+  })
+
+  it('Aparatos YA vigente (fechaVencimiento futura) -- NO muestra el botón', async () => {
+    mockearCarga({
+      entradas: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6, lotes: [] }],
+    })
+
+    render(
+      <CreditosEditablesSocio socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit'], fechaVencimiento: '2099-01-01' }} />,
+    )
+
+    await screen.findByText('CrossFit')
+    expect(screen.queryByRole('button', { name: /Agregar Aparatos/ })).toBeNull()
+  })
+
+  it('confirmar -- llama a agregarAparatosSocio(userId), sin cantidad ni fecha, y refresca al padre', async () => {
+    mockearCarga({
+      entradas: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6, lotes: [] }],
+    })
+    window.confirm.mockReturnValue(true)
+    const onCreditosActualizados = vi.fn()
+
+    render(
+      <CreditosEditablesSocio
+        socio={{ id: 's1', dni: DNI_FACUNDO, nombre: 'Facundo', apellido: 'Uria', plan: ['CrossFit'] }}
+        onCreditosActualizados={onCreditosActualizados}
+      />,
+    )
+
+    await screen.findByText('CrossFit')
+    fireEvent.click(screen.getByRole('button', { name: /Agregar Aparatos/ }))
+
+    expect(window.confirm).toHaveBeenCalledWith('¿Confirmás agregarle Aparatos a Facundo Uria?')
+    await waitFor(() => expect(agregarAparatosSocio).toHaveBeenCalledWith('user-1'))
+    expect(agregarAparatosSocio.mock.calls[0]).toHaveLength(1) // solo userId -- sin discipline_id ni cantidad
+    await waitFor(() => expect(onCreditosActualizados).toHaveBeenCalled())
+    // El botón desaparece de inmediato en esta misma sesión del modal, sin
+    // esperar a que el padre vuelva a pasar `socio.fechaVencimiento` actualizado.
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Agregar Aparatos/ })).toBeNull())
+  })
+
+  it('si se cancela la confirmación, NO llama a ningún RPC', async () => {
+    mockearCarga({
+      entradas: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6, lotes: [] }],
+    })
+    window.confirm.mockReturnValue(false)
+
+    render(<CreditosEditablesSocio socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit'] }} />)
+
+    await screen.findByText('CrossFit')
+    fireEvent.click(screen.getByRole('button', { name: /Agregar Aparatos/ }))
+
+    expect(window.confirm).toHaveBeenCalled()
+    expect(agregarAparatosSocio).not.toHaveBeenCalled()
+  })
+
+  // Mismo criterio de "ausencia de UI en vez de alert en runtime" que ya
+  // rige el resto de esta sección (ver creditos-sin-dni.spec.js) -- sin
+  // userId resuelto, el botón directamente no se muestra (destinado a
+  // fallar siempre), en vez de mostrarse y alertar recién al clickearlo.
+  it('socio sin cuenta PWA todavía (userId null) -- no muestra el botón "+ Agregar Aparatos"', async () => {
+    mockearCarga({
+      userId: null,
+      entradas: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6, lotes: [] }],
+    })
+
+    render(<CreditosEditablesSocio socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit'] }} />)
+
+    await screen.findByText('CrossFit')
+    expect(screen.queryByRole('button', { name: /Agregar Aparatos/ })).toBeNull()
+    expect(agregarAparatosSocio).not.toHaveBeenCalled()
+  })
+
+  it('si el RPC rechaza (ej. "ya vigente" por una carrera con otro cambio), avisa el mensaje real y el botón sigue disponible', async () => {
+    mockearCarga({
+      entradas: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6, lotes: [] }],
+    })
+    window.confirm.mockReturnValue(true)
+    agregarAparatosSocio.mockRejectedValue(new Error('El socio ya tiene Aparatos vigente -- no hay nada que agregar.'))
+
+    render(<CreditosEditablesSocio socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit'] }} />)
+
+    await screen.findByText('CrossFit')
+    fireEvent.click(screen.getByRole('button', { name: /Agregar Aparatos/ }))
+
+    await waitFor(() =>
+      expect(window.alert).toHaveBeenCalledWith('El socio ya tiene Aparatos vigente -- no hay nada que agregar.'),
+    )
+    expect(screen.getByRole('button', { name: /Agregar Aparatos/ })).toBeTruthy()
   })
 })

@@ -8,7 +8,6 @@ import PlanesPacksCard from '../components/PlanesPacksCard'
 
 function mapConfigToForm(config) {
   return {
-    diasTolerancia: String(config.dias_tolerancia ?? 5),
     limiteCancelacionMinutos: String(config.limite_cancelacion_minutos ?? (config.limite_cancelacion_hs ?? 2) * 60),
     xpPorReserva: String(config.xp_por_reserva ?? 100),
     aliasCvu: config.alias_cvu ?? '',
@@ -111,7 +110,6 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
     setError(null)
 
     let payload = {
-      dias_tolerancia: Number(form.diasTolerancia) || 0,
       limite_cancelacion_minutos: Number(form.limiteCancelacionMinutos) || 0,
       xp_por_reserva: Number(form.xpPorReserva) || 0,
       alias_cvu: form.aliasCvu,
@@ -216,12 +214,12 @@ function ConfiguracionForm({ configuracionInicial, onGuardado }) {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <ConfigCard title="⏳ Reglas de Negocio">
-          <NumberField
-            label="Días de tolerancia de pago"
-            value={form.diasTolerancia}
-            onChange={(value) => updateField('diasTolerancia', value)}
-            suffix="días"
-          />
+          {/* CAMBIO 1 (sacar "En Tolerancia" del todo) -- "Días de tolerancia
+              de pago" dejó de leerse en cualquier cálculo de estado (Admin y
+              PWA), así que el campo ya no tiene sentido en esta pantalla --
+              se sacó de acá. La columna `dias_tolerancia` sigue existiendo
+              en la tabla `configuracion` (no se borró de la base), solo
+              dejó de tener una UI que la edite. */}
           <NumberField
             label="Límite para cancelar una clase"
             value={form.limiteCancelacionMinutos}

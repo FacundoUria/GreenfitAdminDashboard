@@ -244,7 +244,7 @@ const PROFILE_AIXA = {
 // Pago" (acreditar_pack), que sí crea el lote inicial -- este test ahora
 // verifica que la sección de Créditos directamente no aparece en ese caso,
 // en vez de mostrar un botón que ya no existe.
-test('caso Aixa: una disciplina que el socio NUNCA tuvo inicializada en la app no aparece en "Editar Socio" -- no hay nada que romper', async ({
+test('caso Aixa: una disciplina que el socio NUNCA tuvo inicializada en la app no aparece en "Editar Socio" -- solo queda "+ Agregar Aparatos" disponible (CAMBIO 5)', async ({
   page,
 }) => {
   const tables = {
@@ -257,11 +257,24 @@ test('caso Aixa: una disciplina que el socio NUNCA tuvo inicializada en la app n
   await loginComoAdmin(page, { tables })
 
   await irASocios(page)
+  // CAMBIO 3 (bug real: "Activo" sin nada real) -- Aixa no tiene ni un
+  // crédito real ni fecha_vencimiento, así que ahora cuenta como "Inactivo"
+  // (antes, sin este fix, el default optimista la mostraba "Activa" igual)
+  // -- el filtro por defecto de la pantalla ('Activo') ya no la incluye.
+  await page.locator('select').first().selectOption('todos')
   const filaTabla = page.getByRole('table').getByRole('row', { name: /Aixa Gómez/ })
   await filaTabla.getByTitle('Editar').click()
   await expect(page.getByRole('heading', { name: 'Editar Socio' })).toBeVisible()
 
-  await expect(page.getByRole('heading', { name: 'Créditos', exact: true })).toHaveCount(0)
+  // CAMBIO 5 -- a diferencia de antes (sin "+ Agregar Aparatos" todavía),
+  // la sección de Créditos SÍ aparece ahora: Aixa tiene cuenta PWA (userId
+  // real) y Aparatos no está vigente, así que el único botón disponible es
+  // "+ Agregar Aparatos" -- ni una fila de crédito real (sigue sin ninguna),
+  // ni "+ Agregar disciplina" (el catálogo de este test no tiene ninguna
+  // disciplina con is_active=true).
+  await expect(page.getByRole('heading', { name: 'Créditos', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Agregar Aparatos' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Agregar disciplina' })).toHaveCount(0)
   expect(tables.user_credits).toHaveLength(0)
 })
 
@@ -309,7 +322,7 @@ test('CAMBIO 2 -- agregar una disciplina nueva a un socio que ya tiene otra acti
 
   await page.getByLabel('Disciplina a agregar').selectOption('disc-boxeo')
   await page.getByLabel('Créditos a agregar').fill('4')
-  await page.getByRole('button', { name: 'Agregar' }).click()
+  await page.getByRole('button', { name: 'Agregar', exact: true }).click()
 
   await expect.poll(() => tables.user_credits.some((f) => f.discipline_id === 'disc-boxeo')).toBe(true)
 
@@ -333,6 +346,10 @@ test('CAMBIO 2 -- socio sin nada activo agrega su primera disciplina -- fecha nu
   await loginComoAdmin(page, { tables, rpc: { admin_fijar_creditos_disciplina: mockAdminFijarCreditosDisciplina(tables) } })
 
   await irASocios(page)
+  // CAMBIO 3 -- mismo motivo que el test de arriba: sin nada real todavía,
+  // Aixa cuenta como "Inactivo" -- el filtro por defecto ('Activo') no la
+  // incluye.
+  await page.locator('select').first().selectOption('todos')
   const filaTabla = page.getByRole('table').getByRole('row', { name: /Aixa Gómez/ })
   await filaTabla.getByTitle('Editar').click()
   await expect(page.getByRole('heading', { name: 'Editar Socio' })).toBeVisible()
@@ -340,7 +357,7 @@ test('CAMBIO 2 -- socio sin nada activo agrega su primera disciplina -- fecha nu
   await page.getByRole('button', { name: /Agregar disciplina/ }).click()
   await page.getByLabel('Disciplina a agregar').selectOption('disc-kickstrike')
   await page.getByLabel('Créditos a agregar').fill('10')
-  await page.getByRole('button', { name: 'Agregar' }).click()
+  await page.getByRole('button', { name: 'Agregar', exact: true }).click()
 
   await expect.poll(() => tables.user_credits.length).toBe(1)
   const fila = tables.user_credits[0]

@@ -2,7 +2,16 @@ import { useEffect, useState } from 'react'
 import { Loader2, Minus, Plus } from 'lucide-react'
 import { formatFecha } from '../utils/fecha'
 import { resolverUserIdPorDni, fetchCreditosPorDisciplina } from '../utils/fichaSocioPwa'
-import { fijarCreditosDisciplina, ajustarCreditoDisciplina } from '../utils/creditosPwa'
+import { fijarCreditosDisciplina, ajustarCreditoDisciplina, agregarAparatosSocio } from '../utils/creditosPwa'
+
+// CAMBIO 5 (re-agregar Aparatos) -- mismo criterio PLAN-INDEPENDIENTE que ya
+// usan aparatosActivoReal() en SociosTabla.jsx y NuevoSocioModal.jsx
+// (duplicado a propósito, mismo patrón que esos dos): fecha_vencimiento en
+// el futuro, sin mirar socio.plan para nada.
+function aparatosActivoReal(socio) {
+  if (!socio?.fechaVencimiento) return false
+  return new Date(`${socio.fechaVencimiento}T00:00:00`).getTime() > Date.now()
+}
 
 // Reemplaza a los steppers -/+1/+4/+8/+12 que vivían sueltos en cada fila
 // de SociosTabla.jsx -- con datos sucios de la migración de CrossFy,
@@ -69,6 +78,24 @@ function CreditosEditablesSocio({ socio, disciplinasActivas = [], onCreditosActu
   const [disciplinaNuevaId, setDisciplinaNuevaId] = useState('')
   const [cantidadNueva, setCantidadNueva] = useState('')
   const [guardandoNueva, setGuardandoNueva] = useState(false)
+
+  // "+ Agregar Aparatos" (CAMBIO 5) -- `aparatosAgregado` es un flag LOCAL,
+  // no un refetch real: este componente nunca trajo datos de Aparatos (solo
+  // créditos, vía fetchCreditosPorDisciplina), así que no hay nada que
+  // refrescar acá -- lo único que puede quedar desactualizado es el propio
+  // `socio.fechaVencimiento` (prop, del padre), que recién se actualiza
+  // cuando Socios.jsx vuelva a hacer fetchSocios(). Este flag evita mostrar
+  // el botón de nuevo en la misma sesión del modal apenas se confirma el
+  // alta, sin depender de ese refetch.
+  const [aparatosAgregado, setAparatosAgregado] = useState(false)
+  const [guardandoAparatos, setGuardandoAparatos] = useState(false)
+  const aparatosVigente = aparatosActivoReal(socio) || aparatosAgregado
+  // Sin cuenta PWA resuelta (userId null -- ej. socio sin DNI cargado, ver
+  // creditos-sin-dni.spec.js), "+ Agregar Aparatos" está destinado a fallar
+  // siempre (mismo alert que el resto de esta sección) -- mismo criterio de
+  // "ausencia de UI en vez de alert en runtime" que ya rige acá: se puede
+  // agregar Aparatos solo si hay un userId real sobre el que hacerlo.
+  const puedeAgregarAparatos = !aparatosVigente && !!userId
 
   useEffect(() => {
     let cancelado = false
@@ -212,15 +239,41 @@ function CreditosEditablesSocio({ socio, disciplinasActivas = [], onCreditosActu
     }
   }
 
+  const handleAgregarAparatos = async () => {
+    if (!userId) {
+      window.alert('Este socio todavía no tiene cuenta en la app -- no se pueden editar créditos acá todavía.')
+      return
+    }
+    const confirmado = window.confirm(`¿Confirmás agregarle Aparatos a ${socio.nombre} ${socio.apellido}?`)
+    if (!confirmado) return
+
+    setGuardandoAparatos(true)
+    try {
+      // Mismo RPC-chico-y-separado de siempre (admin_agregar_aparatos_socio)
+      // -- resuelve sola la fecha (la del plan vigente del socio, o
+      // now()+30 días si no tiene nada activo todavía), sin que este
+      // componente tenga que calcular ni pasar ninguna fecha.
+      await agregarAparatosSocio(userId)
+      setAparatosAgregado(true)
+      onCreditosActualizados?.()
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'No se pudo agregar Aparatos.')
+    } finally {
+      setGuardandoAparatos(false)
+    }
+  }
+
   // Antes esto era un chequeo síncrono sobre socios.plan (se sabía sin
   // esperar ninguna respuesta de red) -- ahora "¿hay algo que mostrar?"
   // depende de la carga real, así que solo se puede decidir DESPUÉS de
   // que termine (mientras carga, se muestra igual el spinner de abajo).
-  // Sin nada que mostrar, sin error Y sin ninguna disciplina para agregar,
-  // la sección entera desaparece -- si hay algo para agregar, se muestra
-  // igual (aunque `filas` esté vacío) para que "+ Agregar disciplina"
-  // siga disponible en un socio sin nada activo todavía.
-  if (!cargando && !error && filas.length === 0 && disciplinasDisponibles.length === 0) return null
+  // Sin nada que mostrar, sin error, sin ninguna disciplina para agregar Y
+  // sin poder agregar Aparatos tampoco (ya vigente, o sin userId real), la
+  // sección entera desaparece -- si hay algo para agregar (una disciplina
+  // de créditos O Aparatos), se muestra igual (aunque `filas` esté vacío)
+  // para que los botones de agregar sigan disponibles en un socio sin nada
+  // activo todavía.
+  if (!cargando && !error && filas.length === 0 && disciplinasDisponibles.length === 0 && !puedeAgregarAparatos) return null
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-white/10 bg-greenfit-dark/40 p-4 sm:col-span-2">
@@ -359,6 +412,24 @@ function CreditosEditablesSocio({ socio, disciplinasActivas = [], onCreditosActu
                 Agregar disciplina
               </button>
             ))}
+
+          {/* CAMBIO 5 -- sin cantidad, solo confirmar (Aparatos no tiene
+              créditos que contar). Visible SOLO si Aparatos no está vigente
+              hoy (si ya lo está, no hay nada que "agregar" -- para cambiarle
+              la fecha existe "Registrar Pago"/"Cobrar", no este atajo) Y hay
+              un userId real resuelto (sin cuenta PWA, el botón siempre
+              fallaría -- mismo criterio de "ausencia de UI" que el resto). */}
+          {puedeAgregarAparatos && (
+            <button
+              type="button"
+              onClick={handleAgregarAparatos}
+              disabled={guardandoAparatos}
+              className="flex h-9 items-center justify-center gap-1.5 self-start rounded-md border border-dashed border-white/20 px-3 text-xs font-semibold text-gray-300 transition-colors hover:border-greenfit-primary hover:text-greenfit-primary disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {guardandoAparatos ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+              Agregar Aparatos
+            </button>
+          )}
         </div>
       )}
     </div>

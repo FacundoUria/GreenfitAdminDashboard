@@ -292,7 +292,7 @@ function RegistrarPagoModal({ socio, disciplinasActivas = [], onClose, onConfirm
                         socio.fechaVencimiento ? `el vencimiento actual (${formatFecha(socio.fechaVencimiento)})` : 'hoy'
                       }.`}{' '}
                   Podés cambiar las fechas libremente (ej. 10 días, 15 días, 2 meses). El estado del socio
-                  (Activo / Vencido / En Tolerancia) se recalcula solo según lo que elijas acá.
+                  (Activo / Vencido) se recalcula solo según lo que elijas acá.
                 </p>
               </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

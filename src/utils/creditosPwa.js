@@ -390,3 +390,22 @@ export async function ajustarCreditoDisciplina(userId, disciplineId, delta) {
     throw error
   }
 }
+
+// CAMBIO 5 (re-agregar Aparatos) -- "+ Agregar Aparatos" en
+// CreditosEditablesSocio.jsx. A diferencia de fijarCreditosDisciplina() (que
+// rechaza kind='membership'), esto llama a un RPC chico y separado
+// (admin_agregar_aparatos_socio, ver supabase_migration_admin_agregar_
+// aparatos_socio.sql -- SIN CORRER TODAVÍA) que resuelve sola la fecha del
+// plan vigente del socio (o now()+30 días si no tiene nada), igual que
+// fijarCreditosDisciplina. No recibe discipline_id ni cantidad -- Aparatos
+// no tiene créditos que contar, y el RPC ya sabe cuál es la única
+// disciplina kind='membership' del catálogo.
+export async function agregarAparatosSocio(userId) {
+  const { error } = await supabase.rpc('admin_agregar_aparatos_socio', {
+    p_user_id: userId,
+  })
+  if (error) {
+    logErrorSupabase(`agregarAparatosSocio (userId=${userId})`, error)
+    throw error
+  }
+}
