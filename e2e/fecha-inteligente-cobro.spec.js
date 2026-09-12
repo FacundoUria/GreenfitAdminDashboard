@@ -4,9 +4,15 @@ import { tablasBase } from './support/fixtures.js'
 import { irASocios } from './support/nav.js'
 
 // Lógica inteligente de fechas -- EXCLUSIVA de "Registrar Pago". Cubre los
-// dos casos pedidos y, en el mismo spec, que "Editar Socio" (el otro lugar
-// donde se puede tocar fecha_vencimiento) NO cambió: sigue mostrando la
-// fecha real de la base tal cual está, vencida o no.
+// dos casos pedidos.
+//
+// CAMBIO 1 (sacar el campo viejo "Fecha de vencimiento" de Editar Socio):
+// este spec tenía un tercer test ("Editar Socio (aislado): sigue mostrando
+// la fecha_vencimiento REAL y vencida") que probaba justo ese campo -- se
+// eliminó junto con el resto de e2e/editar-vencimiento.spec.js (el archivo
+// entero, ahora borrado) porque el campo ya no existe: la única fecha
+// válida bajo el modelo de plan único es la que el socio ya tiene activo,
+// y se maneja con "Cobrar" o "+ Agregar disciplina" (CreditosEditablesSocio.jsx).
 
 // Mismo criterio UTC que registrar-pago-fechas.spec.js/cobro-mostrador.spec.js
 // -- evita que un test corrido cerca de medianoche en un huso detrás de UTC
@@ -93,24 +99,5 @@ test.describe('Registrar Pago -- sugerencia inteligente de fechas', () => {
     await expect(page.getByText(/El socio está vencido/)).toHaveCount(0)
     await expect(page.getByLabel('Fecha de inicio')).toHaveValue(VENCIMIENTO_FUTURO)
     await expect(page.getByLabel('Fecha de vencimiento')).not.toHaveValue(VENCIMIENTO_FUTURO)
-  })
-
-  // RESTRICCIÓN ESTRICTA del ticket: la lógica inteligente de arriba es
-  // EXCLUSIVA de "Registrar Pago" -- "Editar Socio" tiene que seguir
-  // mostrando la fecha real de la base tal cual está, aunque sea del
-  // pasado. Mismo socio VENCIDO del Caso 1, pero por la otra puerta.
-  test('Editar Socio (aislado): sigue mostrando la fecha_vencimiento REAL y vencida, sin "inteligencia" ninguna', async ({
-    page,
-  }) => {
-    await loginComoAdmin(page, { tables: { ...tablasBase(), socios: [SOCIO_VENCIDO] } })
-
-    await irASocios(page)
-    await expect(page.getByRole('table').getByText('Diego Morales')).toBeVisible()
-    await page.locator('[title="Editar"]:visible').click()
-    await expect(page.getByRole('heading', { name: 'Editar Socio' })).toBeVisible()
-
-    // La fecha real y vencida, no HOY -- ninguna sugerencia "inteligente" acá.
-    await expect(page.getByLabel('Fecha de vencimiento')).toHaveValue(VENCIMIENTO_VENCIDO)
-    await expect(page.getByLabel('Fecha de vencimiento')).not.toHaveValue(HOY)
   })
 })

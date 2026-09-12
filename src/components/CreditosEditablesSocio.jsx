@@ -26,13 +26,19 @@ import { fijarCreditosDisciplina, ajustarCreditoDisciplina } from '../utils/cred
 // viene resuelto real desde ahí (el join contra user_credits), así que ya
 // no hace falta resolverDisciplinaId() por nombre acá tampoco.
 //
-// Trade-off conocido: como ya no se recorre socios.plan, esta sección ya
-// NO puede usarse para darle a un socio créditos de una disciplina que
-// TODAVÍA no tiene ningún lote activo (ej. su primera vez en una
-// disciplina nueva) -- para eso sigue estando "Registrar Pago"
-// (acreditar_pack), que sí crea el lote inicial. Esto es sobre AJUSTAR lo
-// que ya existe, no sobre dar de alta una disciplina nueva.
-function CreditosEditablesSocio({ socio, onCreditosActualizados }) {
+// "+ Agregar disciplina" -- ANTES esta sección solo podía AJUSTAR lo que
+// ya existía: para darle a un socio créditos de una disciplina sin ningún
+// lote activo todavía (su primera vez ahí) había que pasar sí o sí por
+// "Registrar Pago". Ahora `disciplinasActivas` (catálogo real, kind=
+// 'credits') menos las que ya están en `filas` da el combo de disciplinas
+// "agregables" -- elegir una y poner una cantidad llama al MISMO
+// fijarCreditosDisciplina() de siempre (admin_fijar_creditos_disciplina),
+// sin ningún cambio de RPC: esa función ya resuelve sola la fecha
+// correcta (la del plan vigente del socio si tiene algo activo, o
+// now()+30 días si no tiene nada), así que la disciplina nueva queda
+// automáticamente con la MISMA fecha que el resto sin que este componente
+// tenga que calcular ni pasar nada de fechas.
+function CreditosEditablesSocio({ socio, disciplinasActivas = [], onCreditosActualizados }) {
   const [userId, setUserId] = useState(null)
   const [filas, setFilas] = useState([])
   const [cargando, setCargando] = useState(true)
@@ -56,6 +62,13 @@ function CreditosEditablesSocio({ socio, onCreditosActualizados }) {
   // pisar el estado si el socio cambia (o el modal se cierra) a mitad de
   // una carga en vuelo.
   const [refrescarTick, setRefrescarTick] = useState(0)
+
+  // "+ Agregar disciplina" -- estado del mini-form inline, separado del de
+  // las filas existentes (valores/procesando) para no pisarse entre sí.
+  const [agregando, setAgregando] = useState(false)
+  const [disciplinaNuevaId, setDisciplinaNuevaId] = useState('')
+  const [cantidadNueva, setCantidadNueva] = useState('')
+  const [guardandoNueva, setGuardandoNueva] = useState(false)
 
   useEffect(() => {
     let cancelado = false
@@ -158,13 +171,56 @@ function CreditosEditablesSocio({ socio, onCreditosActualizados }) {
     }
   }
 
+  // Disciplinas de créditos del catálogo real que el socio NO tiene activas
+  // hoy -- las candidatas para "+ Agregar disciplina". Las que ya están en
+  // `filas` quedan afuera a propósito: para esas ya existe "Fijar en" (no
+  // tiene sentido duplicar el mismo flujo dos veces en la misma sección).
+  const disciplinasDisponibles = disciplinasActivas.filter(
+    (d) => d.kind === 'credits' && !filas.some((f) => f.disciplineId === d.id),
+  )
+
+  const handleAgregarDisciplina = async () => {
+    if (!disciplinaNuevaId) return
+    if (!userId) {
+      window.alert('Este socio todavía no tiene cuenta en la app -- no se pueden editar créditos acá todavía.')
+      return
+    }
+
+    const texto = cantidadNueva.trim()
+    const cantidad = Number(texto)
+    if (texto === '' || !Number.isInteger(cantidad) || cantidad <= 0) {
+      window.alert('Ingresá un número entero mayor a 0.')
+      return
+    }
+
+    setGuardandoNueva(true)
+    try {
+      // Mismo RPC de siempre (admin_fijar_creditos_disciplina) -- ya
+      // resuelve sola la fecha del plan vigente del socio (o now()+30 días
+      // si no tiene nada activo todavía), sin que haga falta pasarle ni
+      // calcular ninguna fecha acá.
+      await fijarCreditosDisciplina(userId, disciplinaNuevaId, cantidad)
+      setRefrescarTick((t) => t + 1)
+      onCreditosActualizados?.()
+      setAgregando(false)
+      setDisciplinaNuevaId('')
+      setCantidadNueva('')
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'No se pudo agregar la disciplina.')
+    } finally {
+      setGuardandoNueva(false)
+    }
+  }
+
   // Antes esto era un chequeo síncrono sobre socios.plan (se sabía sin
   // esperar ninguna respuesta de red) -- ahora "¿hay algo que mostrar?"
   // depende de la carga real, así que solo se puede decidir DESPUÉS de
   // que termine (mientras carga, se muestra igual el spinner de abajo).
-  // Sin nada que mostrar y sin error, la sección entera desaparece --
-  // mismo criterio de siempre, resuelto en el momento correcto.
-  if (!cargando && !error && filas.length === 0) return null
+  // Sin nada que mostrar, sin error Y sin ninguna disciplina para agregar,
+  // la sección entera desaparece -- si hay algo para agregar, se muestra
+  // igual (aunque `filas` esté vacío) para que "+ Agregar disciplina"
+  // siga disponible en un socio sin nada activo todavía.
+  if (!cargando && !error && filas.length === 0 && disciplinasDisponibles.length === 0) return null
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-white/10 bg-greenfit-dark/40 p-4 sm:col-span-2">
@@ -234,6 +290,75 @@ function CreditosEditablesSocio({ socio, onCreditosActualizados }) {
               </div>
             )
           })}
+
+          {disciplinasDisponibles.length > 0 &&
+            (agregando ? (
+              // <div>, no <form> -- este componente vive DENTRO del <form>
+              // de todo el modal de "Editar Socio" (NuevoSocioModal.jsx) --
+              // un <form> anidado ahí adentro es HTML inválido (el submit
+              // del botón termina sin comportamiento predecible). El botón
+              // de abajo llama a handleAgregarDisciplina() directo por
+              // onClick, no por onSubmit.
+              <div className="flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-white/15 bg-greenfit-card px-3 py-2.5">
+                <select
+                  value={disciplinaNuevaId}
+                  onChange={(e) => setDisciplinaNuevaId(e.target.value)}
+                  disabled={guardandoNueva}
+                  aria-label="Disciplina a agregar"
+                  className="min-w-[140px] flex-1 rounded-md border border-white/10 bg-greenfit-dark px-2 py-1.5 text-sm text-white outline-none focus:border-greenfit-primary disabled:opacity-50"
+                >
+                  <option value="">Elegí una disciplina...</option>
+                  {disciplinasDisponibles.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  placeholder="Créditos"
+                  value={cantidadNueva}
+                  onChange={(e) => setCantidadNueva(e.target.value)}
+                  disabled={guardandoNueva}
+                  aria-label="Créditos a agregar"
+                  className="w-20 rounded-md border border-white/10 bg-greenfit-dark px-2 py-1.5 text-center text-sm text-white outline-none focus:border-greenfit-primary disabled:opacity-50"
+                />
+
+                <button
+                  type="button"
+                  onClick={handleAgregarDisciplina}
+                  disabled={guardandoNueva || !disciplinaNuevaId}
+                  className="flex h-9 shrink-0 items-center justify-center rounded-md bg-greenfit-primary/15 px-3 text-xs font-semibold text-greenfit-primary transition-colors hover:bg-greenfit-primary/25 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {guardandoNueva ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Agregar'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAgregando(false)
+                    setDisciplinaNuevaId('')
+                    setCantidadNueva('')
+                  }}
+                  disabled={guardandoNueva}
+                  className="text-xs font-medium text-gray-400 underline transition-colors hover:text-white disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setAgregando(true)}
+                className="flex h-9 items-center justify-center gap-1.5 self-start rounded-md border border-dashed border-white/20 px-3 text-xs font-semibold text-gray-300 transition-colors hover:border-greenfit-primary hover:text-greenfit-primary"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Agregar disciplina
+              </button>
+            ))}
         </div>
       )}
     </div>

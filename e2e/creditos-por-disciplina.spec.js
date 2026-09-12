@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test'
 import { loginComoAdmin } from './support/auth.js'
-import { tablasBase } from './support/fixtures.js'
+import { tablasBase, DISCIPLINA_CROSSFIT } from './support/fixtures.js'
 import { irASocios } from './support/nav.js'
+import { mockAdminFijarCreditosDisciplina } from './support/rpcMocks.js'
 
 // BUG CRÍTICO DE SINCRONIZACIÓN (2026-08-07): un socio con más de una
 // disciplina de créditos (ej. CrossFit + Boxeo) mostraba en la tabla de
@@ -262,4 +263,92 @@ test('caso Aixa: una disciplina que el socio NUNCA tuvo inicializada en la app n
 
   await expect(page.getByRole('heading', { name: 'Créditos', exact: true })).toHaveCount(0)
   expect(tables.user_credits).toHaveLength(0)
+})
+
+// CAMBIO 2 -- "+ Agregar disciplina" (CreditosEditablesSocio.jsx): antes
+// solo se podían AJUSTAR disciplinas que ya tenían algún lote activo --
+// para dar de alta una nueva sin pasar por "Registrar Pago" no había
+// forma. `disciplinasActivas` necesita is_active=true explícito en el
+// fixture -- Socios.jsx filtra por esa columna al armar el combo.
+test('CAMBIO 2 -- agregar una disciplina nueva a un socio que ya tiene otra activa -- las dos terminan con la MISMA fecha', async ({
+  page,
+}) => {
+  const tables = {
+    ...tablasBase(),
+    disciplines: [
+      { ...DISCIPLINA_CROSSFIT, is_active: true },
+      { ...DISCIPLINA_BOXEO, is_active: true },
+    ],
+    socios: [SOCIO_MULTI],
+    profiles: [PROFILE_MULTI],
+    user_credits: [
+      {
+        id: 'uc-1',
+        user_id: PROFILE_MULTI.id,
+        discipline_id: 'disc-crossfit',
+        remaining_credits: 6,
+        expires_at: EN_30_DIAS,
+        created_at: '2026-08-01T00:00:00.000Z',
+        discipline: DISCIPLINA_CROSSFIT,
+      },
+    ],
+  }
+  await loginComoAdmin(page, { tables, rpc: { admin_fijar_creditos_disciplina: mockAdminFijarCreditosDisciplina(tables) } })
+
+  await irASocios(page)
+  const filaTabla = page.getByRole('table').getByRole('row', { name: /Facundo Uria/ })
+  await filaTabla.getByTitle('Editar').click()
+  await expect(page.getByRole('heading', { name: 'Editar Socio' })).toBeVisible()
+
+  await page.getByRole('button', { name: /Agregar disciplina/ }).click()
+
+  // El selector NO ofrece CrossFit (ya activo, tiene su propio "Fijar en" arriba) -- solo Boxeo.
+  const opciones = await page.getByLabel('Disciplina a agregar').locator('option').allTextContents()
+  expect(opciones).toContain('Boxeo')
+  expect(opciones).not.toContain('CrossFit')
+
+  await page.getByLabel('Disciplina a agregar').selectOption('disc-boxeo')
+  await page.getByLabel('Créditos a agregar').fill('4')
+  await page.getByRole('button', { name: 'Agregar' }).click()
+
+  await expect.poll(() => tables.user_credits.some((f) => f.discipline_id === 'disc-boxeo')).toBe(true)
+
+  const filaCrossfit = tables.user_credits.find((f) => f.discipline_id === 'disc-crossfit')
+  const filaBoxeo = tables.user_credits.find((f) => f.discipline_id === 'disc-boxeo')
+  expect(filaBoxeo.remaining_credits).toBe(4)
+  // La garantía real: admin_fijar_creditos_disciplina() resuelve sola la
+  // fecha del plan vigente -- Boxeo queda con EXACTAMENTE la misma fecha
+  // que CrossFit, sin que el frontend calcule ni pase nada.
+  expect(filaBoxeo.expires_at).toBe(filaCrossfit.expires_at)
+})
+
+test('CAMBIO 2 -- socio sin nada activo agrega su primera disciplina -- fecha nueva (hoy + 30 días)', async ({ page }) => {
+  const tables = {
+    ...tablasBase(),
+    disciplines: [{ ...DISCIPLINA_CROSSFIT, is_active: true }, { ...DISCIPLINA_KICKSTRIKE, is_active: true }],
+    socios: [SOCIO_AIXA],
+    profiles: [PROFILE_AIXA],
+    user_credits: [], // Nada activo todavía -- ni siquiera de Kickstrike (su plan de siempre).
+  }
+  await loginComoAdmin(page, { tables, rpc: { admin_fijar_creditos_disciplina: mockAdminFijarCreditosDisciplina(tables) } })
+
+  await irASocios(page)
+  const filaTabla = page.getByRole('table').getByRole('row', { name: /Aixa Gómez/ })
+  await filaTabla.getByTitle('Editar').click()
+  await expect(page.getByRole('heading', { name: 'Editar Socio' })).toBeVisible()
+
+  await page.getByRole('button', { name: /Agregar disciplina/ }).click()
+  await page.getByLabel('Disciplina a agregar').selectOption('disc-kickstrike')
+  await page.getByLabel('Créditos a agregar').fill('10')
+  await page.getByRole('button', { name: 'Agregar' }).click()
+
+  await expect.poll(() => tables.user_credits.length).toBe(1)
+  const fila = tables.user_credits[0]
+  expect(fila.discipline_id).toBe('disc-kickstrike')
+  expect(fila.remaining_credits).toBe(10)
+
+  const hoy = new Date()
+  const esperado = new Date(hoy)
+  esperado.setUTCDate(esperado.getUTCDate() + 30)
+  expect(fila.expires_at.slice(0, 10)).toBe(esperado.toISOString().slice(0, 10))
 })

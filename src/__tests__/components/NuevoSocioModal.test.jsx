@@ -368,65 +368,10 @@ describe('NuevoSocioModal -- sincroniza el teléfono editado con profiles.phone 
   })
 })
 
-// Caso real (Agustina Barbero, DNI 43151174, plan=solo CrossFit): este
-// campo escribe SIEMPRE en socios.fecha_vencimiento, sin importar el plan
-// -- la MISMA columna que SociosTabla.jsx ya no muestra para un socio sin
-// Aparatos/Pase Libre. No se oculta acá (un socio 100% créditos SÍ tiene
-// que poder renovar su vencimiento, ver editar-vencimiento.spec.js) --
-// pero la etiqueta ahora aclara siempre a qué disciplina se aplica, para
-// que no se confunda con "el vencimiento de Aparatos" cuando el socio no
-// lo tiene.
-//
-// Sigue leyendo form.planes (socio.plan), a propósito NO planesActuales --
-// es un campo aparte de este ticket (checkboxes "reflejan la realidad"):
-// existe justamente para poder corregir a mano la fecha de un socio SIN
-// nada realmente activo hoy (ver "Editar Socio (aislado): sigue mostrando
-// la fecha_vencimiento REAL y vencida" en fecha-inteligente-cobro.spec.js)
-// -- gatearlo por lo realmente activo lo ocultaría justo en ese caso.
-describe('NuevoSocioModal -- el campo de vencimiento aclara a qué disciplina se aplica (fix Agustina Barbero)', () => {
-  it('socio con Aparatos: el campo se llama "Fecha de vencimiento (Aparatos)"', () => {
-    const socio = {
-      id: 's-aparatos',
-      nombre: 'Lucía',
-      apellido: 'Paz',
-      dni: '30222333',
-      email: 'lucia@test.com',
-      telefono: '',
-      plan: ['Aparatos'],
-      fechaVencimiento: '2099-01-01',
-    }
-    render(<NuevoSocioModal socio={socio} onClose={vi.fn()} onSaved={vi.fn()} />)
-    expect(screen.getByLabelText('Fecha de vencimiento (Aparatos)')).toBeTruthy()
-  })
-
-  it('socio 100% de créditos (sin Aparatos): el campo se llama "Renovar vencimiento de créditos (...)", no el genérico de antes', () => {
-    const socio = {
-      id: 's-solo-creditos',
-      nombre: 'Bruno',
-      apellido: 'Álvarez',
-      dni: '30999888',
-      email: 'bruno@test.com',
-      telefono: '',
-      plan: ['Boxeo'],
-      fechaVencimiento: '2020-01-01', // residual -- no le corresponde a Aparatos, que no tiene
-    }
-    render(<NuevoSocioModal socio={socio} onClose={vi.fn()} onSaved={vi.fn()} />)
-    expect(screen.getByLabelText('Renovar vencimiento de créditos (Boxeo)')).toBeTruthy()
-    expect(screen.queryByText('Fecha de vencimiento')).toBeNull()
-  })
-
-  it('socio con Aparatos + una disciplina de créditos: la etiqueta sigue asociada a Aparatos (una sola fecha, una sola membresía real)', () => {
-    const socio = {
-      id: 's-combinado',
-      nombre: 'Facundo',
-      apellido: 'Uria',
-      dni: '20333444',
-      email: 'facu@test.com',
-      telefono: '',
-      plan: ['Aparatos', 'CrossFit'],
-      fechaVencimiento: '2099-01-01',
-    }
-    render(<NuevoSocioModal socio={socio} onClose={vi.fn()} onSaved={vi.fn()} />)
-    expect(screen.getByLabelText('Fecha de vencimiento (Aparatos)')).toBeTruthy()
-  })
-})
+// CAMBIO 1 (sacar el campo viejo "Fecha de vencimiento" de Editar Socio):
+// el describe que probaba este campo (fix Agustina Barbero -- la etiqueta
+// aclaraba a qué disciplina se aplicaba la edición directa de
+// fecha_vencimiento) se elimina entero -- el campo ya no existe bajo el
+// modelo de plan único: la única fecha válida es la que el socio ya tiene
+// activo, y se maneja con "Cobrar" o con "+ Agregar disciplina"
+// (CreditosEditablesSocio.jsx), no con un date picker suelto acá.

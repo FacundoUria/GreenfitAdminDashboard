@@ -2,14 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { X } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { diferenciaEnDias, hoyISO, proximoVencimiento, toISODate } from '../utils/fecha'
-import {
-  PLANES_DISPONIBLES,
-  normalizarPlanes,
-  planesDeCreditos,
-  planesDeVencimiento,
-  tienePlanDeVencimiento,
-} from '../utils/planes'
-import { sincronizarVencimientoPwa, sincronizarVencimientoCreditoPwa, resolverDisciplinaId } from '../utils/creditosPwa'
+import { PLANES_DISPONIBLES, normalizarPlanes, planesDeCreditos, tienePlanDeVencimiento } from '../utils/planes'
+import { resolverDisciplinaId } from '../utils/creditosPwa'
 import { resolverUserIdPorDni } from '../utils/fichaSocioPwa'
 import { normalizarTexto } from '../utils/coincidenciaSocios'
 import FichaSocioHistorial from './FichaSocioHistorial'
@@ -46,9 +40,6 @@ function formInicial(socio) {
       telefono: socio.telefono ?? '',
       planes: normalizarPlanes(socio.plan),
       fechaInicio: hoyISO(),
-      // Edición directa del vencimiento -- no depende de pasar por
-      // "Registrar Pago". Vacío si el socio no tiene fecha cargada todavía.
-      fechaVencimiento: socio.fechaVencimiento ?? '',
       creditosPorDisciplina: {},
     }
   }
@@ -346,23 +337,6 @@ function NuevoSocioModal({
     // `else` de abajo (alta nueva) pero hace falta más adelante, fuera de
     // ese bloque, para admin_acreditar_creditos_manual() (p_fecha_inicio).
     let fechaInicioAlta = null
-    // Edición directa del vencimiento -- el admin puede tocar la fecha sin
-    // pasar por "Registrar Pago". `dia_corte` se recalcula del día-del-mes
-    // de la fecha nueva para que un futuro pago en modo "sugerido" (+1 mes)
-    // siga anclado a lo último que se cargó a mano acá.
-    // Bug reportado: antes solo se detectaba una edición de vencimiento si
-    // había algún plan de Aparatos/Pase Libre tildado -- un socio de
-    // CrossFit/Boxeo puro nunca podía cargar/renovar su vencimiento acá.
-    // form.planes acá a propósito, NO planesActuales -- este campo es un
-    // fix aparte (ticket Agustina Barbero), independiente de si el socio
-    // tiene algo REALMENTE activo hoy: existe justamente para poder
-    // corregir a mano la fecha de un socio sin nada vigente (ver el test
-    // "Editar Socio sigue mostrando la fecha_vencimiento REAL y vencida"
-    // en fecha-inteligente-cobro.spec.js) -- con planesActuales ese socio
-    // no tendría ninguna disciplina "activa" y el campo entero
-    // desaparecería, rompiendo esa vía de corrección manual.
-    const vencimientoEditado =
-      esEdicion && form.planes.length > 0 && !!form.fechaVencimiento && form.fechaVencimiento !== (socio?.fechaVencimiento ?? '')
 
     if (esEdicion) {
       const cambios = {
@@ -377,10 +351,6 @@ function NuevoSocioModal({
         // arriba -- socios.plan queda reflejando la realidad post-cambios,
         // no lo que Seba haya tildado a mano en algún momento anterior.
         plan: planesActuales,
-      }
-      if (vencimientoEditado) {
-        cambios.fecha_vencimiento = form.fechaVencimiento
-        cambios.dia_corte = new Date(`${form.fechaVencimiento}T00:00:00`).getDate()
       }
       resultado = await supabase.from('socios').update(cambios).eq('id', socio.id).select()
     } else {
@@ -541,49 +511,8 @@ function NuevoSocioModal({
       if (avisos.length > 0) window.alert(avisos.join('\n'))
     }
 
-    // Edición de un socio ya existente: si se tocó la fecha de vencimiento,
-    // se sincroniza con la PWA -- sin esto, el cambio quedaría reflejado
-    // solo acá en el panel y la app seguiría mostrando la fecha vieja hasta
-    // el próximo "Registrar Pago" (exactamente el desfase que se pidió cerrar).
-    if (esEdicion && vencimientoEditado) {
-      const avisos = []
-      // form.planes acá también -- mismo motivo que vencimientoEditado más
-      // arriba: este bloque sincroniza según lo que el campo de fecha
-      // significa (etiquetado desde form.planes), no según qué esté
-      // realmente activo hoy.
-      for (const disciplina of planesDeVencimiento(form.planes)) {
-        const resultadoSync = await sincronizarVencimientoPwa({
-          dni: form.dni,
-          email: form.email,
-          disciplina,
-          fechaVencimiento: form.fechaVencimiento,
-        })
-        if (!resultadoSync.synced && resultadoSync.reason !== 'sin_cuenta_pwa') {
-          avisos.push(`No se pudo sincronizar el vencimiento de ${disciplina} con la app.`)
-        }
-      }
-      // Bug reportado: el calendario de vencimiento ya no está atado
-      // exclusivamente a Aparatos -- si el socio también tiene (o solo
-      // tiene) disciplinas de CRÉDITOS, la fecha también se sincroniza ahí,
-      // preservando el balance real de créditos (sincronizarVencimientoCreditoPwa
-      // no pisa remaining_credits con null como sí hace la de arriba, que es
-      // correcta para membresías pero no para créditos).
-      for (const disciplina of planesDeCreditos(form.planes)) {
-        const resultadoSync = await sincronizarVencimientoCreditoPwa({
-          dni: form.dni,
-          email: form.email,
-          disciplina,
-          fechaVencimiento: form.fechaVencimiento,
-        })
-        if (!resultadoSync.synced && resultadoSync.reason !== 'sin_cuenta_pwa') {
-          avisos.push(`No se pudo sincronizar el vencimiento de ${disciplina} con la app.`)
-        }
-      }
-      if (avisos.length > 0) window.alert(avisos.join('\n'))
-    }
-
     setGuardando(false)
-    onSaved(socioAUnificar ? '¡Usuario unificado con éxito!' : vencimientoEditado ? 'Vencimiento actualizado' : undefined)
+    onSaved(socioAUnificar ? '¡Usuario unificado con éxito!' : undefined)
     onClose()
   }
 
@@ -749,53 +678,6 @@ function NuevoSocioModal({
             )}
           </div>
 
-          {esEdicion &&
-            form.planes.length > 0 &&
-            (() => {
-              // Este campo escribe SIEMPRE en `socios.fecha_vencimiento` --
-              // la MISMA columna que la tabla de Socios ya no muestra para
-              // un socio sin Aparatos/Pase Libre (ver SociosTabla.jsx,
-              // VencimientoCell). Ocultarlo de acá rompería una función
-              // real y ya probada (un socio 100% créditos SÍ tiene que
-              // poder renovar su vencimiento sin Aparatos, ver
-              // editar-vencimiento.spec.js) -- así que en vez de
-              // esconderlo, se aclara explícitamente a qué disciplina(s)
-              // se aplica, para que no se confunda con "el vencimiento de
-              // Aparatos" cuando el socio no lo tiene.
-              //
-              // form.planes acá a propósito, NO planesActuales -- este
-              // campo (ticket Agustina Barbero) es independiente de si el
-              // socio tiene algo REALMENTE activo hoy: existe justamente
-              // para poder corregir a mano la fecha de un socio sin nada
-              // vigente. Gatearlo con planesActuales lo ocultaría
-              // exactamente en el caso que más lo necesita.
-              const membresias = planesDeVencimiento(form.planes)
-              const creditos = planesDeCreditos(form.planes)
-              const tieneMembresia = membresias.length > 0
-              const etiqueta = tieneMembresia
-                ? `Fecha de vencimiento (${membresias.join(' + ')})`
-                : `Renovar vencimiento de créditos (${creditos.join(', ')})`
-              const ayuda = tieneMembresia
-                ? 'Edición directa, independiente de "Registrar Pago" -- guardar acá actualiza la fecha ya y la sincroniza con la app del socio.'
-                : `Este socio no tiene Aparatos ni Pase Libre -- esta fecha NO es un "vencimiento de Aparatos" (la tabla de Socios ya no la muestra como tal). Al guardar, extiende el vencimiento de ${creditos.join(', ') || 'sus créditos'} en la app, preservando el balance real de créditos.`
-
-              return (
-                <div className="flex flex-col gap-1.5 sm:col-span-2">
-                  <label htmlFor="fechaVencimientoEdicion" className="text-xs font-medium text-gray-400">
-                    {etiqueta}
-                  </label>
-                  <input
-                    id="fechaVencimientoEdicion"
-                    type="date"
-                    value={form.fechaVencimiento}
-                    onChange={handleChange('fechaVencimiento')}
-                    className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
-                  />
-                  <p className="text-[11px] text-gray-500">{ayuda}</p>
-                </div>
-              )
-            })()}
-
           {!esEdicion && planesDeCreditos(form.planes).length > 0 && (
             <div className="flex flex-col gap-1.5 sm:col-span-2">
               <span className="text-xs font-medium text-gray-400">
@@ -907,7 +789,11 @@ function NuevoSocioModal({
           )}
 
           {esEdicion && (
-            <CreditosEditablesSocio socio={socio} onCreditosActualizados={onCreditosActualizados} />
+            <CreditosEditablesSocio
+              socio={socio}
+              disciplinasActivas={disciplinasActivas}
+              onCreditosActualizados={onCreditosActualizados}
+            />
           )}
 
           {esEdicion && <FichaSocioHistorial socio={socio} />}

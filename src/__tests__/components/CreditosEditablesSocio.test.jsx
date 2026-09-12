@@ -238,3 +238,162 @@ describe('CreditosEditablesSocio (reemplaza a los steppers sueltos de SociosTabl
     expect(ajustarCreditoDisciplina).not.toHaveBeenCalled()
   })
 })
+
+// CAMBIO 2 -- "+ Agregar disciplina": antes esta sección solo podía AJUSTAR
+// lo que ya existía (fetchCreditosPorDisciplina, filtrado a "al menos un
+// lote activo") -- para darle a un socio créditos de una disciplina SIN
+// ningún lote activo todavía había que pasar sí o sí por "Registrar Pago".
+// El componente delega 100% en admin_fijar_creditos_disciplina (mismo RPC
+// de siempre, ningún cambio) para resolver la fecha correcta -- estos
+// tests confirman que el componente NUNCA pasa ni calcula ninguna fecha
+// (fijarCreditosDisciplina se llama con exactamente 3 argumentos: userId,
+// disciplineId, cantidad), que es justamente lo que garantiza que la
+// disciplina nueva termine con la MISMA fecha que el resto (esa garantía
+// en sí es responsabilidad del RPC, ya probada en supabase_migration_fix_
+// editor_creditos_plan_unico.sql -- acá solo se cubre que el frontend no
+// interfiera con eso).
+describe('CreditosEditablesSocio -- "+ Agregar disciplina" (CAMBIO 2)', () => {
+  const DISCIPLINAS_ACTIVAS = [
+    { id: 'd-crossfit', name: 'CrossFit', kind: 'credits' },
+    { id: 'd-boxeo', name: 'Boxeo', kind: 'credits' },
+    { id: 'd-kickstrike', name: 'Kickstrike', kind: 'credits' },
+    { id: 'd-aparatos', name: 'Aparatos', kind: 'membership' },
+  ]
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.spyOn(window, 'confirm')
+    vi.spyOn(window, 'alert').mockImplementation(() => {})
+  })
+
+  it('el selector NO muestra disciplinas que ya están activas (evita duplicar "Fijar en")', async () => {
+    mockearCarga({
+      entradas: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6, lotes: [] }],
+    })
+
+    render(
+      <CreditosEditablesSocio
+        socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit'] }}
+        disciplinasActivas={DISCIPLINAS_ACTIVAS}
+      />,
+    )
+
+    await screen.findByText('CrossFit')
+    fireEvent.click(screen.getByRole('button', { name: /Agregar disciplina/ }))
+
+    const opciones = screen.getByLabelText('Disciplina a agregar').querySelectorAll('option')
+    const nombres = Array.from(opciones).map((o) => o.textContent)
+    expect(nombres).toContain('Boxeo')
+    expect(nombres).toContain('Kickstrike')
+    // CrossFit ya está activo (con su fila de "Fijar en" de arriba) -- Aparatos
+    // no es de créditos -- ninguno de los dos tiene que aparecer acá.
+    expect(nombres).not.toContain('CrossFit')
+    expect(nombres).not.toContain('Aparatos')
+  })
+
+  it('sin disciplinas disponibles (todas activas ya) -- no muestra el botón "Agregar disciplina"', async () => {
+    mockearCarga({
+      entradas: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6, lotes: [] }],
+    })
+
+    render(
+      <CreditosEditablesSocio
+        socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit'] }}
+        disciplinasActivas={[{ id: 'd-crossfit', name: 'CrossFit', kind: 'credits' }]}
+      />,
+    )
+
+    await screen.findByText('CrossFit')
+    expect(screen.queryByRole('button', { name: /Agregar disciplina/ })).toBeNull()
+  })
+
+  it('elegir Boxeo y poner una cantidad -- llama a fijarCreditosDisciplina SIN pasar ninguna fecha (la resuelve el RPC solo)', async () => {
+    mockearCarga({
+      entradas: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6, lotes: [] }],
+    })
+    const onCreditosActualizados = vi.fn()
+
+    render(
+      <CreditosEditablesSocio
+        socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit'] }}
+        disciplinasActivas={DISCIPLINAS_ACTIVAS}
+        onCreditosActualizados={onCreditosActualizados}
+      />,
+    )
+
+    await screen.findByText('CrossFit')
+    fireEvent.click(screen.getByRole('button', { name: /Agregar disciplina/ }))
+    fireEvent.change(screen.getByLabelText('Disciplina a agregar'), { target: { value: 'd-boxeo' } })
+    fireEvent.change(screen.getByLabelText('Créditos a agregar'), { target: { value: '8' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Agregar' }))
+
+    // Exactamente 3 argumentos -- ninguna fecha viaja desde acá.
+    await waitFor(() => expect(fijarCreditosDisciplina).toHaveBeenCalledWith('user-1', 'd-boxeo', 8))
+    expect(fijarCreditosDisciplina.mock.calls[0]).toHaveLength(3)
+    await waitFor(() => expect(onCreditosActualizados).toHaveBeenCalled())
+  })
+
+  it('socio SIN ninguna disciplina activa -- la sección igual se muestra, con "+ Agregar disciplina" disponible', async () => {
+    mockearCarga({ entradas: [] })
+
+    render(
+      <CreditosEditablesSocio
+        socio={{ id: 's1', dni: DNI_FACUNDO, plan: [] }}
+        disciplinasActivas={DISCIPLINAS_ACTIVAS}
+      />,
+    )
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /Agregar disciplina/ })).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('button', { name: /Agregar disciplina/ }))
+    fireEvent.change(screen.getByLabelText('Disciplina a agregar'), { target: { value: 'd-crossfit' } })
+    fireEvent.change(screen.getByLabelText('Créditos a agregar'), { target: { value: '12' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Agregar' }))
+
+    // Mismo criterio -- ninguna fecha desde el frontend: sin nada activo,
+    // admin_fijar_creditos_disciplina resuelve sola now()+30 días.
+    await waitFor(() => expect(fijarCreditosDisciplina).toHaveBeenCalledWith('user-1', 'd-crossfit', 12))
+  })
+
+  it('cantidad inválida (0, vacío o no numérica) -- avisa y no llama a ningún RPC', async () => {
+    mockearCarga({ entradas: [] })
+
+    render(
+      <CreditosEditablesSocio
+        socio={{ id: 's1', dni: DNI_FACUNDO, plan: [] }}
+        disciplinasActivas={DISCIPLINAS_ACTIVAS}
+      />,
+    )
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /Agregar disciplina/ })).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: /Agregar disciplina/ }))
+    fireEvent.change(screen.getByLabelText('Disciplina a agregar'), { target: { value: 'd-crossfit' } })
+    fireEvent.change(screen.getByLabelText('Créditos a agregar'), { target: { value: '0' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Agregar' }))
+
+    expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('Ingresá un número entero mayor a 0'))
+    expect(fijarCreditosDisciplina).not.toHaveBeenCalled()
+  })
+
+  it('Cancelar cierra el mini-form sin llamar a ningún RPC', async () => {
+    mockearCarga({
+      entradas: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6, lotes: [] }],
+    })
+
+    render(
+      <CreditosEditablesSocio
+        socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit'] }}
+        disciplinasActivas={DISCIPLINAS_ACTIVAS}
+      />,
+    )
+
+    await screen.findByText('CrossFit')
+    fireEvent.click(screen.getByRole('button', { name: /Agregar disciplina/ }))
+    fireEvent.change(screen.getByLabelText('Disciplina a agregar'), { target: { value: 'd-boxeo' } })
+    fireEvent.click(screen.getByText('Cancelar'))
+
+    expect(screen.queryByLabelText('Disciplina a agregar')).toBeNull()
+    expect(screen.getByRole('button', { name: /Agregar disciplina/ })).toBeTruthy()
+    expect(fijarCreditosDisciplina).not.toHaveBeenCalled()
+  })
+})

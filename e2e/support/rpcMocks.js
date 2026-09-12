@@ -143,3 +143,88 @@ export function mockAdminAcreditarCreditosManual(tables) {
     return null
   }
 }
+
+// admin_fijar_creditos_disciplina() (supabase_migration_fix_editor_
+// creditos_plan_unico.sql) -- la usa CreditosEditablesSocio.jsx tanto para
+// "Fijar en" (disciplina ya activa) como para "+ Agregar disciplina"
+// (CAMBIO 2, disciplina sin ningún lote todavía). A diferencia de
+// admin_acreditar_creditos_manual, esta NO resetea el resto del plan --
+// solo pone en 0 los lotes activos de LA disciplina que se está fijando
+// (mismo criterio de siempre, nunca borra filas) y resuelve la fecha del
+// plan actual del socio (resolver_fecha_plan_actual: el expires_at MÁS
+// LEJANO entre sus otras disciplinas de créditos activas + Aparatos
+// vigente, o now()+30 días si no tiene nada) -- así, agregar una
+// disciplina nueva a un socio que ya tiene algo activo la deja con la
+// MISMA fecha que el resto, sin que el frontend tenga que calcular nada.
+export function mockAdminFijarCreditosDisciplina(tables) {
+  if (!tables.user_credits) tables.user_credits = []
+
+  return (request) => {
+    const { p_user_id: userId, p_discipline_id: disciplineId, p_creditos: creditos } = request.postDataJSON()
+
+    if (creditos == null || creditos < 0) {
+      return { __e2eError: { status: 400, body: { message: `p_creditos inválido: ${creditos}` } } }
+    }
+
+    const disciplina = (tables.disciplines ?? []).find((d) => d.id === disciplineId)
+    if (!disciplina) {
+      return { __e2eError: { status: 400, body: { message: `La disciplina ${disciplineId} no existe.` } } }
+    }
+    if (disciplina.kind !== 'credits') {
+      return { __e2eError: { status: 400, body: { message: `La disciplina ${disciplineId} no es de créditos.` } } }
+    }
+
+    const ahoraISO = new Date().toISOString()
+
+    // Consolidar SOLO esta disciplina -- mismo orden que el RPC real: ANTES
+    // de resolver la fecha del plan, para que el residuo de esta misma
+    // disciplina no "cuente" como fecha activa.
+    for (const fila of tables.user_credits) {
+      if (fila.user_id === userId && fila.discipline_id === disciplineId && (fila.remaining_credits ?? 0) > 0) {
+        fila.remaining_credits = 0
+      }
+    }
+
+    // resolver_fecha_plan_actual -- el expires_at más lejano entre las
+    // OTRAS disciplinas de créditos activas + Aparatos vigente de este
+    // socio, o now()+30 días si no tiene nada.
+    const activas = tables.user_credits.filter((f) => {
+      if (f.user_id !== userId || !f.expires_at || f.expires_at <= ahoraISO) return false
+      const d = (tables.disciplines ?? []).find((disc) => disc.id === f.discipline_id)
+      if (!d) return false
+      if (d.kind === 'credits') return (f.remaining_credits ?? 0) > 0
+      return d.kind === 'membership'
+    })
+    const fechaPlan =
+      activas.length > 0
+        ? activas.reduce((masLejana, f) => (f.expires_at > masLejana ? f.expires_at : masLejana), activas[0].expires_at)
+        : `${sumarDiasUTC(isoUTC(new Date()), 30)}T12:00:00.000Z`
+
+    tables.user_credits.push({
+      id: `uc-e2e-fijar-${tables.user_credits.length + 1}`,
+      user_id: userId,
+      discipline_id: disciplineId,
+      remaining_credits: creditos,
+      expires_at: fechaPlan,
+      created_at: new Date().toISOString(),
+      discipline: disciplina,
+    })
+
+    // Espejo en socios.creditos -- recalculado desde cero, mismo criterio
+    // que el RPC real.
+    const profile = (tables.profiles ?? []).find((p) => p.id === userId)
+    const socio = profile ? (tables.socios ?? []).find((s) => s.dni === profile.dni) : null
+    if (socio) {
+      const totalCreditos = tables.user_credits
+        .filter((f) => {
+          if (f.user_id !== userId || !f.expires_at || f.expires_at <= ahoraISO || (f.remaining_credits ?? 0) <= 0) return false
+          const d = (tables.disciplines ?? []).find((disc) => disc.id === f.discipline_id)
+          return d?.kind === 'credits'
+        })
+        .reduce((suma, f) => suma + f.remaining_credits, 0)
+      socio.creditos = totalCreditos
+    }
+
+    return null
+  }
+}
