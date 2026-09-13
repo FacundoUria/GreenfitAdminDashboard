@@ -16,7 +16,13 @@ import { estadoOperativoSocio, getSocioMetrics } from '../utils/socioMetrics'
 import { formatearPlanes, planesDeVencimiento, PLANES_DISPONIBLES } from '../utils/planes'
 import { buscarCoincidenciaPorNombre } from '../utils/coincidenciaSocios'
 import { sincronizarEstadoCuentaPwa, resolverDisciplinaId } from '../utils/creditosPwa'
-import { fetchAvataresYNiveles, fetchCreditosPorDisciplina, resolverUserIdPorDni, registrarPago } from '../utils/fichaSocioPwa'
+import {
+  fetchAvataresYNiveles,
+  fetchAparatosVigentePorDni,
+  fetchCreditosPorDisciplina,
+  resolverUserIdPorDni,
+  registrarPago,
+} from '../utils/fichaSocioPwa'
 import SociosTabla from '../components/SociosTabla'
 import NuevoSocioModal from '../components/NuevoSocioModal'
 import RegistrarPagoModal from '../components/RegistrarPagoModal'
@@ -106,6 +112,18 @@ function Socios() {
   // planesDeCreditos en utils/planes.js), esto es lo que la app realmente
   // tiene cargado por cada disciplina de créditos del socio.
   const [creditosPorDni, setCreditosPorDni] = useState(new Map())
+  // Aparatos REALMENTE vigente por DNI (fila real en user_credits,
+  // discipline kind='membership', expires_at > ahora) -- mismo criterio
+  // que creditosPorDni, pero para Aparatos. Fuente de verdad para
+  // aparatosActivoReal() en NuevoSocioModal.jsx/SociosTabla.jsx/
+  // CreditosEditablesSocio.jsx: BUG REAL (caso Arianna Isgro, DNI
+  // 51705419) -- esas tres funciones decidían "¿Aparatos activo?" mirando
+  // SOLO socios.fecha_vencimiento, sin confirmar que hubiera una fila real
+  // detrás. Un residuo (import de CrossFy, el campo viejo ya eliminado de
+  // Editar Socio) podía dejar esa columna con una fecha futura sin que le
+  // correspondiera nada real -- el checkbox/columna "mentían" Aparatos
+  // activo. Un dni ausente de este Map significa "no hay nada real".
+  const [aparatosVigentePorDni, setAparatosVigentePorDni] = useState(new Map())
   const [busqueda, setBusqueda] = useState('')
   // El Dashboard linkea acá con ?filtro=por_vencer (u otro value de
   // filtroOptions) para llegar con la lista ya filtrada. Sin ese query
@@ -185,6 +203,7 @@ function Socios() {
     if (socios.length === 0) return
     fetchAvataresYNiveles(socios.map((s) => s.dni)).then(setGamificacionPorDni)
     fetchCreditosPorDisciplina(socios.map((s) => s.dni)).then(setCreditosPorDni)
+    fetchAparatosVigentePorDni(socios.map((s) => s.dni)).then(setAparatosVigentePorDni)
   }, [socios])
 
   // estadoOperativoSocio() es la MISMA función que usa Home.jsx -- antes
@@ -208,9 +227,14 @@ function Socios() {
           avatarUrl: gamificacion?.avatarUrl ?? null,
           nivelXp: gamificacion?.nivel ?? null,
           creditosPwaPorDisciplina,
+          // Caso Arianna Isgro -- ver aparatosActivoReal() en
+          // SociosTabla.jsx/NuevoSocioModal.jsx/CreditosEditablesSocio.jsx:
+          // esas tres funciones ya no calculan esto desde fecha_vencimiento,
+          // leen este campo directo.
+          aparatosVigenteReal: aparatosVigentePorDni.get(socio.dni) === true,
         }
       }),
-    [socios, gamificacionPorDni, creditosPorDni],
+    [socios, gamificacionPorDni, creditosPorDni, aparatosVigentePorDni],
   )
 
   const counts = useMemo(() => {
@@ -299,6 +323,10 @@ function Socios() {
   const refrescarCreditosPwa = () => {
     if (socios.length === 0) return
     fetchCreditosPorDisciplina(socios.map((s) => s.dni)).then(setCreditosPorDni)
+    // "+ Agregar Aparatos" (CreditosEditablesSocio.jsx) dispara este mismo
+    // callback -- sin este refresh, aparatosVigenteReal quedaría
+    // desactualizado hasta el próximo fetchSocios() completo.
+    fetchAparatosVigentePorDni(socios.map((s) => s.dni)).then(setAparatosVigentePorDni)
   }
 
   const handleCambiarBaja = async (socio) => {

@@ -95,14 +95,34 @@ describe('PlanCell -- "Plan / Membresía" calculado en vivo, no socios.plan (fix
     expect(screen.queryByText('CrossFit')).toBeNull()
   })
 
-  it('Aparatos vigente (fecha_vencimiento futura) -- aparece, aunque el plan no tenga Aparatos tildado', () => {
-    const socio = { ...SOCIO_CON_FOTO, plan: ['Boxeo'], fechaVencimiento: '2099-01-01', creditosPwaPorDisciplina: [] }
+  it('Aparatos vigente (fila real en user_credits) -- aparece, aunque el plan no tenga Aparatos tildado', () => {
+    const socio = { ...SOCIO_CON_FOTO, plan: ['Boxeo'], aparatosVigenteReal: true, creditosPwaPorDisciplina: [] }
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
     expect(screen.getAllByText('Aparatos').length).toBeGreaterThan(0)
   })
 
-  it('Aparatos tildado en el plan pero con fecha_vencimiento vencida -- no aparece', () => {
-    const socio = { ...SOCIO_CON_FOTO, plan: ['Aparatos'], fechaVencimiento: '2020-01-01', creditosPwaPorDisciplina: [] }
+  it('Aparatos tildado en el plan pero SIN fila real vigente -- no aparece', () => {
+    const socio = { ...SOCIO_CON_FOTO, plan: ['Aparatos'], aparatosVigenteReal: false, creditosPwaPorDisciplina: [] }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.queryByText('Aparatos')).toBeNull()
+  })
+
+  // BUG REAL (caso Arianna Isgro, DNI 51705419) -- ANTES esto se calculaba
+  // desde `socio.fechaVencimiento` (un mirror de socios.fecha_vencimiento)
+  // solo, sin confirmar que existiera una fila real detrás -- una fecha
+  // futura residual (import de CrossFy, campo viejo ya eliminado) SIN
+  // ninguna fila real de Aparatos hacía aparecer "Aparatos" igual. Ahora
+  // depende 100% de `aparatosVigenteReal` (resuelto contra user_credits en
+  // Socios.jsx, ver fetchAparatosVigentePorDni) -- una fecha_vencimiento
+  // futura por sí sola YA NO alcanza.
+  it('fecha_vencimiento residual (futura) SIN fila real de Aparatos -- NO aparece (caso Arianna)', () => {
+    const socio = {
+      ...SOCIO_CON_FOTO,
+      plan: ['Boxeo'],
+      fechaVencimiento: '2099-01-01', // residual -- sin ninguna fila real detrás
+      aparatosVigenteReal: false,
+      creditosPwaPorDisciplina: [],
+    }
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
     expect(screen.queryByText('Aparatos')).toBeNull()
   })
@@ -111,7 +131,7 @@ describe('PlanCell -- "Plan / Membresía" calculado en vivo, no socios.plan (fix
     const socio = {
       ...SOCIO_CON_FOTO,
       plan: [],
-      fechaVencimiento: '2099-01-01',
+      aparatosVigenteReal: true,
       creditosPwaPorDisciplina: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6 }],
     }
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
@@ -121,7 +141,7 @@ describe('PlanCell -- "Plan / Membresía" calculado en vivo, no socios.plan (fix
   })
 
   it('sin nada activo (ni créditos ni Aparatos) -- muestra "—"', () => {
-    const socio = { ...SOCIO_CON_FOTO, plan: ['CrossFit', 'Aparatos'], fechaVencimiento: null, creditosPwaPorDisciplina: [] }
+    const socio = { ...SOCIO_CON_FOTO, plan: ['CrossFit', 'Aparatos'], aparatosVigenteReal: false, creditosPwaPorDisciplina: [] }
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
     expect(screen.getAllByText('—').length).toBeGreaterThan(0)
   })
@@ -555,7 +575,7 @@ describe('EstadoBadge -- "Activo"/"Inactivo" sobre datos reales, sin gate por so
       ...SOCIO_CON_FOTO,
       plan: ['CrossFit', 'Aparatos'],
       creditosPwaPorDisciplina: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 0, lotes: [] }],
-      fechaVencimiento: '2099-01-01',
+      aparatosVigenteReal: true,
     }
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
     expect(screen.getAllByText('Activo').length).toBeGreaterThan(0)
@@ -572,20 +592,36 @@ describe('EstadoBadge -- "Activo"/"Inactivo" sobre datos reales, sin gate por so
     expect(screen.queryByText('Activo')).toBeNull()
   })
 
-  // CAMBIO 4 -- antes, una fecha_vencimiento futura SIN Aparatos tildado en
-  // socio.plan no contaba como "vigente" (el gate esPlanDeCreditos/
-  // tienePlanDeVencimiento). Ahora EstadoBadge ya NO mira socio.plan para
-  // nada (mismo criterio que PlanCell/aparatosActivoReal): una fecha
-  // futura SIEMPRE cuenta como Aparatos vigente, sin importar el plan.
-  it('CAMBIO 4 -- fecha_vencimiento futura SIN Aparatos en el plan SÍ cuenta como vigente ahora (ya no depende de socio.plan)', () => {
+  // CAMBIO 4 (ticket anterior) -- EstadoBadge ya no mira socio.plan para
+  // nada, decide sobre datos reales sin importar qué diga el plan.
+  it('CAMBIO 4 -- Aparatos vigente real, sin Aparatos tildado en el plan -- SÍ cuenta como Activo (ya no depende de socio.plan)', () => {
     const socio = {
       ...SOCIO_CON_FOTO, // plan: ['CrossFit']
-      fechaVencimiento: '2099-01-01',
+      aparatosVigenteReal: true,
       creditosPwaPorDisciplina: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 0, lotes: [] }],
     }
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
     expect(screen.getAllByText('Activo').length).toBeGreaterThan(0)
     expect(screen.queryByText('Inactivo')).toBeNull()
+  })
+
+  // BUG REAL (caso Arianna Isgro, DNI 51705419) -- ANTES una
+  // fecha_vencimiento futura SOLA (sin confirmar ninguna fila real en
+  // user_credits) ya alcanzaba para que EstadoBadge mostrara "Activo" --
+  // exactamente el bug de este ticket. Ahora aparatosActivoReal() lee
+  // `aparatosVigenteReal` (resuelto contra user_credits de verdad en
+  // Socios.jsx), no la fecha copiada -- una fecha residual sin nada real
+  // detrás muestra "Inactivo", como corresponde.
+  it('fecha_vencimiento futura residual, SIN fila real de Aparatos y sin créditos -- "Inactivo" (caso Arianna)', () => {
+    const socio = {
+      ...SOCIO_CON_FOTO,
+      fechaVencimiento: '2099-01-01', // residual -- sin ninguna fila real detrás
+      aparatosVigenteReal: false,
+      creditosPwaPorDisciplina: [],
+    }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('Inactivo').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Activo')).toBeNull()
   })
 
   // CAMBIO 2 -- "Cuota Vencida" y "dado de baja" ya no se distinguen en el

@@ -80,15 +80,25 @@ async function esperarCuentaPwa(dni, intentos = 6, esperaMs = 800) {
 }
 
 // FIX (checkboxes "reflejan la realidad", caso real Valentina Ramon) --
-// Aparatos vigente = fecha_vencimiento en el futuro, sin depender de
-// socio.plan -- mismo criterio que aparatosActivoReal() en SociosTabla.jsx
-// (PlanCell), duplicado acá a propósito: son dos componentes sin relación
-// de import entre sí, y la función es una sola comparación de fecha, no
-// vale la pena crear un módulo compartido por esto. Pase Libre es un alias
-// de la misma columna/disciplina -- se trata idéntico a Aparatos.
+// Aparatos vigente sin depender de socio.plan -- mismo criterio que
+// aparatosActivoReal() en SociosTabla.jsx (PlanCell), duplicado acá a
+// propósito: son dos componentes sin relación de import entre sí, y la
+// función es una sola comparación, no vale la pena crear un módulo
+// compartido por esto. Pase Libre es un alias de la misma columna/
+// disciplina -- se trata idéntico a Aparatos.
+//
+// BUG REAL (caso Arianna Isgro, DNI 51705419): ANTES esto comparaba
+// `socio.fechaVencimiento` (mirror de socios.fecha_vencimiento) contra hoy,
+// sin confirmar que existiera una fila real detrás en user_credits -- un
+// residuo (import de CrossFy, el campo "Fecha de vencimiento" ya eliminado
+// de este mismo modal) podía dejar esa columna con una fecha futura SIN
+// ninguna membresía real, y el checkbox quedaba tildado para siempre (ni
+// siquiera admin_quitar_disciplina_socio podía destildarlo -- sin ninguna
+// fila que actualizar, no tenía nada que corregir). Ahora lee
+// `socio.aparatosVigenteReal` -- un booleano YA resuelto contra
+// user_credits de verdad (fetchAparatosVigentePorDni, Socios.jsx).
 function aparatosActivoReal(socio) {
-  if (!socio?.fechaVencimiento) return false
-  return new Date(`${socio.fechaVencimiento}T00:00:00`).getTime() > Date.now()
+  return socio?.aparatosVigenteReal === true
 }
 
 function NuevoSocioModal({

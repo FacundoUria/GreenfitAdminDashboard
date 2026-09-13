@@ -173,7 +173,7 @@ describe('NuevoSocioModal -- edición: los checkboxes reflejan lo que el socio t
     email: 'marina@test.com',
     telefono: '',
     plan: [],
-    fechaVencimiento: '2099-01-01',
+    aparatosVigenteReal: true,
     creditosPwaPorDisciplina: [],
   }
 

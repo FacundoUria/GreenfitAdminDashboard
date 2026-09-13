@@ -35,14 +35,23 @@ function tieneAparatosVigente(socio) {
 }
 
 // FIX (checkboxes/columna "reflejan la realidad", caso real Valentina
-// Ramon) -- Aparatos vigente = fecha_vencimiento en el futuro, PUNTO --
-// sin el gate `tienePlanDeVencimiento(socio.plan)` que sí tiene
-// tieneAparatosVigente() (usada por VencimientoCell/EstadoBadge, fuera de
+// Ramon) -- Aparatos vigente sin el gate `tienePlanDeVencimiento(socio.plan)`
+// que sí tiene tieneAparatosVigente() (usada por VencimientoCell, fuera de
 // alcance de este ticket). Pase Libre es un alias de la misma columna/
 // disciplina -- no se distingue, se trata idéntico a Aparatos.
+//
+// BUG REAL (caso Arianna Isgro, DNI 51705419): esto comparaba
+// `socio.fechaVencimiento` (un MIRROR de socios.fecha_vencimiento) contra
+// hoy, sin confirmar que existiera una fila real detrás en user_credits.
+// Un residuo (import de CrossFy, el campo "Fecha de vencimiento" ya
+// eliminado de Editar Socio) podía dejar esa columna con una fecha futura
+// SIN ninguna membresía real -- el checkbox/columna "mentían" Aparatos
+// activo, y como no hay ninguna fila que actualizar, ni
+// admin_quitar_disciplina_socio() podía corregirlo (ver ese RPC). Ahora lee
+// `socio.aparatosVigenteReal` -- un booleano YA resuelto contra user_credits
+// de verdad (fetchAparatosVigentePorDni, Socios.jsx), no una fecha copiada.
 function aparatosActivoReal(socio) {
-  if (!socio.fechaVencimiento) return false
-  return new Date(`${socio.fechaVencimiento}T00:00:00`).getTime() > Date.now()
+  return socio?.aparatosVigenteReal === true
 }
 
 // FIX (modelo de "plan único") -- ANTES esta columna mostraba
@@ -83,7 +92,7 @@ const CLASES_ACTIVO = 'bg-greenfit-primary/15 text-greenfit-primary'
 // sin mirar socio.plan ni socio.estado para nada:
 //
 //   ¿tiene ALGO vigente hoy? (un lote de créditos activo en cualquier
-//   disciplina, O Aparatos con fecha_vencimiento futura -- aparatosActivoReal,
+//   disciplina, O una fila real de Aparatos vigente -- aparatosActivoReal,
 //   la misma función SIN gate por plan que ya usa PlanCell más abajo).
 //
 // Sí -> "Activo". No -> "Inactivo" -- con el MISMO estilo/label para el

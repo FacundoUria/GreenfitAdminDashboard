@@ -173,6 +173,62 @@ export async function fetchCreditosPorDisciplina(dnis) {
   return resultado
 }
 
+// BUG REAL (caso Arianna Isgro, DNI 51705419): "¿Aparatos está activo?" se
+// venía decidiendo mirando SOLO socios.fecha_vencimiento (un mirror que
+// varias fuentes viejas -- import de CrossFy, el campo "Fecha de
+// vencimiento" ya eliminado de Editar Socio -- pueden haber dejado con una
+// fecha futura SIN que exista ninguna fila real detrás en user_credits).
+// Esta función es la fuente real: en batch (mismo criterio que
+// fetchCreditosPorDisciplina/fetchAvataresYNiveles), confirma que EXISTA
+// una fila de disciplina kind='membership' con expires_at > ahora para
+// cada socio -- no se lee fecha_vencimiento acá para nada. Devuelve un Map
+// dni -> true SOLO para los socios con Aparatos genuinamente vigente; un
+// dni ausente del Map significa "no, no hay nada real" (no un `false`
+// explícito, mismo criterio que el resto de esta fuente).
+//
+// Consulta SEPARADA de fetchCreditosPorDisciplina a propósito -- esa
+// función filtra kind='credits' por diseño (ver su comentario), mezclar
+// las dos responsabilidades en una sola función/shape de retorno hubiera
+// obligado a tocar todos sus call-sites (Home/Socios/Reportes/
+// CreditosEditablesSocio) por un fix que en los hechos solo necesitan
+// SociosTabla.jsx y NuevoSocioModal.jsx.
+export async function fetchAparatosVigentePorDni(dnis) {
+  const dnisValidos = Array.from(new Set((dnis ?? []).filter(Boolean)))
+  if (dnisValidos.length === 0) return new Map()
+
+  const { data: perfiles, error: perfilesError } = await supabase.from('profiles').select('id, dni').in('dni', dnisValidos)
+  if (perfilesError) {
+    console.error('No se pudieron resolver las cuentas PWA para confirmar Aparatos vigente:', perfilesError.message)
+    return new Map()
+  }
+  const dniPorUserId = new Map((perfiles ?? []).map((p) => [p.id, p.dni]))
+  const userIds = Array.from(dniPorUserId.keys())
+  if (userIds.length === 0) return new Map()
+
+  const { data: filas, error: aparatosError } = await supabase
+    .from('user_credits')
+    .select('user_id, expires_at, discipline:disciplines(kind)')
+    .in('user_id', userIds)
+  if (aparatosError) {
+    if (esErrorDeRelacionFaltante(aparatosError)) return new Map()
+    console.error('No se pudo confirmar Aparatos vigente real de la PWA:', aparatosError.message)
+    return new Map()
+  }
+
+  const ahora = Date.now()
+  const resultado = new Map()
+  for (const fila of filas ?? []) {
+    const disciplina = Array.isArray(fila.discipline) ? fila.discipline[0] : fila.discipline
+    if (!disciplina || disciplina.kind !== 'membership') continue
+    if (!fila.expires_at || new Date(fila.expires_at).getTime() <= ahora) continue
+
+    const dni = dniPorUserId.get(fila.user_id)
+    if (!dni) continue
+    resultado.set(dni, true)
+  }
+  return resultado
+}
+
 // ============================================================
 // Ficha 360° -- Historial único de Asistencias y Entrenamientos
 // ============================================================

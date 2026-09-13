@@ -59,7 +59,7 @@ describe('CreditosEditablesSocio (reemplaza a los steppers sueltos de SociosTabl
     mockearCarga({ entradas: [] })
 
     const { container } = render(
-      <CreditosEditablesSocio socio={{ id: 's2', dni: DNI_FACUNDO, plan: ['Aparatos'], fechaVencimiento: '2099-01-01' }} />,
+      <CreditosEditablesSocio socio={{ id: 's2', dni: DNI_FACUNDO, plan: ['Aparatos'], aparatosVigenteReal: true }} />,
     )
 
     await waitFor(() => expect(fetchCreditosPorDisciplina).toHaveBeenCalled())
@@ -428,7 +428,7 @@ describe('CreditosEditablesSocio -- "+ Agregar Aparatos" (CAMBIO 5)', () => {
     vi.spyOn(window, 'alert').mockImplementation(() => {})
   })
 
-  it('Aparatos NO vigente (sin fechaVencimiento) -- muestra el botón "+ Agregar Aparatos"', async () => {
+  it('Aparatos NO vigente (sin fila real) -- muestra el botón "+ Agregar Aparatos"', async () => {
     mockearCarga({
       entradas: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6, lotes: [] }],
     })
@@ -439,17 +439,37 @@ describe('CreditosEditablesSocio -- "+ Agregar Aparatos" (CAMBIO 5)', () => {
     expect(screen.getByRole('button', { name: /Agregar Aparatos/ })).toBeTruthy()
   })
 
-  it('Aparatos YA vigente (fechaVencimiento futura) -- NO muestra el botón', async () => {
+  it('Aparatos YA vigente (fila real en user_credits) -- NO muestra el botón', async () => {
     mockearCarga({
       entradas: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6, lotes: [] }],
     })
 
     render(
-      <CreditosEditablesSocio socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit'], fechaVencimiento: '2099-01-01' }} />,
+      <CreditosEditablesSocio socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit'], aparatosVigenteReal: true }} />,
     )
 
     await screen.findByText('CrossFit')
     expect(screen.queryByRole('button', { name: /Agregar Aparatos/ })).toBeNull()
+  })
+
+  // BUG REAL (caso Arianna Isgro, DNI 51705419) -- ANTES una
+  // fechaVencimiento futura SOLA (sin ninguna fila real de user_credits)
+  // ya bastaba para ocultar este botón, justo cuando era LO ÚNICO que
+  // podía corregirla. Ahora depende de `aparatosVigenteReal` -- una fecha
+  // residual sin nada real detrás no oculta el botón.
+  it('fechaVencimiento futura residual, SIN fila real de Aparatos -- el botón sigue disponible (caso Arianna)', async () => {
+    mockearCarga({
+      entradas: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6, lotes: [] }],
+    })
+
+    render(
+      <CreditosEditablesSocio
+        socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit'], fechaVencimiento: '2099-01-01', aparatosVigenteReal: false }}
+      />,
+    )
+
+    await screen.findByText('CrossFit')
+    expect(screen.getByRole('button', { name: /Agregar Aparatos/ })).toBeTruthy()
   })
 
   it('confirmar -- llama a agregarAparatosSocio(userId), sin cantidad ni fecha, y refresca al padre', async () => {
@@ -474,7 +494,7 @@ describe('CreditosEditablesSocio -- "+ Agregar Aparatos" (CAMBIO 5)', () => {
     expect(agregarAparatosSocio.mock.calls[0]).toHaveLength(1) // solo userId -- sin discipline_id ni cantidad
     await waitFor(() => expect(onCreditosActualizados).toHaveBeenCalled())
     // El botón desaparece de inmediato en esta misma sesión del modal, sin
-    // esperar a que el padre vuelva a pasar `socio.fechaVencimiento` actualizado.
+    // esperar a que el padre vuelva a pasar `socio.aparatosVigenteReal` actualizado.
     await waitFor(() => expect(screen.queryByRole('button', { name: /Agregar Aparatos/ })).toBeNull())
   })
 

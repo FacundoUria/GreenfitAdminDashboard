@@ -6,11 +6,19 @@ import { fijarCreditosDisciplina, ajustarCreditoDisciplina, agregarAparatosSocio
 
 // CAMBIO 5 (re-agregar Aparatos) -- mismo criterio PLAN-INDEPENDIENTE que ya
 // usan aparatosActivoReal() en SociosTabla.jsx y NuevoSocioModal.jsx
-// (duplicado a propósito, mismo patrón que esos dos): fecha_vencimiento en
-// el futuro, sin mirar socio.plan para nada.
+// (duplicado a propósito, mismo patrón que esos dos).
+//
+// BUG REAL (caso Arianna Isgro, DNI 51705419, fix aplicado a las 3 copias
+// de esta función): ANTES esto comparaba `socio.fechaVencimiento` (mirror
+// de socios.fecha_vencimiento) contra hoy -- un residuo (import de CrossFy,
+// campo viejo ya eliminado) podía dejar esa fecha en el futuro SIN ninguna
+// fila real de Aparatos detrás, y esta función decía "ya está vigente"
+// justo cuando el botón de abajo ("+ Agregar Aparatos") era LO ÚNICO que
+// podía corregirlo -- quedaba oculto, sin ninguna forma de arreglarlo desde
+// acá. Ahora lee `socio.aparatosVigenteReal`, resuelto contra user_credits
+// de verdad (fetchAparatosVigentePorDni, Socios.jsx).
 function aparatosActivoReal(socio) {
-  if (!socio?.fechaVencimiento) return false
-  return new Date(`${socio.fechaVencimiento}T00:00:00`).getTime() > Date.now()
+  return socio?.aparatosVigenteReal === true
 }
 
 // Reemplaza a los steppers -/+1/+4/+8/+12 que vivían sueltos en cada fila
@@ -79,14 +87,13 @@ function CreditosEditablesSocio({ socio, disciplinasActivas = [], onCreditosActu
   const [cantidadNueva, setCantidadNueva] = useState('')
   const [guardandoNueva, setGuardandoNueva] = useState(false)
 
-  // "+ Agregar Aparatos" (CAMBIO 5) -- `aparatosAgregado` es un flag LOCAL,
-  // no un refetch real: este componente nunca trajo datos de Aparatos (solo
-  // créditos, vía fetchCreditosPorDisciplina), así que no hay nada que
-  // refrescar acá -- lo único que puede quedar desactualizado es el propio
-  // `socio.fechaVencimiento` (prop, del padre), que recién se actualiza
-  // cuando Socios.jsx vuelva a hacer fetchSocios(). Este flag evita mostrar
-  // el botón de nuevo en la misma sesión del modal apenas se confirma el
-  // alta, sin depender de ese refetch.
+  // "+ Agregar Aparatos" (CAMBIO 5) -- `aparatosAgregado` es un flag LOCAL
+  // que evita mostrar el botón de nuevo en la misma sesión del modal ANTES
+  // de que termine el refetch real: `onCreditosActualizados` (Socios.jsx,
+  // refrescarCreditosPwa) sí vuelve a pedir aparatosVigenteReal (ver
+  // fetchAparatosVigentePorDni), pero eso es async y el `socio` que este
+  // componente recibe por prop no se actualiza hasta que el padre
+  // re-renderice con el resultado -- este flag cubre ese instante.
   const [aparatosAgregado, setAparatosAgregado] = useState(false)
   const [guardandoAparatos, setGuardandoAparatos] = useState(false)
   const aparatosVigente = aparatosActivoReal(socio) || aparatosAgregado
