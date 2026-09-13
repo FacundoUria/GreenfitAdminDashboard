@@ -59,6 +59,23 @@ const filtroOptions = [
 
 const filtroPlanOptions = [{ value: 'todos', label: 'Todos los planes' }, ...PLANES_DISPONIBLES.map((p) => ({ value: p, label: p }))]
 
+// BUG REAL (filtro por disciplina, caso real "Inactivo" + CrossFit) --
+// ANTES el filtro de disciplina comparaba contra `socio.plan`, el mismo
+// campo de texto legacy editado a mano que PlanCell/CreditosCell/
+// checkboxesEdicion ya habían dejado de leer hacía varios tickets (se
+// desincroniza: "+ Agregar disciplina" nunca lo actualiza, y una
+// disciplina puede agotarse sin que nadie destilde el plan a mano). Un
+// socio podía aparecer (o desaparecer) del filtro por una disciplina que
+// ya no tiene realmente, o que sí tiene pero nunca quedó tildada en el
+// plan. Mismo criterio real que ya usa PlanCell (SociosTabla.jsx): créditos
+// reales por disciplina + 'Aparatos'/'Pase Libre' como alias de la misma
+// membresía si aparatosVigenteReal.
+function disciplinasRealesDelSocio(socio) {
+  const nombres = (socio.creditosPwaPorDisciplina ?? []).map((entrada) => entrada.disciplineName)
+  if (socio.aparatosVigenteReal) nombres.push('Aparatos', 'Pase Libre')
+  return nombres
+}
+
 // Activo (no vencido) y con fecha_vencimiento dentro de los próximos
 // DIAS_POR_VENCER días -- mismo criterio que usa el widget del Dashboard,
 // para que el número que ves ahí y lo que filtra acá coincidan.
@@ -278,6 +295,17 @@ function Socios() {
       // devuelve 'inactivo' para el primer caso y 'vencido' para el
       // segundo, ver socioMetrics.js) -- ya no son dos opciones separadas
       // del desplegable (antes 'inactivo_cuenta' y 'vencido').
+      //
+      // BUG REAL (URGENTE, filtro "Inactivo" mostrando socios con badge
+      // "Activo") -- esto compara contra `socio.estado`, que sale de
+      // estadoOperativoSocio() -- el fix real estaba ahí, no acá: esa
+      // función podía devolver 'vencido' para un socio con créditos reales
+      // vigentes en otra disciplina (si Aparatos estaba vencido/residual y
+      // fecha_vencimiento nunca se sincronizó con el resto del plan),
+      // mientras EstadoBadge (que NO mira fecha_vencimiento si hay
+      // créditos reales) mostraba "Activo" -- ver el comentario completo en
+      // socioMetrics.js. Ya arreglado ahí; esta comparación en sí siempre
+      // estuvo bien.
       const coincideEstado =
         filtroEstado === 'todos'
           ? true
@@ -291,7 +319,7 @@ function Socios() {
                   ? estaPorVencer(socio)
                   : socio.estado === filtroEstado // 'activo'
 
-      const coincidePlan = filtroPlan === 'todos' || (socio.plan ?? []).includes(filtroPlan)
+      const coincidePlan = filtroPlan === 'todos' || disciplinasRealesDelSocio(socio).includes(filtroPlan)
 
       return coincideBusqueda && coincideEstado && coincidePlan
     })

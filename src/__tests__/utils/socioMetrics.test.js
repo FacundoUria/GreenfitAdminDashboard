@@ -74,6 +74,47 @@ describe('estadoOperativoSocio', () => {
       )
     })
   })
+
+  // BUG REAL, URGENTE (filtro "Inactivo" de Socios.jsx mostrando socios con
+  // badge "Activo") -- un socio puede tener fecha_vencimiento vencida/
+  // residual (Aparatos nunca renovado, o nunca real -- ver ticket "Aparatos
+  // fantasma") mientras tiene créditos REALES vigentes en otra disciplina
+  // (admin_fijar_creditos_disciplina/admin_ajustar_credito_disciplina nunca
+  // tocan fecha_vencimiento a propósito -- las dos fechas pueden divergir).
+  // ANTES, fecha_vencimiento decidía SOLA apenas existía -- este socio caía
+  // a 'vencido' acá (contado como "Inactivo" en el filtro) mientras
+  // EstadoBadge (SociosTabla.jsx, que mira créditos reales directo, sin
+  // pasar por fecha_vencimiento) lo mostraba "Activo" -- la fila aparecía
+  // con badge "Activo" bajo el filtro "Inactivo". Un crédito real vigente
+  // ahora gana SIEMPRE, sin importar qué diga fecha_vencimiento.
+  describe('créditos reales vigentes GANAN sobre una fecha_vencimiento vencida o residual (fix filtro "Inactivo")', () => {
+    it('fecha_vencimiento VENCIDA + créditos reales vigentes en otra disciplina -> activo, no vencido', () => {
+      const socio = {
+        fecha_vencimiento: '2026-07-01', // Aparatos vencido hace rato
+        activo: true,
+        creditosPwaPorDisciplina: [{ disciplineName: 'CrossFit', remainingCredits: 6 }],
+      }
+      expect(estadoOperativoSocio(socio, REF)).toBe('activo')
+    })
+
+    it('fecha_vencimiento vencida SIN créditos reales -> sigue siendo vencido (no se rompió el caso normal)', () => {
+      const socio = {
+        fecha_vencimiento: '2026-07-01',
+        activo: true,
+        creditosPwaPorDisciplina: [],
+      }
+      expect(estadoOperativoSocio(socio, REF)).toBe('vencido')
+    })
+
+    it('dado de baja + créditos reales vigentes -> sigue siendo inactivo (la baja gana siempre, sin excepción)', () => {
+      const socio = {
+        fecha_vencimiento: '2026-07-01',
+        activo: false,
+        creditosPwaPorDisciplina: [{ disciplineName: 'CrossFit', remainingCredits: 6 }],
+      }
+      expect(estadoOperativoSocio(socio, REF)).toBe('inactivo')
+    })
+  })
 })
 
 describe('getSocioMetrics', () => {

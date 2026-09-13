@@ -18,12 +18,13 @@ function tieneCreditosActivosReal(creditosPwaPorDisciplina) {
 // Reglas (únicas, válidas para toda la app):
 // - Dado de baja (`activo === false`): 'inactivo' -- aparte de
 //   Activo/Vencido, no se mezcla con el estado de pago.
-// - Con fecha de vencimiento: 'activo' si vencimiento >= hoy, 'vencido' si
-//   ya pasó (calcularEstadoCuota ya resuelve esto -- CAMBIO 1, sin ninguna
-//   ventana de tolerancia de por medio).
-// - SIN fecha de vencimiento (nunca tuvo Aparatos -- socio 100% créditos, o
-//   recién dado de alta sin nada cargado todavía): 'activo' SOLO si tiene
-//   al menos un crédito real vigente en alguna disciplina; si no, 'inactivo'.
+// - Con al menos un crédito real vigente en alguna disciplina: 'activo',
+//   SIEMPRE -- sin importar qué diga fecha_vencimiento (ver BUG REAL abajo).
+// - Si no, con fecha de vencimiento: 'activo' si vencimiento >= hoy,
+//   'vencido' si ya pasó (calcularEstadoCuota ya resuelve esto -- CAMBIO 1,
+//   sin ninguna ventana de tolerancia de por medio).
+// - Sin nada de lo anterior (nunca tuvo Aparatos NI créditos reales, o
+//   recién dado de alta sin nada cargado todavía): 'inactivo'.
 //   CAMBIO 3 (bug real: "Activo" con Plan/Créditos/Vencimiento vacíos) --
 //   ANTES el default acá era 'activo' a ciegas, sin mirar si el socio tenía
 //   un solo crédito real -- un socio de créditos que gastó todo y nunca
@@ -33,16 +34,32 @@ function tieneCreditosActivosReal(creditosPwaPorDisciplina) {
 //   ese dato (undefined) cae a 'inactivo' por seguridad, nunca al viejo
 //   default optimista.
 //
+// BUG REAL (filtro "Inactivo" de Socios.jsx mostrando socios con badge
+// "Activo", caso real: socio con Aparatos vencido/residual + créditos
+// reales vigentes en otra disciplina, ej. CrossFit) -- ANTES, si
+// fecha_vencimiento existía, `calcularEstadoCuota` decidía SOLA (activo si
+// vigente, vencido si no) sin mirar los créditos para nada -- un socio con
+// Aparatos vencido pero CrossFit realmente vigente (créditos y Aparatos NO
+// comparten fecha si Aparatos nunca se renovó pero los créditos sí se
+// "Fijaron"/ajustaron después, ver admin_fijar_creditos_disciplina --
+// nunca toca fecha_vencimiento a propósito) caía a 'vencido' acá, mientras
+// EstadoBadge (SociosTabla.jsx) SÍ lo mostraba "Activo" (mira créditos
+// reales directo, sin pasar por fecha_vencimiento). El filtro "Inactivo"
+// (que agrupa 'vencido' + 'inactivo') terminaba incluyendo a ese socio, con
+// su badge diciendo "Activo" en la fila. Ahora un crédito real vigente
+// GANA siempre, mismo criterio que EstadoBadge -- los dos ya no pueden
+// divergir por este motivo.
+//
 // Acepta tanto filas crudas de Supabase (`fecha_vencimiento`, snake_case)
 // como el objeto ya mapeado que arma Socios.jsx (`fechaVencimiento`,
 // camelCase) -- así las tres pantallas pueden llamar exactamente la misma
 // función sin tener que normalizar el shape antes.
 export function estadoOperativoSocio(socio, fechaReferencia = new Date()) {
   if (socio.activo === false) return 'inactivo'
+  if (tieneCreditosActivosReal(socio.creditosPwaPorDisciplina)) return 'activo'
   const fechaVencimiento = socio.fecha_vencimiento ?? socio.fechaVencimiento ?? null
   const estadoPorFecha = calcularEstadoCuota(fechaVencimiento, fechaReferencia)
-  if (estadoPorFecha) return estadoPorFecha
-  return tieneCreditosActivosReal(socio.creditosPwaPorDisciplina) ? 'activo' : 'inactivo'
+  return estadoPorFecha ?? 'inactivo'
 }
 
 // Conteos para las tarjetas de KPI de Home, Socios y Reportes -- las tres
