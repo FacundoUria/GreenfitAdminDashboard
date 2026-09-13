@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  AlertCircle,
   CheckCircle2,
   Loader2,
   MessageCircle,
@@ -263,21 +262,16 @@ function Socios() {
     }
   }, [sociosConEstado])
 
-  // testId comparte prefijo con las tarjetas equivalentes de Home.jsx
-  // (kpi-activos/kpi-vencidos) a propósito -- permite a un test E2E leer
-  // "el mismo número" en las dos pantallas sin depender del texto exacto de
-  // la etiqueta (que además difiere: "Cuotas Vencidas" en Home vs "Cuota
-  // Vencida" acá).
-  //
-  // CAMBIO 2 -- la tarjeta "Cuota Vencida" sigue mostrando el conteo
-  // PRECISO de vencidos (counts.vencido, sin dados de baja mezclados), pero
-  // al hacer click filtra por 'inactivo' -- el desplegable ya no tiene una
-  // opción 'vencido' separada (ver filtroOptions), así que no hay a qué
-  // filtro exacto apuntarla; 'inactivo' es la opción que más se acerca (la
-  // incluye) sin dejar el <select> en un valor que ninguna <option> matchea.
+  // Simplificación de tarjetas de KPI -- mismo criterio que ya se aplicó al
+  // filtro dropdown y al badge de fila (Activo/Por Vencer/Inactivo, ver
+  // tickets anteriores): se sacan "Cuota Vencida" y "En Tolerancia" (esta
+  // última ya no existía, se sacó en el ticket que sacó la tolerancia del
+  // todo) -- quedan solo "Socios Activos" y "Nuevos del Mes". `counts.vencido`
+  // sigue viviendo en `counts` (getSocioMetrics lo sigue distinguiendo
+  // internamente, lo necesitan Home/Reportes) aunque ya no tenga tarjeta
+  // propia acá.
   const kpis = [
     { key: 'activo', testId: 'kpi-activos', label: 'Socios Activos', value: counts.activo, icon: Users },
-    { key: 'inactivo', testId: 'kpi-vencidos', label: 'Cuota Vencida', value: counts.vencido, icon: AlertCircle },
     { key: 'nuevo', testId: 'kpi-nuevos', label: 'Nuevos del Mes', value: counts.nuevo, icon: UserPlus },
   ]
 
@@ -669,7 +663,11 @@ function Socios() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {/* Solo 2 tarjetas (se sacaron "Cuota Vencida" y "En Tolerancia") --
+          grilla tope en sm:grid-cols-2 con ancho acotado, en vez de la de 4
+          columnas de antes: dos tarjetas estiradas a todo el ancho de la
+          pantalla en desktop se veían sueltas/desbalanceadas. */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:max-w-2xl">
         {kpis.map(({ key, testId, label, subtitulo, value, icon: Icon }) => (
           <button
             key={key}

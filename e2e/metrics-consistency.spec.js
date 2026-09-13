@@ -207,11 +207,16 @@ test('Home y Socios muestran EXACTAMENTE los mismos números de Activos/Vencidos
   // depende de un fetch aparte (fetchCreditosPorDisciplina, CAMBIO 3), que
   // puede resolver en un tick posterior al que ya pintó a Ana. `esperarKpi`
   // reintenta sola hasta que el número final (créditos incluidos) está --
-  // mismos valores literales que Home, la garantía real es que ACÁ TAMBIÉN
-  // se llega a esos mismos 2/2 (no solo que "matchea lo que Home leyó").
+  // mismo valor literal que Home, la garantía real es que ACÁ TAMBIÉN se
+  // llega a ese mismo 2 (no solo que "matchea lo que Home leyó").
   await esperarKpi(page, 'kpi-activos', homeActivos)
-  await esperarKpi(page, 'kpi-vencidos', homeVencidas)
   await expect(page.getByTestId('kpi-tolerancia')).toHaveCount(0)
+  // Ticket de simplificación de tarjetas -- Socios.jsx ya no tiene tarjeta
+  // de "Cuota Vencida" (solo quedan "Socios Activos" y "Nuevos del Mes");
+  // ese número sigue viviendo en Home ("Cuotas Vencidas", ya afirmado
+  // arriba) y en el conteo interno de getSocioMetrics (counts.vencido, lo
+  // sigue necesitando el filtro "Inactivo" de más abajo).
+  await expect(page.getByTestId('kpi-vencidos')).toHaveCount(0)
 
   // CAMBIO 2 -- el desplegable de filtro ya no ofrece "Cuota Vencida" ni
   // "Inactivos (dados de baja)" por separado, solo "Inactivo" (unificado).
