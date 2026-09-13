@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import Reportes from '../../pages/Reportes'
 
 // Bug real (auditoría de Reportes): los KPIs y el gráfico "Socios Activos
@@ -42,10 +42,11 @@ const mockedFrom = supabase.from
 
 // Thenable CON `.in()` -- Reportes.jsx hace `supabase.from('socios').select('*')`
 // (awaited directo), pero desde CAMBIO 3 también llama a
-// fetchCreditosPorDisciplina() (utils/fichaSocioPwa.js), que encadena
-// `.select(...).in(...)` sobre `profiles`/`user_credits`. Un solo objeto que
-// sea awaitable Y tenga `.in()` (ambos resolviendo al mismo resultado) cubre
-// los dos patrones sin duplicar el mock.
+// fetchCreditosPorDisciplina()/fetchAparatosVigentePorDni()
+// (utils/fichaSocioPwa.js), que encadenan `.select(...).in(...)` sobre
+// `profiles`/`user_credits`. Un solo objeto que sea awaitable Y tenga
+// `.in()` (ambos resolviendo al mismo resultado) cubre los dos patrones sin
+// duplicar el mock.
 function makeChain(data) {
   const resultado = { data, error: null }
   return {
@@ -56,12 +57,19 @@ function makeChain(data) {
   }
 }
 
-// Los fixtures de este archivo no dependen de créditos reales (todos tienen
-// fecha_vencimiento propia o activo=false) -- `profiles`/`user_credits`
-// vacíos alcanza; fetchCreditosPorDisciplina() simplemente no encuentra
-// ninguna cuenta PWA y devuelve un Map vacío, sin afectar ningún assert.
-function mockSupabaseTables(socios) {
-  mockedFrom.mockImplementation((tabla) => (tabla === 'socios' ? makeChain(socios) : makeChain([])))
+// `profiles`/`userCredits` opcionales -- BUG REAL #2 (Agustina Aguero, ver
+// socioMetrics.js): estadoOperativoSocio() ya no confía en
+// fecha_vencimiento sola para 'activo', necesita `aparatosVigenteReal`
+// resuelto contra una fila real de user_credits. Los tests que representan
+// un socio con Aparatos GENUINAMENTE vigente pasan esa fila acá; los que no
+// la pasan están representando a propósito "sin nada real detrás".
+function mockSupabaseTables(socios, { profiles = [], userCredits = [] } = {}) {
+  mockedFrom.mockImplementation((tabla) => {
+    if (tabla === 'socios') return makeChain(socios)
+    if (tabla === 'profiles') return makeChain(profiles)
+    if (tabla === 'user_credits') return makeChain(userCredits)
+    return makeChain([])
+  })
 }
 
 // Alta bien antigua -- cae dentro de CUALQUIER mes del rango por defecto (6
@@ -83,6 +91,21 @@ const SOCIO_ACTIVO_NORMAL = {
   created_at: ALTA_ANTIGUA,
 }
 
+// Fila real de Aparatos que respalda la fecha_vencimiento de Martina --
+// sin esto, BUG REAL #2 la contaría "Inactivo" (fecha sin nada real
+// detrás), exactamente el bug que motivó ese fix.
+const PROFILE_ACTIVO_NORMAL = { id: 'profile-s1', dni: SOCIO_ACTIVO_NORMAL.dni }
+const DISCIPLINA_APARATOS_MOCK = { id: 'disc-aparatos', name: 'Aparatos', kind: 'membership' }
+const USER_CREDITS_ACTIVO_NORMAL = [
+  {
+    user_id: PROFILE_ACTIVO_NORMAL.id,
+    discipline_id: DISCIPLINA_APARATOS_MOCK.id,
+    remaining_credits: null,
+    expires_at: `${VENCIMIENTO_FUTURO}T12:00:00.000Z`,
+    discipline: DISCIPLINA_APARATOS_MOCK,
+  },
+]
+
 // El caso del ticket: dado de baja, con fecha_vencimiento todavía futura --
 // `estado` legacy también dice "Activo" a propósito (si algo cayera al
 // fallback de texto libre en vez de al chequeo real de `activo`, seguiría
@@ -102,18 +125,28 @@ describe('Reportes -- KPIs y "Socios Activos (mensual)" excluyen a los dados de 
   beforeEach(() => vi.clearAllMocks())
 
   it('un socio dado de baja con fecha_vencimiento futura NO cuenta como "Socios Activos", ni como Cuota Vencida', async () => {
-    mockSupabaseTables([SOCIO_ACTIVO_NORMAL, SOCIO_BAJA_VENCIMIENTO_FUTURO])
+    mockSupabaseTables([SOCIO_ACTIVO_NORMAL, SOCIO_BAJA_VENCIMIENTO_FUTURO], {
+      profiles: [PROFILE_ACTIVO_NORMAL],
+      userCredits: USER_CREDITS_ACTIVO_NORMAL,
+    })
     render(<Reportes />)
 
+    // Créditos/Aparatos reales resuelven en un fetch APARTE, disparado
+    // recién después de que `loading` ya bajó (ver Reportes.jsx) -- esperar
+    // a que aparezca el texto "Socios Activos" no alcanza para que ese
+    // segundo fetch haya asentado, `waitFor` reintenta hasta que sí.
     const activos = await screen.findByText('Socios Activos')
-    expect(activos.nextElementSibling).toHaveTextContent('1') // solo el normal -- el dado de baja queda afuera
+    await waitFor(() => expect(activos.nextElementSibling).toHaveTextContent('1')) // solo el normal -- el dado de baja queda afuera
 
     expect(screen.getByText('Cuota Vencida').nextElementSibling).toHaveTextContent('0')
   })
 
   // CAMBIO 1 -- la tarjeta "En Tolerancia" se sacó del todo.
   it('CAMBIO 1 -- ya no muestra ninguna tarjeta "En Tolerancia"', async () => {
-    mockSupabaseTables([SOCIO_ACTIVO_NORMAL])
+    mockSupabaseTables([SOCIO_ACTIVO_NORMAL], {
+      profiles: [PROFILE_ACTIVO_NORMAL],
+      userCredits: USER_CREDITS_ACTIVO_NORMAL,
+    })
     render(<Reportes />)
 
     await screen.findByText('Socios Activos')
@@ -121,24 +154,33 @@ describe('Reportes -- KPIs y "Socios Activos (mensual)" excluyen a los dados de 
   })
 
   it('el gráfico "Socios Activos (mensual)" tampoco cuenta al dado de baja en NINGÚN mes del rango', async () => {
-    mockSupabaseTables([SOCIO_ACTIVO_NORMAL, SOCIO_BAJA_VENCIMIENTO_FUTURO])
+    mockSupabaseTables([SOCIO_ACTIVO_NORMAL, SOCIO_BAJA_VENCIMIENTO_FUTURO], {
+      profiles: [PROFILE_ACTIVO_NORMAL],
+      userCredits: USER_CREDITS_ACTIVO_NORMAL,
+    })
     render(<Reportes />)
 
     // El primer <LineChart> renderizado es "Socios Activos (mensual)" --
-    // "Socios Nuevos (mensual)" es el segundo.
+    // "Socios Nuevos (mensual)" es el segundo. Mismo motivo que arriba --
+    // créditos/Aparatos reales resuelven después, `waitFor` reintenta hasta
+    // que el gráfico ya está pintado con ese dato asentado.
     const [chartSociosActivos] = await screen.findAllByTestId('line-chart')
-    const data = JSON.parse(chartSociosActivos.getAttribute('data-chart'))
-
-    expect(data.length).toBeGreaterThan(0)
-    expect(data.every((punto) => punto.valor === 1)).toBe(true)
+    await waitFor(() => {
+      const data = JSON.parse(chartSociosActivos.getAttribute('data-chart'))
+      expect(data.length).toBeGreaterThan(0)
+      expect(data.every((punto) => punto.valor === 1)).toBe(true)
+    })
   })
 
   it('un socio activo normal (sin baja) sigue contando en "Socios Activos" -- sin cambios', async () => {
-    mockSupabaseTables([SOCIO_ACTIVO_NORMAL])
+    mockSupabaseTables([SOCIO_ACTIVO_NORMAL], {
+      profiles: [PROFILE_ACTIVO_NORMAL],
+      userCredits: USER_CREDITS_ACTIVO_NORMAL,
+    })
     render(<Reportes />)
 
     const activos = await screen.findByText('Socios Activos')
-    expect(activos.nextElementSibling).toHaveTextContent('1')
+    await waitFor(() => expect(activos.nextElementSibling).toHaveTextContent('1'))
   })
 
   // CAMBIO 3 (bug real: "Activo" sin nada real) -- un socio 100% créditos
@@ -160,6 +202,43 @@ describe('Reportes -- KPIs y "Socios Activos (mensual)" excluyen a los dados de 
 
     const activos = await screen.findByText('Socios Activos')
     expect(activos.nextElementSibling).toHaveTextContent('0')
+  })
+
+  // BUG REAL #2, URGENTE (filtro "Activo" mostrando socios con badge
+  // "Inactivo", caso real Agustina Aguero DNI 43418750) -- un socio con
+  // fecha_vencimiento futura pero SIN ninguna fila real de Aparatos detrás
+  // (fecha fantasma -- import de CrossFy, campo viejo ya eliminado) NO debe
+  // contar como "Socios Activos" en Reportes tampoco.
+  //
+  // CON cuenta PWA a propósito (profile presente, sin user_credits) -- es
+  // el caso REAL de Agustina: tiene cuenta en la app, simplemente sin
+  // ninguna fila de Aparatos. Distinto de "sin cuenta PWA" (Lucía Paz, ver
+  // registrar-pago-fechas.spec.js), donde fecha_vencimiento SÍ es la única
+  // fuente de verdad posible y debe confiarse en ella completa.
+  it('BUG REAL #2 -- socio CON cuenta PWA pero fecha_vencimiento futura SIN fila real de Aparatos NO cuenta como "Socios Activos" (caso Agustina Aguero)', async () => {
+    const socioFantasma = {
+      id: 's5',
+      nombre: 'Agustina',
+      apellido: 'Aguero',
+      dni: '43418750',
+      activo: true,
+      estado: 'Activo',
+      fecha_vencimiento: VENCIMIENTO_FUTURO, // fantasma -- sin fila real
+      created_at: ALTA_ANTIGUA,
+    }
+    mockSupabaseTables([socioFantasma], {
+      profiles: [{ id: 'profile-agustina', dni: '43418750' }],
+      userCredits: [], // cuenta PWA confirmada, pero sin ninguna fila real
+    })
+    render(<Reportes />)
+
+    // Con cuenta PWA confirmada, ANTES de que fetchAparatosVigentePorDni
+    // resuelva, `aparatosVigenteReal` transitoriamente es `undefined` (el
+    // Map todavía está vacío) -- mismo valor que "sin cuenta PWA", que
+    // confía en la fecha completa. Sin `waitFor`, se podría leer un "1"
+    // transitorio en vez del "0" final ya asentado.
+    const activos = await screen.findByText('Socios Activos')
+    await waitFor(() => expect(activos.nextElementSibling).toHaveTextContent('0'))
   })
 
   it('regresión -- "Nuevos del mes" sigue contando altas de este mes sin importar activo/baja (no se tocó ese criterio)', async () => {

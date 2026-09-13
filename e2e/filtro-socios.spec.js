@@ -179,9 +179,16 @@ test('filtro de estado (Activo/Inactivo/Por Vencer) + disciplina -- AND real, si
   const selectEstado = page.locator('select').first()
   const selectPlan = page.getByLabel('Filtrar por plan/disciplina')
 
-  // Filtro por defecto es 'activo' -- Ana (activa de verdad, con créditos
-  // reales) tiene que estar visible desde el arranque.
+  // Filtro por defecto es 'activo'. Ana depende del fetch de créditos
+  // reales (fetchCreditosPorDisciplina) y Elena depende del fetch de
+  // Aparatos real (fetchAparatosVigentePorDni) -- son DOS fetches
+  // independientes, disparados en paralelo pero resueltos por separado
+  // (ninguno espera al otro). Esperar a las dos ACÁ, antes de tocar el
+  // filtro, evita una carrera real: sin esto, Ana podía aparecer (créditos
+  // ya resueltos) mientras Aparatos todavía no -- y los checks de más abajo
+  // que dependen de Elena (aparatosVigenteReal) leían el Map todavía vacío.
   await expect(tabla.getByText('Ana Fantasma')).toBeVisible()
+  await expect(tabla.getByText('Elena PorVencer')).toBeVisible()
 
   // 1) Solo "Inactivo" -- Ana (Activa de verdad) NO tiene que aparecer, y
   // ningún badge "Activo" tiene que estar en la tabla filtrada.

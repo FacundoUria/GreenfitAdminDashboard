@@ -296,7 +296,7 @@ describe('VencimientoCell -- desglose de vencimiento por lote de créditos (fix 
   })
 
   it('Aparatos (membresía) lleva el mismo prefijo "Vence el " que las líneas de créditos', () => {
-    const socio = { ...SOCIO_SIN_FOTO, fechaVencimiento: '2026-12-31' }
+    const socio = { ...SOCIO_SIN_FOTO, fechaVencimiento: '2026-12-31', aparatosVigenteReal: true }
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
     expect(screen.getAllByText('Vence el 31/12/2026').length).toBeGreaterThan(0)
   })
@@ -386,6 +386,7 @@ describe('VencimientoCell -- fecha_vencimiento solo se muestra si el socio tiene
       ...SOCIO_CON_FOTO,
       plan: ['CrossFit', 'Aparatos'],
       fechaVencimiento: '2026-11-10', // vigente -- ver fix de mostrarAparatos, ya compara contra la fecha real
+      aparatosVigenteReal: true,
       creditosPwaPorDisciplina: [
         { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 12, lotes: [{ id: 'l1', remainingCredits: 12, expiresAt: '2026-09-23T12:00:00.000Z' }] },
       ],
@@ -410,7 +411,7 @@ describe('VencimientoCell -- fecha_vencimiento solo se muestra si el socio tiene
   })
 
   it('socio con Aparatos solamente: 1 fecha sin etiqueta de disciplina, pero CON el prefijo "Vence el "', () => {
-    const socio = { ...SOCIO_SIN_FOTO, fechaVencimiento: '2026-12-31' } // plan: ['Aparatos']
+    const socio = { ...SOCIO_SIN_FOTO, fechaVencimiento: '2026-12-31', aparatosVigenteReal: true } // plan: ['Aparatos']
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
     expect(screen.getAllByText('Vence el 31/12/2026').length).toBeGreaterThan(0)
     expect(screen.queryByText(/Aparatos:/)).toBeNull()
@@ -429,6 +430,7 @@ describe('VencimientoCell -- agrupa por FECHA, no por disciplina (rediseño)', (
       ...SOCIO_CON_FOTO,
       plan: ['CrossFit', 'Aparatos'],
       fechaVencimiento: '2026-10-08',
+      aparatosVigenteReal: true,
       creditosPwaPorDisciplina: [
         { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 4, lotes: [{ id: 'l1', remainingCredits: 4, expiresAt: '2026-10-08T12:00:00.000Z' }] },
       ],
@@ -442,6 +444,7 @@ describe('VencimientoCell -- agrupa por FECHA, no por disciplina (rediseño)', (
       ...SOCIO_CON_FOTO,
       plan: ['CrossFit', 'Boxeo', 'Aparatos'],
       fechaVencimiento: '2026-10-08',
+      aparatosVigenteReal: true,
       creditosPwaPorDisciplina: [
         { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 4, lotes: [{ id: 'l1', remainingCredits: 4, expiresAt: '2026-10-08T12:00:00.000Z' }] },
         { disciplineId: 'd-boxeo', disciplineName: 'Boxeo', remainingCredits: 2, lotes: [{ id: 'l2', remainingCredits: 2, expiresAt: '2026-10-08T15:00:00.000Z' }] },
@@ -458,6 +461,7 @@ describe('VencimientoCell -- agrupa por FECHA, no por disciplina (rediseño)', (
       ...SOCIO_CON_FOTO,
       plan: ['CrossFit', 'Boxeo', 'Aparatos'],
       fechaVencimiento: '2026-10-08',
+      aparatosVigenteReal: true,
       creditosPwaPorDisciplina: [
         { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 4, lotes: [{ id: 'l1', remainingCredits: 4, expiresAt: '2026-10-08T12:00:00.000Z' }] },
         { disciplineId: 'd-boxeo', disciplineName: 'Boxeo', remainingCredits: 2, lotes: [{ id: 'l2', remainingCredits: 2, expiresAt: '2026-10-15T12:00:00.000Z' }] },
@@ -468,7 +472,7 @@ describe('VencimientoCell -- agrupa por FECHA, no por disciplina (rediseño)', (
   })
 
   it('estilo visual unificado -- la línea de Aparatos usa la MISMA clase que la de créditos (sin distinción de tamaño/color)', () => {
-    const socio = { ...SOCIO_SIN_FOTO, fechaVencimiento: '2026-12-31' } // plan: ['Aparatos']
+    const socio = { ...SOCIO_SIN_FOTO, fechaVencimiento: '2026-12-31', aparatosVigenteReal: true } // plan: ['Aparatos']
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
     const lineas = screen.getAllByText('Vence el 31/12/2026')
     expect(lineas.length).toBeGreaterThan(0)
@@ -526,7 +530,7 @@ describe('VencimientoCell -- Aparatos solo se muestra si está VIGENTE de verdad
   })
 
   it('Aparatos genuinamente vigente -- sigue mostrándose normal', () => {
-    const socio = { ...SOCIO_SIN_FOTO, estado: 'activo', fechaVencimiento: '2099-01-01' }
+    const socio = { ...SOCIO_SIN_FOTO, estado: 'activo', fechaVencimiento: '2099-01-01', aparatosVigenteReal: true }
     render(<SociosTabla socios={[socio]} {...HANDLERS} />)
     expect(screen.getAllByText('Vence el 01/01/2099').length).toBeGreaterThan(0)
   })

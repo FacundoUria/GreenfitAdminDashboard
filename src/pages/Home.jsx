@@ -16,7 +16,7 @@ import { supabase } from '../lib/supabaseClient'
 import { colorOcupacion } from '../utils/ocupacion'
 import { diaActualPorDefecto, fechaDeEstaSemana, mapearClasesDesdeBookings } from '../utils/clases'
 import { getSocioMetrics, estadoOperativoSocio } from '../utils/socioMetrics'
-import { fetchCreditosPorDisciplina } from '../utils/fichaSocioPwa'
+import { fetchAparatosVigentePorDni, fetchCreditosPorDisciplina } from '../utils/fichaSocioPwa'
 import ActividadReciente from '../components/ActividadReciente'
 
 const usuario = 'Seba'
@@ -53,6 +53,13 @@ function Home() {
   // fecha_vencimiento -- sin este merge, Home volvería a mostrar más
   // "Socios Activos" de los que realmente hay, igual que el bug original.
   const [creditosPorDni, setCreditosPorDni] = useState(new Map())
+  // Aparatos REALMENTE vigente por DNI -- mismo dato que Socios.jsx
+  // (fetchAparatosVigentePorDni). BUG REAL #2 (caso Agustina Aguero, ver
+  // socioMetrics.js): estadoOperativoSocio() ya no confía en
+  // fecha_vencimiento sola para 'activo' -- exige esta fila real. Sin este
+  // merge, CUALQUIER socio con Aparatos genuinamente vigente (la inmensa
+  // mayoría) contaría "Inactivo" acá, mismo bug pero en la otra dirección.
+  const [aparatosVigentePorDni, setAparatosVigentePorDni] = useState(new Map())
 
   const fetchDatos = async () => {
     setLoading(true)
@@ -108,11 +115,22 @@ function Home() {
   useEffect(() => {
     if (socios.length === 0) return
     fetchCreditosPorDisciplina(socios.map((s) => s.dni)).then(setCreditosPorDni)
+    fetchAparatosVigentePorDni(socios.map((s) => s.dni)).then(setAparatosVigentePorDni)
   }, [socios])
 
   const sociosConCreditos = useMemo(
-    () => socios.map((s) => ({ ...s, creditosPwaPorDisciplina: creditosPorDni.get(s.dni) ?? [] })),
-    [socios, creditosPorDni],
+    () =>
+      socios.map((s) => ({
+        ...s,
+        creditosPwaPorDisciplina: creditosPorDni.get(s.dni) ?? [],
+        // TRI-ESTADO -- NUNCA coercionar a booleano acá (`=== true`
+        // perdería la diferencia entre `false` -- tiene cuenta PWA
+        // confirmada sin nada real -- y `undefined` -- sin cuenta PWA, cae
+        // a fecha_vencimiento directa, ver fetchAparatosVigentePorDni en
+        // fichaSocioPwa.js). Se pasa el valor CRUDO tal cual.
+        aparatosVigenteReal: aparatosVigentePorDni.get(s.dni),
+      })),
+    [socios, creditosPorDni, aparatosVigentePorDni],
   )
 
   // getSocioMetrics() es la MISMA función que usa Socios.jsx para sus

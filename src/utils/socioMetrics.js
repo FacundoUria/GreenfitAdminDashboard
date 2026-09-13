@@ -18,11 +18,14 @@ function tieneCreditosActivosReal(creditosPwaPorDisciplina) {
 // Reglas (únicas, válidas para toda la app):
 // - Dado de baja (`activo === false`): 'inactivo' -- aparte de
 //   Activo/Vencido, no se mezcla con el estado de pago.
-// - Con al menos un crédito real vigente en alguna disciplina: 'activo',
-//   SIEMPRE -- sin importar qué diga fecha_vencimiento (ver BUG REAL abajo).
-// - Si no, con fecha de vencimiento: 'activo' si vencimiento >= hoy,
-//   'vencido' si ya pasó (calcularEstadoCuota ya resuelve esto -- CAMBIO 1,
-//   sin ninguna ventana de tolerancia de por medio).
+// - Con al menos un crédito real vigente en alguna disciplina, O Aparatos
+//   con una fila real vigente en user_credits: 'activo', SIEMPRE -- sin
+//   importar qué diga fecha_vencimiento (ver BUG REAL x2 abajo).
+// - Si no hay nada real, pero fecha_vencimiento existe y ya pasó: 'vencido'
+//   (calcularEstadoCuota -- CAMBIO 1, sin ninguna ventana de tolerancia).
+//   Una fecha_vencimiento FUTURA sin nada real detrás YA NO cuenta como
+//   'activo' -- ver el segundo BUG REAL, es justo el caso que había que
+//   dejar de confiar.
 // - Sin nada de lo anterior (nunca tuvo Aparatos NI créditos reales, o
 //   recién dado de alta sin nada cargado todavía): 'inactivo'.
 //   CAMBIO 3 (bug real: "Activo" con Plan/Créditos/Vencimiento vacíos) --
@@ -34,7 +37,7 @@ function tieneCreditosActivosReal(creditosPwaPorDisciplina) {
 //   ese dato (undefined) cae a 'inactivo' por seguridad, nunca al viejo
 //   default optimista.
 //
-// BUG REAL (filtro "Inactivo" de Socios.jsx mostrando socios con badge
+// BUG REAL #1 (filtro "Inactivo" de Socios.jsx mostrando socios con badge
 // "Activo", caso real: socio con Aparatos vencido/residual + créditos
 // reales vigentes en otra disciplina, ej. CrossFit) -- ANTES, si
 // fecha_vencimiento existía, `calcularEstadoCuota` decidía SOLA (activo si
@@ -44,11 +47,38 @@ function tieneCreditosActivosReal(creditosPwaPorDisciplina) {
 // "Fijaron"/ajustaron después, ver admin_fijar_creditos_disciplina --
 // nunca toca fecha_vencimiento a propósito) caía a 'vencido' acá, mientras
 // EstadoBadge (SociosTabla.jsx) SÍ lo mostraba "Activo" (mira créditos
-// reales directo, sin pasar por fecha_vencimiento). El filtro "Inactivo"
-// (que agrupa 'vencido' + 'inactivo') terminaba incluyendo a ese socio, con
-// su badge diciendo "Activo" en la fila. Ahora un crédito real vigente
-// GANA siempre, mismo criterio que EstadoBadge -- los dos ya no pueden
-// divergir por este motivo.
+// reales directo, sin pasar por fecha_vencimiento). Un crédito real vigente
+// GANA siempre.
+//
+// BUG REAL #2, dirección contraria (filtro "Activo" mostrando socios con
+// badge "Inactivo", caso real Agustina Aguero DNI 43418750) -- esta función
+// SEGUÍA confiando en `calcularEstadoCuota(fecha_vencimiento)` para el
+// resultado 'activo' sin confirmar que existiera una fila real de Aparatos
+// detrás (mismo "fecha fantasma" ya resuelto en aparatosActivoReal() para
+// el checkbox/PlanCell, ver ticket Arianna Isgro, pero nunca aplicado acá).
+// Un socio sin ningún crédito real Y sin Aparatos real, pero con
+// fecha_vencimiento residual futura (import de CrossFy, campo viejo ya
+// eliminado), caía a 'activo' por fecha -- contado como "Activo" en el
+// filtro -- mientras EstadoBadge (que exige la fila real) lo mostraba
+// "Inactivo".
+//
+// `socio.aparatosVigenteReal` es TRI-ESTADO (ver fetchAparatosVigentePorDni
+// en fichaSocioPwa.js) -- true | false | undefined, NO un booleano simple:
+//   - true: fila real vigente confirmada -> 'activo', gana siempre.
+//   - false: tiene cuenta PWA CONFIRMADA sin ninguna fila vigente -- una
+//     fecha_vencimiento futura fantasma ya NO alcanza para 'activo' (el fix
+//     de este ticket); solo importa si esa fecha YA PASÓ, para poder seguir
+//     devolviendo 'vencido' en vez de 'inactivo' (Home/Reportes necesitan
+//     esa distinción, ver getSocioMetrics).
+//   - undefined: el socio NO TIENE cuenta PWA -- no existe ninguna fila de
+//     user_credits que pudiera confirmar nada (ej. cobrado 100% por
+//     mostrador, Registrar Pago, nunca se registró en la app). Para este
+//     caso puntual NO hay "fecha fantasma" posible -- socios.fecha_vencimiento
+//     es la ÚNICA fuente de verdad que existe, y se confía en ella
+//     COMPLETA (tanto para 'activo' como para 'vencido'), igual que
+//     siempre. Tratar este caso igual que `false` rompería Registrar Pago
+//     para cualquier socio sin cuenta PWA (caso real: Lucía Paz, plan de
+//     vencimiento, nunca se registró en la app).
 //
 // Acepta tanto filas crudas de Supabase (`fecha_vencimiento`, snake_case)
 // como el objeto ya mapeado que arma Socios.jsx (`fechaVencimiento`,
@@ -57,8 +87,14 @@ function tieneCreditosActivosReal(creditosPwaPorDisciplina) {
 export function estadoOperativoSocio(socio, fechaReferencia = new Date()) {
   if (socio.activo === false) return 'inactivo'
   if (tieneCreditosActivosReal(socio.creditosPwaPorDisciplina)) return 'activo'
+
   const fechaVencimiento = socio.fecha_vencimiento ?? socio.fechaVencimiento ?? null
   const estadoPorFecha = calcularEstadoCuota(fechaVencimiento, fechaReferencia)
+
+  if (socio.aparatosVigenteReal === true) return 'activo'
+  if (socio.aparatosVigenteReal === false) return estadoPorFecha === 'vencido' ? 'vencido' : 'inactivo'
+  // aparatosVigenteReal === undefined -- sin cuenta PWA, se confía en la
+  // fecha completa (activo o vencido), es la única fuente posible.
   return estadoPorFecha ?? 'inactivo'
 }
 

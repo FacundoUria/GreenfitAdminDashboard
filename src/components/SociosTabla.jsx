@@ -1,5 +1,4 @@
 import { CreditCard, MessageCircle, Pencil, UserX, UserCheck } from 'lucide-react'
-import { planesDeVencimiento, tienePlanDeVencimiento } from '../utils/planes'
 import { formatFecha } from '../utils/fecha'
 
 // Créditos por LOTES (ver supabase_migration_lotes_creditos_fase1/2.sql):
@@ -12,46 +11,54 @@ function tieneCreditosActivos(creditosPwaPorDisciplina) {
   return (creditosPwaPorDisciplina ?? []).some((c) => (c.remainingCredits ?? 0) > 0)
 }
 
-// Aparatos no pasa por fetchCreditosPorDisciplina (esa función filtra
-// kind='credits' a propósito, Aparatos es kind='membership') -- se reusa
-// `socio.fechaVencimiento`, el mismo dato que ya muestra VencimientoCell
-// para esa disciplina, sin ninguna consulta nueva.
+// Aparatos vigente -- fuente ÚNICA para toda esta tabla (PlanCell,
+// EstadoBadge, VencimientoCell): un booleano YA resuelto contra
+// user_credits de verdad (fetchAparatosVigentePorDni, Socios.jsx/Home.jsx/
+// Reportes.jsx), nunca fecha_vencimiento ni socio.plan directo.
 //
-// BUG REAL (caso Agustina Barbero, DNI 43151174, plan=solo CrossFit):
-// esto no chequeaba si el socio REALMENTE tiene Aparatos/Pase Libre
-// tildado en su plan -- socios.fecha_vencimiento es una sola columna que
-// se puede haber cargado alguna vez (alta vieja, migración de CrossFy, o
-// el campo "Fecha de vencimiento" de NuevoSocioModal, que aplica a
-// CUALQUIER plan) sin que le corresponda a una membresía real hoy. Un
-// socio 100% créditos con un remanente vencido pero una
-// `fecha_vencimiento` residual todavía futura podía figurar "Con
-// Créditos" en el badge por esa fecha sola, sin tener ni un crédito real
-// ni Aparatos. Ahora exige `tienePlanDeVencimiento` primero.
-function tieneAparatosVigente(socio) {
-  if (!tienePlanDeVencimiento(socio.plan)) return false
-  if (!socio.fechaVencimiento) return false
-  const vencimiento = new Date(`${socio.fechaVencimiento}T00:00:00`)
-  return vencimiento.getTime() > Date.now()
-}
-
-// FIX (checkboxes/columna "reflejan la realidad", caso real Valentina
-// Ramon) -- Aparatos vigente sin el gate `tienePlanDeVencimiento(socio.plan)`
-// que sí tiene tieneAparatosVigente() (usada por VencimientoCell, fuera de
-// alcance de este ticket). Pase Libre es un alias de la misma columna/
-// disciplina -- no se distingue, se trata idéntico a Aparatos.
+// Hasta acá había DOS funciones separadas para esto (tieneAparatosVigente,
+// gateada por tienePlanDeVencimiento(socio.plan), y esta -- sin ese gate),
+// cada una con su propia versión del mismo bug real en distinto momento:
 //
-// BUG REAL (caso Arianna Isgro, DNI 51705419): esto comparaba
-// `socio.fechaVencimiento` (un MIRROR de socios.fecha_vencimiento) contra
-// hoy, sin confirmar que existiera una fila real detrás en user_credits.
-// Un residuo (import de CrossFy, el campo "Fecha de vencimiento" ya
-// eliminado de Editar Socio) podía dejar esa columna con una fecha futura
-// SIN ninguna membresía real -- el checkbox/columna "mentían" Aparatos
-// activo, y como no hay ninguna fila que actualizar, ni
-// admin_quitar_disciplina_socio() podía corregirlo (ver ese RPC). Ahora lee
-// `socio.aparatosVigenteReal` -- un booleano YA resuelto contra user_credits
-// de verdad (fetchAparatosVigentePorDni, Socios.jsx), no una fecha copiada.
+// BUG REAL #1 (caso Agustina Barbero, DNI 43151174, plan=solo CrossFit):
+// comparar fecha_vencimiento SIN mirar el plan dejaba que una fecha
+// residual (CrossFy, o el campo "Fecha de vencimiento" ya eliminado de
+// Editar Socio) figurara como Aparatos vigente sin que el socio lo tuviera
+// tildado. "Arreglado" en su momento agregando el gate
+// tienePlanDeVencimiento(socio.plan) -- pero socio.plan es EXACTAMENTE el
+// mismo campo stale que el resto de esta tabla (PlanCell/CreditosCell) ya
+// había dejado de leer para todo lo demás.
+//
+// BUG REAL #2 (caso Arianna Isgro, DNI 51705419): la fecha_vencimiento
+// residual del bug #1 puede convivir con un `socio.plan` que TODAVÍA dice
+// "Aparatos" (nunca se destildó) -- el gate del fix anterior no alcanzaba
+// para nada en ese caso: seguía "vigente" con una fecha fantasma sin
+// ninguna fila real detrás. Ahí se resolvió (para PlanCell/EstadoBadge)
+// leyendo `socio.aparatosVigenteReal` en vez de la fecha -- pero
+// VencimientoCell (más abajo) seguía usando la OTRA función
+// (tieneAparatosVigente, con el gate por plan) -- un cuarto lugar con el
+// mismo bug, sin arreglar (caso real: Agustina Aguero, DNI 43418750,
+// "Vence el 16/09/2026" con Plan/Membresía vacío). Ahora las dos
+// consumidoras usan esta única función.
+//
+// `aparatosVigenteReal` es TRI-ESTADO (ver fetchAparatosVigentePorDni en
+// fichaSocioPwa.js) -- true | false | undefined:
+//   - true: fila real vigente confirmada -> Aparatos activo.
+//   - false: tiene cuenta PWA CONFIRMADA sin ninguna fila vigente -- NO
+//     activo, sin importar qué diga fecha_vencimiento (el fix de este
+//     ticket, caso Agustina Aguero).
+//   - undefined: el socio NO tiene cuenta PWA -- no existe ninguna fila de
+//     user_credits posible (ej. cobrado 100% por mostrador, nunca se
+//     registró en la app). Acá SÍ se cae a fecha_vencimiento directa, es la
+//     única fuente de verdad que existe para este caso -- tratarlo como
+//     `false` rompería "Registrar Pago" para cualquier socio sin cuenta
+//     PWA (caso real: Lucía Paz, plan de vencimiento).
 function aparatosActivoReal(socio) {
-  return socio?.aparatosVigenteReal === true
+  const vigente = socio?.aparatosVigenteReal
+  if (vigente === true) return true
+  if (vigente === false) return false
+  if (!socio?.fechaVencimiento) return false
+  return new Date(`${socio.fechaVencimiento}T00:00:00`).getTime() > Date.now()
 }
 
 // FIX (modelo de "plan único") -- ANTES esta columna mostraba
@@ -266,16 +273,18 @@ const MAX_GRUPOS_FECHA_EN_DESGLOSE = 3
 // créditos de abajo no dependen de nada de esto (se rigen por sus propios
 // lotes, ver `agrupados`/`entradasMultiFecha`).
 //
-// BUG REAL (caso Agustina Barbero, DNI 43151174, plan=solo CrossFit):
+// BUG REAL (caso Agustina Barbero, DNI 43151174, plan=solo CrossFit; y
+// después caso Agustina Aguero, DNI 43418750, con el mismo síntoma) --
 // esto mostraba `socios.fecha_vencimiento` SIEMPRE que hubiera un valor y
 // el socio estuviera activo, sin chequear si el socio REALMENTE tiene
-// Aparatos/Pase Libre tildado -- una fecha residual (dato sucio de la
-// migración de CrossFy, o cargada una vez desde el campo "Fecha de
-// vencimiento" de NuevoSocioModal, que aplica a cualquier plan) se veía
-// como una segunda fecha sin etiqueta, indistinguible de la de créditos.
-// Ahora exige `tienePlanDeVencimiento` (Aparatos O Pase Libre -- las dos
-// etiquetas que usan esta misma columna, ver utils/planes.js) antes de
-// mostrar nada.
+// Aparatos vigente -- una fecha residual (dato sucio de la migración de
+// CrossFy, o cargada una vez desde el campo "Fecha de vencimiento" de
+// NuevoSocioModal, ya eliminado) se veía como una segunda fecha sin
+// etiqueta, indistinguible de la de créditos. El primer intento de arreglo
+// (gatear por `tienePlanDeVencimiento(socio.plan)`) no alcanzaba -- ese
+// campo puede seguir diciendo "Aparatos" aunque no haya ninguna fila real
+// (nunca se destildó). Ahora usa `aparatosActivoReal()`, la misma fuente
+// real que ya usan PlanCell/EstadoBadge -- sin mirar socio.plan para nada.
 //
 // REDISEÑO -- agrupar por FECHA, no por disciplina (antes: una línea POR
 // DISCIPLINA, cada una con su propio texto -- si 2 disciplinas vencían el
@@ -300,25 +309,35 @@ function VencimientoCell({ socio }) {
   // cuota general del socio, esa ventana de gracia tenía sentido. Bajo el
   // modelo nuevo (acreditar_pack -- un solo plan activo), fecha_vencimiento
   // pasó a representar específicamente la vigencia de Aparatos del ÚLTIMO
-  // pack -- comparar la fecha directo (mismo patrón que ya usa
-  // tieneAparatosVigente(), reusada acá tal cual) es lo único que
-  // realmente contesta "¿esto sigue vigente ahora mismo?", sin ninguna
-  // ventana de gracia de por medio (caso real: Facundo Uria, DNI 44537978
-  // -- con `estado==='activo'` seguía mostrando Aparatos "Vence el ..." con
-  // una fecha ya reseteada). CAMBIO 1 (ticket aparte) sacó la tolerancia
-  // del todo -- este comentario documenta por qué VencimientoCell nunca la
+  // pack -- comparar la fecha directo es lo único que realmente contesta
+  // "¿esto sigue vigente ahora mismo?", sin ninguna ventana de gracia de
+  // por medio (caso real: Facundo Uria, DNI 44537978 -- con
+  // `estado==='activo'` seguía mostrando Aparatos "Vence el ..." con una
+  // fecha ya reseteada). CAMBIO 1 (ticket aparte) sacó la tolerancia del
+  // todo -- este comentario documenta por qué VencimientoCell nunca la
   // necesitó ni siquiera cuando existía.
-  const mostrarAparatos = tieneAparatosVigente(socio)
-  // "Aparatos" y "Pase Libre" son las dos etiquetas posibles de la misma
-  // columna (fecha_vencimiento) -- en el caso real (uno de los dos
-  // tildado) esto da un solo nombre; el `join` es solo para el caso
-  // teórico de tener ambos tildados a la vez, sin perder ningún dato.
-  const etiquetaMembresia = planesDeVencimiento(socio.plan).join(' + ')
+  //
+  // aparatosActivoReal() ya confirma que existe una fila real detrás (ver
+  // el comentario completo junto a esa función, casos Agustina
+  // Barbero/Arianna Isgro/Agustina Aguero) -- una vez confirmado eso, la
+  // FECHA que se muestra sigue siendo `socio.fechaVencimiento` (el mirror),
+  // que si hay una fila real SÍ está sincronizado con ella.
+  const mostrarAparatos = aparatosActivoReal(socio)
+  // Nomenclatura estricta (mismo criterio que PlanCell): "Aparatos" a
+  // secas, sin leer socio.plan -- ese campo puede estar vacío o decir otra
+  // cosa (residuo, nunca actualizado) aunque mostrarAparatos ya haya
+  // confirmado que la membresía es real.
+  const etiquetaMembresia = 'Aparatos'
 
   const entradasSimples = [] // { nombre, fechaISO } -- una fecha única por disciplina
   const entradasMultiFecha = [] // { nombre, texto } -- disciplinas con 2+ fechas propias
 
-  if (mostrarAparatos) {
+  // `&& socio.fechaVencimiento` -- guarda defensiva: en producción, una
+  // fila real de Aparatos (mostrarAparatos=true) siempre debería venir con
+  // fecha_vencimiento sincronizada (todos los RPCs que escriben una
+  // escriben la otra a la vez), pero si algún día no fuera así, mejor no
+  // mostrar nada a reventar tratando de formatear una fecha inexistente.
+  if (mostrarAparatos && socio.fechaVencimiento) {
     entradasSimples.push({ nombre: etiquetaMembresia, fechaISO: socio.fechaVencimiento })
   }
 

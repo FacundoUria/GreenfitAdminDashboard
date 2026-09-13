@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { loginComoAdmin } from './support/auth.js'
 import { irASocios } from './support/nav.js'
-import { DISCIPLINA_CROSSFIT } from './support/fixtures.js'
+import { DISCIPLINA_CROSSFIT, DISCIPLINA_APARATOS } from './support/fixtures.js'
 
 // Cubre el fix de "Socios Activos"/"Cuotas Vencidas" mostrando números
 // DISTINTOS en Home y en Socios para el mismo padrón de socios -- ambas
@@ -28,6 +28,10 @@ function fechaOffset(dias) {
 
 const SOCIOS_MIXTOS = [
   {
+    // BUG REAL #2 (ver socioMetrics.js) -- fecha_vencimiento futura SOLA ya
+    // no alcanza para 'activo': necesita una fila real de Aparatos detrás
+    // (ver PROFILE_ANA/user_credits más abajo) -- en producción, toda
+    // fecha_vencimiento vigente viene siempre acompañada de una fila real.
     id: 'socio-activo-fecha',
     nombre: 'Ana',
     apellido: 'Activa',
@@ -147,10 +151,13 @@ test('Home y Socios muestran EXACTAMENTE los mismos números de Activos/Vencidos
   await loginComoAdmin(page, {
     tables: {
       socios: SOCIOS_MIXTOS,
-      // Cristian SÍ tiene cuenta PWA con un crédito real vigente de
-      // CrossFit -- Noelia también tiene cuenta, pero sin ningún crédito
-      // real (todo en 0), para cubrir el caso "Activo sin nada real".
+      // Ana SÍ tiene cuenta PWA con una fila real de Aparatos vigente
+      // (BUG REAL #2 -- respalda su fecha_vencimiento futura). Cristian SÍ
+      // tiene cuenta PWA con un crédito real vigente de CrossFit -- Noelia
+      // también tiene cuenta, pero sin ningún crédito real (todo en 0),
+      // para cubrir el caso "Activo sin nada real".
       profiles: [
+        { id: 'profile-ana', dni: '10000001', full_name: 'Ana Activa' },
         { id: 'profile-cristian', dni: '10000004', full_name: 'Cristian Créditos' },
         { id: 'profile-noelia', dni: '10000006', full_name: 'Noelia SinCreditos' },
       ],
@@ -158,6 +165,14 @@ test('Home y Socios muestran EXACTAMENTE los mismos números de Activos/Vencidos
       // resuelve joins reales, mismo criterio que ya usa
       // creditos-por-disciplina.spec.js para esta misma tabla.
       user_credits: [
+        {
+          id: 'uc-ana-aparatos',
+          user_id: 'profile-ana',
+          discipline_id: DISCIPLINA_APARATOS.id,
+          remaining_credits: null,
+          expires_at: `${fechaOffset(10)}T12:00:00.000Z`,
+          discipline: DISCIPLINA_APARATOS,
+        },
         {
           id: 'uc-cristian-crossfit',
           user_id: 'profile-cristian',
@@ -176,7 +191,7 @@ test('Home y Socios muestran EXACTAMENTE los mismos números de Activos/Vencidos
         },
       ],
       xp_events: [],
-      disciplines: [DISCIPLINA_CROSSFIT],
+      disciplines: [DISCIPLINA_CROSSFIT, DISCIPLINA_APARATOS],
       configuracion: [{ id: 1, dias_tolerancia: 5, limite_cancelacion_minutos: 120, alias_cvu: null, titular_cuenta: null }],
       bookings: [],
       classes: [],

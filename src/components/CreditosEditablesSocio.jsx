@@ -17,8 +17,18 @@ import { fijarCreditosDisciplina, ajustarCreditoDisciplina, agregarAparatosSocio
 // podía corregirlo -- quedaba oculto, sin ninguna forma de arreglarlo desde
 // acá. Ahora lee `socio.aparatosVigenteReal`, resuelto contra user_credits
 // de verdad (fetchAparatosVigentePorDni, Socios.jsx).
+// `aparatosVigenteReal` es TRI-ESTADO (ver fetchAparatosVigentePorDni en
+// fichaSocioPwa.js) -- true | false | undefined: `false` es "tiene cuenta
+// PWA confirmada, sin nada real" (gana sobre cualquier fecha_vencimiento
+// fantasma, caso Agustina Aguero); `undefined` es "sin cuenta PWA, no hay
+// ninguna fila posible" -- ahí sí se cae a fecha_vencimiento directa (caso
+// real: Lucía Paz, cobrada 100% por mostrador, nunca se registró en la app).
 function aparatosActivoReal(socio) {
-  return socio?.aparatosVigenteReal === true
+  const vigente = socio?.aparatosVigenteReal
+  if (vigente === true) return true
+  if (vigente === false) return false
+  if (!socio?.fechaVencimiento) return false
+  return new Date(`${socio.fechaVencimiento}T00:00:00`).getTime() > Date.now()
 }
 
 // Reemplaza a los steppers -/+1/+4/+8/+12 que vivían sueltos en cada fila

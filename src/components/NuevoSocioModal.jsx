@@ -97,8 +97,18 @@ async function esperarCuentaPwa(dni, intentos = 6, esperaMs = 800) {
 // fila que actualizar, no tenía nada que corregir). Ahora lee
 // `socio.aparatosVigenteReal` -- un booleano YA resuelto contra
 // user_credits de verdad (fetchAparatosVigentePorDni, Socios.jsx).
+// `aparatosVigenteReal` es TRI-ESTADO (ver fetchAparatosVigentePorDni en
+// fichaSocioPwa.js) -- true | false | undefined: `false` es "tiene cuenta
+// PWA confirmada, sin nada real" (gana sobre cualquier fecha_vencimiento
+// fantasma, caso Agustina Aguero); `undefined` es "sin cuenta PWA, no hay
+// ninguna fila posible" -- ahí sí se cae a fecha_vencimiento directa (caso
+// real: Lucía Paz, cobrada 100% por mostrador, nunca se registró en la app).
 function aparatosActivoReal(socio) {
-  return socio?.aparatosVigenteReal === true
+  const vigente = socio?.aparatosVigenteReal
+  if (vigente === true) return true
+  if (vigente === false) return false
+  if (!socio?.fechaVencimiento) return false
+  return new Date(`${socio.fechaVencimiento}T00:00:00`).getTime() > Date.now()
 }
 
 function NuevoSocioModal({

@@ -14,7 +14,7 @@ import { AlertCircle, Download, Loader2, UserPlus, Users } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { esDelMesActual } from '../utils/fecha'
 import { estadoOperativoSocio, getSocioMetrics } from '../utils/socioMetrics'
-import { fetchCreditosPorDisciplina } from '../utils/fichaSocioPwa'
+import { fetchAparatosVigentePorDni, fetchCreditosPorDisciplina } from '../utils/fichaSocioPwa'
 
 const DIAS_SEMANA_LABELS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
 
@@ -182,6 +182,12 @@ function Reportes() {
   // real): estadoOperativoSocio() lo necesita para decidir bien un socio
   // 100% créditos, sin fecha_vencimiento.
   const [creditosPorDni, setCreditosPorDni] = useState(new Map())
+  // Aparatos REALMENTE vigente por DNI -- mismo dato que Home.jsx/
+  // Socios.jsx (fetchAparatosVigentePorDni). BUG REAL #2 (caso Agustina
+  // Aguero, ver socioMetrics.js): sin este merge, estadoOperativoSocio()
+  // contaría "Inactivo" a cualquier socio con Aparatos genuinamente
+  // vigente (la inmensa mayoría) en vez de "Activo".
+  const [aparatosVigentePorDni, setAparatosVigentePorDni] = useState(new Map())
 
   const fetchSocios = async () => {
     setLoading(true)
@@ -209,11 +215,22 @@ function Reportes() {
   useEffect(() => {
     if (socios.length === 0) return
     fetchCreditosPorDisciplina(socios.map((s) => s.dni)).then(setCreditosPorDni)
+    fetchAparatosVigentePorDni(socios.map((s) => s.dni)).then(setAparatosVigentePorDni)
   }, [socios])
 
   const sociosConCreditos = useMemo(
-    () => socios.map((s) => ({ ...s, creditosPwaPorDisciplina: creditosPorDni.get(s.dni) ?? [] })),
-    [socios, creditosPorDni],
+    () =>
+      socios.map((s) => ({
+        ...s,
+        creditosPwaPorDisciplina: creditosPorDni.get(s.dni) ?? [],
+        // TRI-ESTADO -- NUNCA coercionar a booleano acá (`=== true`
+        // perdería la diferencia entre `false` -- tiene cuenta PWA
+        // confirmada sin nada real -- y `undefined` -- sin cuenta PWA, cae
+        // a fecha_vencimiento directa, ver fetchAparatosVigentePorDni en
+        // fichaSocioPwa.js). Se pasa el valor CRUDO tal cual.
+        aparatosVigenteReal: aparatosVigentePorDni.get(s.dni),
+      })),
+    [socios, creditosPorDni, aparatosVigentePorDni],
   )
 
   // Mismo criterio EXACTO que ya usan Home.jsx y Socios.jsx -- antes acá se

@@ -233,13 +233,32 @@ function Socios() {
       socios.map((socio) => {
         const gamificacion = gamificacionPorDni.get(socio.dni)
         // CAMBIO 3 (bug real: "Activo" sin nada real) -- estadoOperativoSocio()
-        // necesita `creditosPwaPorDisciplina` YA mergeado para poder decidir
-        // bien un socio 100% créditos, sin fecha_vencimiento -- se arma el
-        // objeto completo ANTES de llamarla, no después.
+        // necesita `creditosPwaPorDisciplina` Y `aparatosVigenteReal` YA
+        // mergeados para poder decidir bien -- se arma el objeto completo
+        // ANTES de llamarla, no después.
+        //
+        // BUG REAL #2, URGENTE (caso Agustina Aguero, y su reverso: un
+        // socio con Aparatos REAL vigente -- caso Elena en filtro-
+        // socios.spec.js -- quedaba "Inactivo"/"Vencido" en el filtro pese
+        // a que su badge decía "Activo") -- `aparatosVigenteReal` se
+        // agregaba SOLO al objeto final devuelto acá abajo, para que lo
+        // leyeran PlanCell/EstadoBadge -- pero NUNCA se lo pasaba a
+        // estadoOperativoSocio() en sí, que lo necesita desde el fix
+        // anterior (ver socioMetrics.js) para decidir 'activo' cuando no
+        // hay créditos reales. El badge (real-data directo) y el filtro
+        // (esta función) podían divergir por este motivo solo en
+        // Socios.jsx -- Home.jsx/Reportes.jsx ya armaban el objeto completo
+        // de una sola vez y no tenían este problema.
         const creditosPwaPorDisciplina = creditosPorDni.get(socio.dni) ?? []
+        // TRI-ESTADO -- NUNCA coercionar a booleano acá (`=== true`
+        // perdería la diferencia entre `false` -- tiene cuenta PWA
+        // confirmada sin nada real -- y `undefined` -- sin cuenta PWA, cae
+        // a fecha_vencimiento directa, ver el comentario en
+        // fetchAparatosVigentePorDni). Se pasa el valor CRUDO tal cual.
+        const aparatosVigenteReal = aparatosVigentePorDni.get(socio.dni)
         return {
           ...socio,
-          estado: estadoOperativoSocio({ ...socio, creditosPwaPorDisciplina }),
+          estado: estadoOperativoSocio({ ...socio, creditosPwaPorDisciplina, aparatosVigenteReal }),
           avatarUrl: gamificacion?.avatarUrl ?? null,
           nivelXp: gamificacion?.nivel ?? null,
           creditosPwaPorDisciplina,
@@ -247,7 +266,7 @@ function Socios() {
           // SociosTabla.jsx/NuevoSocioModal.jsx/CreditosEditablesSocio.jsx:
           // esas tres funciones ya no calculan esto desde fecha_vencimiento,
           // leen este campo directo.
-          aparatosVigenteReal: aparatosVigentePorDni.get(socio.dni) === true,
+          aparatosVigenteReal,
         }
       }),
     [socios, gamificacionPorDni, creditosPorDni, aparatosVigentePorDni],

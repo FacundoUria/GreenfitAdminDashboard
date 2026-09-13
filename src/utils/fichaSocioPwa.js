@@ -181,17 +181,30 @@ export async function fetchCreditosPorDisciplina(dnis) {
 // Esta función es la fuente real: en batch (mismo criterio que
 // fetchCreditosPorDisciplina/fetchAvataresYNiveles), confirma que EXISTA
 // una fila de disciplina kind='membership' con expires_at > ahora para
-// cada socio -- no se lee fecha_vencimiento acá para nada. Devuelve un Map
-// dni -> true SOLO para los socios con Aparatos genuinamente vigente; un
-// dni ausente del Map significa "no, no hay nada real" (no un `false`
-// explícito, mismo criterio que el resto de esta fuente).
+// cada socio -- no se lee fecha_vencimiento acá para nada.
+//
+// Devuelve un Map TRI-ESTADO, dni -> true | false | (ausente):
+//   - true: tiene cuenta PWA Y una fila real de Aparatos vigente.
+//   - false: tiene cuenta PWA CONFIRMADA, pero SIN ninguna fila vigente --
+//     esto es justo lo que hace falta para el caso Agustina Aguero (DNI
+//     43418750): una fecha_vencimiento futura fantasma NO puede ganarle a
+//     este `false`, tiene que poder decirse explícitamente "no, esta cuenta
+//     no tiene nada real" en vez de "no sé".
+//   - ausente (dni ni siquiera aparece en el Map): el dni NO resolvió
+//     ninguna cuenta PWA -- socio que nunca se registró en la app (ej.
+//     cobrado 100% por mostrador, ver Registrar Pago). Para ESTOS,
+//     socios.fecha_vencimiento es la ÚNICA fuente de verdad posible (no
+//     hay ninguna fila de user_credits que pueda existir sin una cuenta
+//     PWA detrás) -- los consumidores de este Map tienen que seguir
+//     confiando en la fecha tal cual para este caso puntual, igual que
+//     siempre. Por eso NO alcanza con un booleano simple (`.get(dni) ===
+//     true`) -- hay que distinguir los tres casos, no solo dos.
 //
 // Consulta SEPARADA de fetchCreditosPorDisciplina a propósito -- esa
 // función filtra kind='credits' por diseño (ver su comentario), mezclar
 // las dos responsabilidades en una sola función/shape de retorno hubiera
-// obligado a tocar todos sus call-sites (Home/Socios/Reportes/
-// CreditosEditablesSocio) por un fix que en los hechos solo necesitan
-// SociosTabla.jsx y NuevoSocioModal.jsx.
+// obligado a tocar todos sus call-sites por un fix que en los hechos solo
+// necesita esta.
 export async function fetchAparatosVigentePorDni(dnis) {
   const dnisValidos = Array.from(new Set((dnis ?? []).filter(Boolean)))
   if (dnisValidos.length === 0) return new Map()
@@ -203,20 +216,26 @@ export async function fetchAparatosVigentePorDni(dnis) {
   }
   const dniPorUserId = new Map((perfiles ?? []).map((p) => [p.id, p.dni]))
   const userIds = Array.from(dniPorUserId.keys())
-  if (userIds.length === 0) return new Map()
+
+  // Todos los que SÍ tienen cuenta PWA arrancan en `false` (sin Aparatos
+  // vigente CONFIRMADO) -- se sube a `true` más abajo si aparece una fila
+  // real. Los sin cuenta (dni ausente de `perfiles`) ni siquiera entran
+  // acá -- quedan fuera del Map por completo.
+  const resultado = new Map()
+  for (const dni of dniPorUserId.values()) resultado.set(dni, false)
+  if (userIds.length === 0) return resultado
 
   const { data: filas, error: aparatosError } = await supabase
     .from('user_credits')
     .select('user_id, expires_at, discipline:disciplines(kind)')
     .in('user_id', userIds)
   if (aparatosError) {
-    if (esErrorDeRelacionFaltante(aparatosError)) return new Map()
+    if (esErrorDeRelacionFaltante(aparatosError)) return resultado
     console.error('No se pudo confirmar Aparatos vigente real de la PWA:', aparatosError.message)
-    return new Map()
+    return resultado
   }
 
   const ahora = Date.now()
-  const resultado = new Map()
   for (const fila of filas ?? []) {
     const disciplina = Array.isArray(fila.discipline) ? fila.discipline[0] : fila.discipline
     if (!disciplina || disciplina.kind !== 'membership') continue
