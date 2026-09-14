@@ -61,9 +61,31 @@ export function proximosDias(cantidad = 7) {
   })
 }
 
-export function etiquetaDia(fecha, index) {
-  if (index === 0) return 'Hoy'
-  if (index === 1) return 'Mañana'
+// Un día calendario antes de la fecha dada, a las 00:00 local -- usado para
+// agregar "Ayer" a la navegación de Clases.jsx (Seba necesita poder revisar
+// quién asistió o si hubo algún problema en la clase del día anterior) sin
+// duplicar a mano el `setDate`/`setHours` que ya usa proximosDias().
+export function diaAnterior(fecha) {
+  const anterior = new Date(fecha)
+  anterior.setDate(anterior.getDate() - 1)
+  return anterior
+}
+
+// Ya NO depende del índice dentro del array de DIAS_VISIBLES -- agregar
+// "Ayer" adelante de "Hoy" corría un índice que este cálculo asumía fijo
+// (index 0 = Hoy, index 1 = Mañana). Comparando la fecha real contra hoy
+// (en días de diferencia) funciona sin importar en qué posición del array
+// caiga cada una.
+export function etiquetaDia(fecha) {
+  const hoy = new Date()
+  hoy.setHours(0, 0, 0, 0)
+  const comparada = new Date(fecha)
+  comparada.setHours(0, 0, 0, 0)
+  const diferenciaDias = Math.round((comparada.getTime() - hoy.getTime()) / 86_400_000)
+
+  if (diferenciaDias === -1) return 'Ayer'
+  if (diferenciaDias === 0) return 'Hoy'
+  if (diferenciaDias === 1) return 'Mañana'
   return WEEKDAYS_ABBR[fecha.getDay()]
 }
 

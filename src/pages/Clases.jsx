@@ -4,6 +4,7 @@ import { Loader2, Plus } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import {
   combinarFechaYHora,
+  diaAnterior,
   etiquetaDia,
   formatDateOnly,
   mapearClasesDesdeBookings,
@@ -13,7 +14,13 @@ import ClasesGrid from '../components/ClasesGrid'
 import InscriptosModal from '../components/InscriptosModal'
 import NuevaClaseModal from '../components/NuevaClaseModal'
 
-const DIAS_VISIBLES = proximosDias(7)
+// "Ayer" adelante de "Hoy" -- para que Seba pueda revisar quién asistió o
+// si hubo algún problema en la clase del día anterior. El resto de los días
+// (Hoy, Mañana, y los siguientes) queda exactamente igual que antes. `HOY`
+// se guarda aparte -- DIAS_VISIBLES[0] ahora es Ayer, no Hoy, y la pantalla
+// tiene que seguir abriendo en el día de hoy por defecto.
+const HOY = proximosDias(1)[0]
+const DIAS_VISIBLES = [diaAnterior(HOY), ...proximosDias(7)]
 
 function Clases() {
   const navigate = useNavigate()
@@ -21,7 +28,7 @@ function Clases() {
   const [bookings, setBookings] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [fechaSeleccionada, setFechaSeleccionada] = useState(DIAS_VISIBLES[0])
+  const [fechaSeleccionada, setFechaSeleccionada] = useState(HOY)
   const [claseInscriptosId, setClaseInscriptosId] = useState(null)
   const [modalNuevaClaseAbierto, setModalNuevaClaseAbierto] = useState(false)
   const [claseEnEdicion, setClaseEnEdicion] = useState(null)
@@ -271,7 +278,7 @@ function Clases() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex gap-2 overflow-x-auto pb-1">
-          {DIAS_VISIBLES.map((fecha, index) => {
+          {DIAS_VISIBLES.map((fecha) => {
             const fechaStr = formatDateOnly(fecha)
             const seleccionado = fechaStr === fechaSeleccionadaStr
             return (
@@ -285,7 +292,7 @@ function Clases() {
                     : 'bg-greenfit-card text-gray-300 hover:text-white'
                 }`}
               >
-                <span className="text-xs capitalize">{etiquetaDia(fecha, index)}</span>
+                <span className="text-xs capitalize">{etiquetaDia(fecha)}</span>
                 <span className="text-base font-semibold">{fecha.getDate()}</span>
               </button>
             )
