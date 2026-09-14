@@ -1,4 +1,5 @@
-import { CreditCard, MessageCircle, Pencil, UserX, UserCheck } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { ArrowDown, ArrowUp, ArrowUpDown, CreditCard, MessageCircle, Pencil, UserX, UserCheck } from 'lucide-react'
 import { formatFecha } from '../utils/fecha'
 
 // Créditos por LOTES (ver supabase_migration_lotes_creditos_fase1/2.sql):
@@ -59,6 +60,38 @@ function aparatosActivoReal(socio) {
   if (vigente === false) return false
   if (!socio?.fechaVencimiento) return false
   return new Date(`${socio.fechaVencimiento}T00:00:00`).getTime() > Date.now()
+}
+
+// Ordenar por Vencimiento (encabezado clickeable, ver SociosTabla más abajo)
+// -- bajo el modelo de "plan único" (resolver_fecha_plan_actual en SQL),
+// Aparatos + todas las disciplinas de créditos activas de un socio
+// comparten la MISMA fecha, así que alcanza con tomar la más lejana entre
+// las fuentes reales vigentes -- mismo criterio que ese RPC, sin depender
+// de cómo VencimientoCell agrupa/formatea el texto que se muestra. `null`
+// cuando el socio no tiene ninguna fecha real (Inactivo/sin nada activo) --
+// eso es lo que hace que quede al final en cualquiera de los dos sentidos.
+function fechaVencimientoParaOrden(socio) {
+  const fechas = []
+  if (aparatosActivoReal(socio) && socio.fechaVencimiento) {
+    fechas.push(new Date(`${socio.fechaVencimiento}T00:00:00`).getTime())
+  }
+  for (const entrada of socio.creditosPwaPorDisciplina ?? []) {
+    for (const lote of entrada.lotes ?? []) {
+      if (lote.expiresAt) fechas.push(new Date(lote.expiresAt).getTime())
+    }
+  }
+  return fechas.length > 0 ? Math.max(...fechas) : null
+}
+
+// null siempre al final, sin importar la dirección -- un socio sin fecha no
+// "vence antes" ni "vence después" que nadie, simplemente no aplica.
+function compararPorVencimiento(a, b, direccion) {
+  const fechaA = fechaVencimientoParaOrden(a)
+  const fechaB = fechaVencimientoParaOrden(b)
+  if (fechaA === null && fechaB === null) return 0
+  if (fechaA === null) return 1
+  if (fechaB === null) return -1
+  return direccion === 'asc' ? fechaA - fechaB : fechaB - fechaA
 }
 
 // FIX (modelo de "plan único") -- ANTES esta columna mostraba
@@ -615,6 +648,20 @@ function SociosTabla({
 }) {
   const todosSeleccionados = socios.length > 0 && socios.every((s) => seleccionados.has(s.id))
 
+  // Orden por Vencimiento -- null (sin ordenar, orden de llegada de
+  // `socios`) hasta el primer click en el encabezado; de ahí en más solo
+  // alterna asc/desc (nunca vuelve a "sin ordenar"). Estado LOCAL de esta
+  // tabla -- es una preferencia de visualización, no algo que Socios.jsx
+  // necesite conocer ni persistir.
+  const [ordenVencimiento, setOrdenVencimiento] = useState(null) // null | 'asc' | 'desc'
+  const handleOrdenarPorVencimiento = () => {
+    setOrdenVencimiento((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+  }
+  const sociosOrdenados = useMemo(() => {
+    if (!ordenVencimiento) return socios
+    return [...socios].sort((a, b) => compararPorVencimiento(a, b, ordenVencimiento))
+  }, [socios, ordenVencimiento])
+
   if (socios.length === 0) {
     return (
       <div className="rounded-xl bg-greenfit-card px-5 py-10 text-center text-sm text-gray-400">
@@ -638,7 +685,7 @@ function SociosTabla({
           Seleccionar todos
         </label>
 
-        {socios.map((socio) => (
+        {sociosOrdenados.map((socio) => (
           <SocioCard
             key={socio.id}
             socio={socio}
@@ -671,12 +718,23 @@ function SociosTabla({
               <th className="px-5 py-3 font-medium">Estado</th>
               <th className="px-5 py-3 font-medium">Plan / Membresía</th>
               <th className="px-5 py-3 font-medium">Créditos</th>
-              <th className="px-5 py-3 font-medium">Vencimiento</th>
+              <th className="px-5 py-3 font-medium">
+                <button
+                  type="button"
+                  onClick={handleOrdenarPorVencimiento}
+                  className="flex items-center gap-1 uppercase tracking-wide text-gray-400 transition-colors hover:text-white"
+                >
+                  Vencimiento
+                  {ordenVencimiento === 'asc' && <ArrowUp className="h-3.5 w-3.5" />}
+                  {ordenVencimiento === 'desc' && <ArrowDown className="h-3.5 w-3.5" />}
+                  {ordenVencimiento === null && <ArrowUpDown className="h-3.5 w-3.5 opacity-40" />}
+                </button>
+              </th>
               <th className="px-5 py-3 text-right font-medium">Acciones</th>
             </tr>
           </thead>
           <tbody>
-            {socios.map((socio) => (
+            {sociosOrdenados.map((socio) => (
               <tr key={socio.id} className="border-b border-white/5 last:border-0 hover:bg-white/5">
                 <td className="px-5 py-3">
                   <input
@@ -691,10 +749,18 @@ function SociosTabla({
                   <div className="flex items-center gap-3">
                     <AvatarSocio socio={socio} size={36} />
                     <div>
-                      <p className="flex items-center gap-1.5 font-medium text-white">
+                      {/* CAMBIO 2 -- segunda forma de llegar a "Editar Socio",
+                          además del lápiz de Acciones (que se mantiene igual).
+                          Mismo onEditar(socio) que ya usa ese botón -- sin
+                          duplicar ninguna lógica. */}
+                      <button
+                        type="button"
+                        onClick={() => onEditar(socio)}
+                        className="flex items-center gap-1.5 text-left font-medium text-white hover:text-greenfit-primary hover:underline"
+                      >
                         {socio.nombre} {socio.apellido}
                         <NivelBadge nivel={socio.nivelXp} />
-                      </p>
+                      </button>
                       <p className="text-xs text-gray-400">{socio.email}</p>
                     </div>
                   </div>

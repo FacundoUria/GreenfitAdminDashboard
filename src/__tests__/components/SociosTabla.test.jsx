@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within, fireEvent } from '@testing-library/react'
 import SociosTabla from '../../components/SociosTabla'
 
 // La tabla renderiza SIEMPRE las dos variantes (tarjetas para mobile, tabla
@@ -639,5 +639,120 @@ describe('EstadoBadge -- "Activo"/"Inactivo" sobre datos reales, sin gate por so
     expect(badges.length).toBeGreaterThan(0)
     const clasesUnicas = new Set(badges.map((el) => el.className))
     expect(clasesUnicas.size).toBe(1) // un solo estilo, sin distinguir la razón
+  })
+})
+
+// CAMBIO 1 -- encabezado "Vencimiento" clickeable, ordena la lista. Bajo el
+// modelo de "plan único" cada socio tiene una única fecha real (Aparatos y
+// créditos comparten la misma) -- estos socios de prueba tienen fechas bien
+// separadas para no depender de ningún agrupamiento por día.
+describe('SociosTabla -- ordenar por Vencimiento (encabezado clickeable, CAMBIO 1)', () => {
+  // nivelXp: null en las 4 -- evita que el badge "N{x}" (NivelBadge) se
+  // cuele en el textContent del botón del nombre, que estos tests comparan
+  // literal (ver nombresEnOrdenDesktop()).
+  const SOCIO_VENCE_PRIMERO = {
+    ...SOCIO_CON_FOTO,
+    id: 's-primero',
+    nombre: 'Ana',
+    apellido: 'Primero',
+    nivelXp: null,
+    creditosPwaPorDisciplina: [
+      { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 4, lotes: [{ id: 'l1', remainingCredits: 4, expiresAt: '2026-10-01T12:00:00.000Z' }] },
+    ],
+  }
+  const SOCIO_VENCE_MEDIO = {
+    ...SOCIO_CON_FOTO,
+    id: 's-medio',
+    nombre: 'Bruno',
+    apellido: 'Medio',
+    nivelXp: null,
+    creditosPwaPorDisciplina: [
+      { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 4, lotes: [{ id: 'l2', remainingCredits: 4, expiresAt: '2026-11-01T12:00:00.000Z' }] },
+    ],
+  }
+  const SOCIO_VENCE_ULTIMO = {
+    ...SOCIO_CON_FOTO,
+    id: 's-ultimo',
+    nombre: 'Carla',
+    apellido: 'Ultimo',
+    nivelXp: null,
+    creditosPwaPorDisciplina: [
+      { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 4, lotes: [{ id: 'l3', remainingCredits: 4, expiresAt: '2026-12-01T12:00:00.000Z' }] },
+    ],
+  }
+  const SOCIO_SIN_FECHA = {
+    ...SOCIO_CON_FOTO,
+    id: 's-sin-fecha',
+    nombre: 'Dario',
+    apellido: 'SinFecha',
+    nivelXp: null,
+    activo: false,
+    creditosPwaPorDisciplina: [],
+  }
+
+  // Filas de la tabla DESKTOP en orden -- filtra por los nombres de este
+  // describe para no chocar con la variante mobile (mismo DOM, ver nota del
+  // encabezado del archivo).
+  function nombresEnOrdenDesktop() {
+    const tabla = screen.getAllByRole('table')[0]
+    return within(tabla)
+      .getAllByRole('row')
+      .slice(1) // saltea el <tr> del encabezado
+      .map((fila) => within(fila).getByRole('button', { name: /Primero|Medio|Ultimo|SinFecha/ }).textContent)
+  }
+
+  it('sin tocar el encabezado, respeta el orden en que llegan los socios (sin ordenar)', () => {
+    render(<SociosTabla socios={[SOCIO_VENCE_MEDIO, SOCIO_VENCE_PRIMERO, SOCIO_SIN_FECHA, SOCIO_VENCE_ULTIMO]} {...HANDLERS} />)
+    expect(nombresEnOrdenDesktop()).toEqual(['Bruno Medio', 'Ana Primero', 'Dario SinFecha', 'Carla Ultimo'])
+  })
+
+  it('primer click en "Vencimiento" ordena ASCENDENTE -- el que vence antes, primero -- y sin fecha al final', () => {
+    render(<SociosTabla socios={[SOCIO_VENCE_ULTIMO, SOCIO_SIN_FECHA, SOCIO_VENCE_MEDIO, SOCIO_VENCE_PRIMERO]} {...HANDLERS} />)
+    fireEvent.click(screen.getByRole('button', { name: /Vencimiento/ }))
+    expect(nombresEnOrdenDesktop()).toEqual(['Ana Primero', 'Bruno Medio', 'Carla Ultimo', 'Dario SinFecha'])
+  })
+
+  it('segundo click invierte a DESCENDENTE -- el que vence después, primero -- y sin fecha SIGUE al final', () => {
+    render(<SociosTabla socios={[SOCIO_VENCE_PRIMERO, SOCIO_SIN_FECHA, SOCIO_VENCE_ULTIMO, SOCIO_VENCE_MEDIO]} {...HANDLERS} />)
+    const encabezado = screen.getByRole('button', { name: /Vencimiento/ })
+    fireEvent.click(encabezado) // asc
+    fireEvent.click(encabezado) // desc
+    expect(nombresEnOrdenDesktop()).toEqual(['Carla Ultimo', 'Bruno Medio', 'Ana Primero', 'Dario SinFecha'])
+  })
+
+  it('un tercer click vuelve a ascendente (alterna, nunca "vuelve a sin ordenar")', () => {
+    render(<SociosTabla socios={[SOCIO_VENCE_ULTIMO, SOCIO_VENCE_PRIMERO, SOCIO_VENCE_MEDIO]} {...HANDLERS} />)
+    const encabezado = screen.getByRole('button', { name: /Vencimiento/ })
+    fireEvent.click(encabezado) // asc
+    fireEvent.click(encabezado) // desc
+    fireEvent.click(encabezado) // asc de nuevo
+    expect(nombresEnOrdenDesktop()).toEqual(['Ana Primero', 'Bruno Medio', 'Carla Ultimo'])
+  })
+})
+
+// CAMBIO 2 -- click en el nombre del socio (columna "Socio") abre el mismo
+// modal que el lápiz de Acciones -- mismo onEditar(socio), sin duplicar
+// lógica ni el botón de Acciones (que se mantiene).
+describe('SociosTabla -- click en el nombre del socio abre "Editar Socio" (CAMBIO 2)', () => {
+  it('clickear el nombre en la tabla desktop llama a onEditar con el socio completo', () => {
+    const onEditar = vi.fn()
+    render(<SociosTabla socios={[SOCIO_CON_FOTO]} {...HANDLERS} onEditar={onEditar} />)
+
+    const tabla = screen.getAllByRole('table')[0]
+    fireEvent.click(within(tabla).getByRole('button', { name: /Martina Ríos/ }))
+
+    expect(onEditar).toHaveBeenCalledTimes(1)
+    expect(onEditar).toHaveBeenCalledWith(SOCIO_CON_FOTO)
+  })
+
+  it('el lápiz de Acciones sigue andando igual -- es una SEGUNDA forma de llegar, no un reemplazo', () => {
+    const onEditar = vi.fn()
+    render(<SociosTabla socios={[SOCIO_CON_FOTO]} {...HANDLERS} onEditar={onEditar} />)
+
+    const tabla = screen.getAllByRole('table')[0]
+    fireEvent.click(within(tabla).getByRole('button', { name: 'Editar' }))
+
+    expect(onEditar).toHaveBeenCalledTimes(1)
+    expect(onEditar).toHaveBeenCalledWith(SOCIO_CON_FOTO)
   })
 })
