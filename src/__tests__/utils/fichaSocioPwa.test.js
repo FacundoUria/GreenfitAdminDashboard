@@ -10,6 +10,7 @@ import {
   calcularRacha,
   fetchAvataresYNiveles,
   fetchCreditosPorDisciplina,
+  fetchAparatosVigentePorDni,
   fetchHistorialAsistencias,
   fetchHistorialPagos,
   buscarSociosParaCheckin,
@@ -28,7 +29,13 @@ const mockedRpc = supabase.rpc
 function makeChain(result) {
   const chain = {}
   const self = () => chain
-  ;['select', 'eq', 'lte', 'in', 'is', 'order'].forEach((metodo) => {
+  // 'range' incluido -- fetchCreditosPorDisciplina/fetchAparatosVigentePorDni
+  // ahora paginan con fetchTodasLasFilas() (ver el bug de Fernanda Isgro,
+  // DNI 38756811, más abajo), que siempre llama a .range() antes de
+  // awaitear. Para un `result` de una sola página (todos los tests de acá
+  // arriba, con pocas filas), .range() es un no-op encadenado más -- el
+  // helper hace UNA sola vuelta y listo, mismo comportamiento de siempre.
+  ;['select', 'eq', 'lte', 'in', 'is', 'order', 'range'].forEach((metodo) => {
     chain[metodo] = vi.fn(self)
   })
   chain.then = (resolve, reject) => Promise.resolve(result).then(resolve, reject)
@@ -224,6 +231,160 @@ describe('fetchCreditosPorDisciplina (fix del bug de sincronización: fuente de 
     const mapa = await fetchCreditosPorDisciplina([])
     expect(mapa.size).toBe(0)
     expect(mockedFrom).not.toHaveBeenCalled()
+  })
+})
+
+// BUG REAL, URGENTE (caso Fernanda Isgro, DNI 38756811, confirmado con
+// 1220+ filas reales de user_credits) -- PostgREST/Supabase corta
+// CUALQUIER respuesta en el límite de filas del proyecto (1000 por
+// default) EN SILENCIO. fetchCreditosPorDisciplina()/
+// fetchAparatosVigentePorDni() pedían TODOS los socios en un solo
+// `.in(...)`, sin `.range()` -- con más de 1000 filas reales de
+// user_credits, los socios cuya fila caía después del corte quedaban
+// "Inactivo"/vacíos en el panel aunque tuvieran todo real y vigente. Fix:
+// fetchTodasLasFilas() (helper interno, no exportado -- se prueba acá a
+// través de las dos funciones públicas) pagina con `.range()` en lotes de
+// 1000 hasta agotar el resultado real.
+//
+// Mock dedicado (no `makeChain`): simula EXACTAMENTE lo que devolvería
+// Supabase página por página -- `.range(desde, hasta)` corta un array real
+// de 1220 filas, igual que lo haría el servidor real. Si el fetch NO
+// paginara (código viejo), solo pediría la "página" (0, 999) una vez y
+// nunca vería las últimas 220 filas -- exactamente donde está la fila real
+// de Fernanda en este escenario.
+function makeChainPaginado(todasLasFilas, llamadasRange) {
+  const chain = {}
+  const self = () => chain
+  ;['select', 'eq', 'lte', 'in', 'is', 'order'].forEach((metodo) => {
+    chain[metodo] = vi.fn(self)
+  })
+  chain.range = vi.fn((desde, hasta) => {
+    llamadasRange.push([desde, hasta])
+    return Promise.resolve({ data: todasLasFilas.slice(desde, hasta + 1), error: null })
+  })
+  return chain
+}
+
+const FERNANDA = { userId: 'user-fernanda', dni: '38756811' }
+const OTRO_SOCIO = { userId: 'user-otro-socio', dni: '20000000' }
+const CROSSFIT = { id: 'd-crossfit', name: 'CrossFit', kind: 'credits' }
+const APARATOS = { id: 'd-aparatos', name: 'Aparatos', kind: 'membership' }
+
+// 1220 filas totales -- MISMO número que la evidencia real. 1219 de
+// "relleno" (otro socio cualquiera, ocupan las posiciones 0..1218) + la
+// fila REAL de Fernanda en la posición 1219 -- después del corte de 1000
+// que aplicaría Supabase sin paginar.
+function filasUserCreditsConFernandaAlFinal(disciplina, filaFernanda) {
+  const filas = []
+  for (let i = 0; i < 1219; i++) {
+    filas.push({
+      id: `relleno-${i}`,
+      user_id: OTRO_SOCIO.userId,
+      remaining_credits: 1,
+      expires_at: '2099-01-01T00:00:00.000Z',
+      discipline: disciplina,
+    })
+  }
+  filas.push(filaFernanda)
+  return filas // length === 1220
+}
+
+describe('fetchCreditosPorDisciplina / fetchAparatosVigentePorDni -- paginación real (bug Fernanda Isgro, 1220+ filas)', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('fetchCreditosPorDisciplina trae TODAS las filas (1220), no solo las primeras 1000 -- Fernanda incluida', async () => {
+    const filaFernanda = {
+      id: 'uc-fernanda-crossfit',
+      user_id: FERNANDA.userId,
+      remaining_credits: 12,
+      expires_at: '2026-10-14T12:00:00.000Z',
+      discipline: CROSSFIT,
+    }
+    const todasLasFilas = filasUserCreditsConFernandaAlFinal(CROSSFIT, filaFernanda)
+    const llamadasRange = []
+
+    mockedFrom.mockImplementation((tabla) => {
+      if (tabla === 'profiles') {
+        return makeChain({
+          data: [
+            { id: FERNANDA.userId, dni: FERNANDA.dni },
+            { id: OTRO_SOCIO.userId, dni: OTRO_SOCIO.dni },
+          ],
+          error: null,
+        })
+      }
+      if (tabla === 'user_credits') return makeChainPaginado(todasLasFilas, llamadasRange)
+      throw new Error(`tabla inesperada: ${tabla}`)
+    })
+
+    const mapa = await fetchCreditosPorDisciplina([FERNANDA.dni, OTRO_SOCIO.dni])
+
+    // 2 páginas: (0, 999) y (1000, 1999) -- la segunda devuelve menos de
+    // 1000 filas (220), señal de que no hay más.
+    expect(llamadasRange).toEqual([
+      [0, 999],
+      [1000, 1999],
+    ])
+
+    // El caso real: Fernanda, cuya fila cae en la posición 1219 (después
+    // del corte de 1000), aparece con sus 12 créditos reales -- ANTES de
+    // este fix, con un fetch sin paginar, mapa.get(FERNANDA.dni) hubiera
+    // sido `undefined` (su única fila jamás llegaba desde Supabase).
+    expect(mapa.get(FERNANDA.dni)).toEqual([
+      { disciplineId: CROSSFIT.id, disciplineName: 'CrossFit', remainingCredits: 12, lotes: [{ id: 'uc-fernanda-crossfit', remainingCredits: 12, expiresAt: '2026-10-14T12:00:00.000Z' }] },
+    ])
+  })
+
+  it('fetchAparatosVigentePorDni también pagina -- una fila de Aparatos vigente en la posición 1219 se confirma igual', async () => {
+    const filaFernanda = {
+      user_id: FERNANDA.userId,
+      expires_at: '2026-10-14T12:00:00.000Z',
+      discipline: APARATOS,
+    }
+    const todasLasFilas = filasUserCreditsConFernandaAlFinal(APARATOS, filaFernanda)
+    const llamadasRange = []
+
+    mockedFrom.mockImplementation((tabla) => {
+      if (tabla === 'profiles') {
+        return makeChain({
+          data: [
+            { id: FERNANDA.userId, dni: FERNANDA.dni },
+            { id: OTRO_SOCIO.userId, dni: OTRO_SOCIO.dni },
+          ],
+          error: null,
+        })
+      }
+      if (tabla === 'user_credits') return makeChainPaginado(todasLasFilas, llamadasRange)
+      throw new Error(`tabla inesperada: ${tabla}`)
+    })
+
+    const mapa = await fetchAparatosVigentePorDni([FERNANDA.dni, OTRO_SOCIO.dni])
+
+    expect(llamadasRange).toEqual([
+      [0, 999],
+      [1000, 1999],
+    ])
+    // Sin el fix: al no ver su fila, Fernanda hubiera quedado en `false`
+    // (cuenta PWA confirmada, "sin nada real") -- exactamente lo que
+    // mostraba "Inactivo" en la tabla pese a tener Aparatos vigente.
+    expect(mapa.get(FERNANDA.dni)).toBe(true)
+  })
+
+  it('sin el fix (simulando el código viejo, un solo .range() fijo en 0-999) la fila de Fernanda NO llegaría -- confirma que el bug era real', async () => {
+    // Este test no ejercita el código de producción -- reproduce a
+    // propósito el comportamiento ANTERIOR (una sola página) para dejar
+    // documentada la comparación exacta que motivó el fix.
+    const filaFernanda = {
+      id: 'uc-fernanda-crossfit',
+      user_id: FERNANDA.userId,
+      remaining_credits: 12,
+      expires_at: '2026-10-14T12:00:00.000Z',
+      discipline: CROSSFIT,
+    }
+    const todasLasFilas = filasUserCreditsConFernandaAlFinal(CROSSFIT, filaFernanda)
+    const primeraPagina = todasLasFilas.slice(0, 1000)
+    expect(primeraPagina).not.toContainEqual(filaFernanda) // su fila (índice 1219) queda afuera
+    expect(primeraPagina.length).toBe(1000)
   })
 })
 

@@ -27,6 +27,39 @@ function esErrorDeRelacionFaltante(error) {
   return mensaje.includes('does not exist') || mensaje.includes('schema cache') || mensaje.includes('could not find')
 }
 
+// BUG REAL -- URGENTE (caso Fernanda Isgro, DNI 38756811, confirmado con
+// 1220+ filas reales de user_credits): PostgREST/Supabase corta CUALQUIER
+// respuesta en el límite de filas configurado a nivel de proyecto (Project
+// Settings > API > "Max Rows", 1000 por default) -- en SILENCIO, sin
+// ningún error. Un `.select()` sin `.range()` explícito queda a merced de
+// ese corte. fetchCreditosPorDisciplina()/fetchAparatosVigentePorDni()
+// piden TODOS los socios de la tabla en una sola pasada -- con más de 1000
+// filas reales, los socios cuya fila cae después del corte quedaban
+// "Inactivo"/vacíos en el panel, aunque tuvieran todo real y vigente.
+// "Editar Socio" > Créditos nunca mostró el bug porque llama a la MISMA
+// función con el array de un solo dni del socio que se está editando -- un
+// resultado tan chico nunca puede chocar contra el límite.
+//
+// Trae TODAS las filas de una consulta, sin importar cuántas sean, pidiendo
+// lotes de a `tamanoLote` con `.range()` hasta que una respuesta traiga
+// MENOS filas que el lote (señal de que no queda nada más). Un query
+// builder de supabase-js no se puede reusar/re-awaitear -- por eso
+// `construirQuery` es una FUNCIÓN que arma una consulta nueva en cada
+// vuelta (mismo `.select()/.eq()/.in()` de siempre, sin `.range()` propio),
+// no un objeto de consulta ya armado.
+async function fetchTodasLasFilas(construirQuery, tamanoLote = 1000) {
+  const filas = []
+  let desde = 0
+  while (true) {
+    const { data, error } = await construirQuery().range(desde, desde + tamanoLote - 1)
+    if (error) return { data: null, error }
+    filas.push(...(data ?? []))
+    if (!data || data.length < tamanoLote) break
+    desde += tamanoLote
+  }
+  return { data: filas, error: null }
+}
+
 export async function resolverUserIdPorDni(dni) {
   if (!dni) return null
   const { data } = await supabase.from('profiles').select('id').eq('dni', dni).maybeSingle()
@@ -106,7 +139,9 @@ export async function fetchCreditosPorDisciplina(dnis) {
   const dnisValidos = Array.from(new Set((dnis ?? []).filter(Boolean)))
   if (dnisValidos.length === 0) return new Map()
 
-  const { data: perfiles, error: perfilesError } = await supabase.from('profiles').select('id, dni').in('dni', dnisValidos)
+  const { data: perfiles, error: perfilesError } = await fetchTodasLasFilas(() =>
+    supabase.from('profiles').select('id, dni').in('dni', dnisValidos),
+  )
   if (perfilesError) {
     console.error('No se pudieron resolver las cuentas PWA para los créditos por disciplina:', perfilesError.message)
     return new Map()
@@ -115,10 +150,12 @@ export async function fetchCreditosPorDisciplina(dnis) {
   const userIds = Array.from(dniPorUserId.keys())
   if (userIds.length === 0) return new Map()
 
-  const { data: filas, error: creditosError } = await supabase
-    .from('user_credits')
-    .select('id, user_id, remaining_credits, expires_at, discipline:disciplines(id, name, kind)')
-    .in('user_id', userIds)
+  const { data: filas, error: creditosError } = await fetchTodasLasFilas(() =>
+    supabase
+      .from('user_credits')
+      .select('id, user_id, remaining_credits, expires_at, discipline:disciplines(id, name, kind)')
+      .in('user_id', userIds),
+  )
   if (creditosError) {
     if (esErrorDeRelacionFaltante(creditosError)) return new Map()
     console.error('No se pudieron traer los créditos reales de la PWA:', creditosError.message)
@@ -209,7 +246,9 @@ export async function fetchAparatosVigentePorDni(dnis) {
   const dnisValidos = Array.from(new Set((dnis ?? []).filter(Boolean)))
   if (dnisValidos.length === 0) return new Map()
 
-  const { data: perfiles, error: perfilesError } = await supabase.from('profiles').select('id, dni').in('dni', dnisValidos)
+  const { data: perfiles, error: perfilesError } = await fetchTodasLasFilas(() =>
+    supabase.from('profiles').select('id, dni').in('dni', dnisValidos),
+  )
   if (perfilesError) {
     console.error('No se pudieron resolver las cuentas PWA para confirmar Aparatos vigente:', perfilesError.message)
     return new Map()
@@ -225,10 +264,12 @@ export async function fetchAparatosVigentePorDni(dnis) {
   for (const dni of dniPorUserId.values()) resultado.set(dni, false)
   if (userIds.length === 0) return resultado
 
-  const { data: filas, error: aparatosError } = await supabase
-    .from('user_credits')
-    .select('user_id, expires_at, discipline:disciplines(kind)')
-    .in('user_id', userIds)
+  const { data: filas, error: aparatosError } = await fetchTodasLasFilas(() =>
+    supabase
+      .from('user_credits')
+      .select('user_id, expires_at, discipline:disciplines(kind)')
+      .in('user_id', userIds),
+  )
   if (aparatosError) {
     if (esErrorDeRelacionFaltante(aparatosError)) return resultado
     console.error('No se pudo confirmar Aparatos vigente real de la PWA:', aparatosError.message)

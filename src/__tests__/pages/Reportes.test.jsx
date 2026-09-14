@@ -52,7 +52,16 @@ function makeChain(data) {
   return {
     select: vi.fn().mockReturnValue({
       then: (resolve) => resolve(resultado),
-      in: vi.fn().mockResolvedValue(resultado),
+      // .range() incluido -- fetchCreditosPorDisciplina/
+      // fetchAparatosVigentePorDni ahora paginan con fetchTodasLasFilas()
+      // (bug Fernanda Isgro, DNI 38756811, 1220+ filas de user_credits en
+      // producción), que siempre llama a .range() antes de awaitear. Con
+      // `data` chico (todos los fixtures de este archivo), una sola vuelta
+      // alcanza -- mismo comportamiento de siempre.
+      in: vi.fn().mockReturnValue({
+        then: (resolve) => resolve(resultado),
+        range: vi.fn().mockResolvedValue(resultado),
+      }),
     }),
   }
 }
