@@ -10,10 +10,16 @@ vi.mock('../../utils/creditosPwa', () => ({
   fijarCreditosDisciplina: vi.fn(),
   ajustarCreditoDisciplina: vi.fn(),
   agregarAparatosSocio: vi.fn(),
+  editarFechaVencimientoSocio: vi.fn(),
 }))
 
 import { resolverUserIdPorDni, fetchCreditosPorDisciplina } from '../../utils/fichaSocioPwa'
-import { fijarCreditosDisciplina, ajustarCreditoDisciplina, agregarAparatosSocio } from '../../utils/creditosPwa'
+import {
+  fijarCreditosDisciplina,
+  ajustarCreditoDisciplina,
+  agregarAparatosSocio,
+  editarFechaVencimientoSocio,
+} from '../../utils/creditosPwa'
 import CreditosEditablesSocio from '../../components/CreditosEditablesSocio'
 
 // DNI real del ticket (Facundo Uria) -- caso que expuso el bug del modelo de
@@ -546,5 +552,202 @@ describe('CreditosEditablesSocio -- "+ Agregar Aparatos" (CAMBIO 5)', () => {
       expect(window.alert).toHaveBeenCalledWith('El socio ya tiene Aparatos vigente -- no hay nada que agregar.'),
     )
     expect(screen.getByRole('button', { name: /Agregar Aparatos/ })).toBeTruthy()
+  })
+})
+
+// CAMBIO 3 -- "Vencimiento del plan": editar la fecha única del plan
+// (créditos + Aparatos) sin tocar cantidades. ADITIVO -- admin_editar_
+// fecha_vencimiento_socio() es un RPC nuevo y separado, no reemplaza a
+// "Cobrar" (fijarCreditosDisciplina/agregarAparatosSocio siguen intactos,
+// ver los describe de arriba, sin un solo cambio).
+describe('CreditosEditablesSocio -- "Vencimiento del plan" (CAMBIO 3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.spyOn(window, 'confirm')
+    vi.spyOn(window, 'alert').mockImplementation(() => {})
+  })
+
+  it('socio con créditos vigentes -- muestra "Vencimiento del plan" con la fecha real', async () => {
+    mockearCarga({
+      entradas: [
+        {
+          disciplineId: 'd-crossfit',
+          disciplineName: 'CrossFit',
+          remainingCredits: 6,
+          lotes: [{ id: 'l1', remainingCredits: 6, expiresAt: '2026-10-05T12:00:00.000Z' }],
+        },
+      ],
+    })
+
+    render(<CreditosEditablesSocio socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit'] }} />)
+
+    await screen.findByText('CrossFit')
+    expect(screen.getByText('Vencimiento del plan:')).toBeTruthy()
+    expect(screen.getByText('05/10/2026')).toBeTruthy()
+  })
+
+  it('socio SOLO con Aparatos vigente (sin créditos) -- igual muestra "Vencimiento del plan"', async () => {
+    mockearCarga({ entradas: [] })
+
+    render(
+      <CreditosEditablesSocio
+        socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['Aparatos'], aparatosVigenteReal: true, fechaVencimiento: '2026-11-20' }}
+      />,
+    )
+
+    await waitFor(() => expect(fetchCreditosPorDisciplina).toHaveBeenCalled())
+    expect(await screen.findByText('Vencimiento del plan:')).toBeTruthy()
+    expect(screen.getByText('20/11/2026')).toBeTruthy()
+  })
+
+  it('socio SIN nada activo -- no muestra "Vencimiento del plan" en absoluto (mismo criterio que "+ Agregar disciplina")', async () => {
+    mockearCarga({ entradas: [] })
+
+    render(<CreditosEditablesSocio socio={{ id: 's1', dni: DNI_FACUNDO, plan: [] }} />)
+
+    await waitFor(() => expect(fetchCreditosPorDisciplina).toHaveBeenCalled())
+    expect(screen.queryByText('Vencimiento del plan:')).toBeNull()
+  })
+
+  it('tocar el lápiz, elegir una fecha y confirmar -- llama a editarFechaVencimientoSocio con el texto de confirmación exacto', async () => {
+    mockearCarga({
+      entradas: [
+        {
+          disciplineId: 'd-crossfit',
+          disciplineName: 'CrossFit',
+          remainingCredits: 6,
+          lotes: [{ id: 'l1', remainingCredits: 6, expiresAt: '2026-10-05T12:00:00.000Z' }],
+        },
+      ],
+    })
+    window.confirm.mockReturnValue(true)
+    const onCreditosActualizados = vi.fn()
+
+    render(
+      <CreditosEditablesSocio
+        socio={{ id: 's1', dni: DNI_FACUNDO, nombre: 'Facundo', apellido: 'Uria', plan: ['CrossFit'] }}
+        onCreditosActualizados={onCreditosActualizados}
+      />,
+    )
+
+    await screen.findByText('CrossFit')
+    fireEvent.click(screen.getByRole('button', { name: 'Editar vencimiento del plan' }))
+
+    const input = screen.getByLabelText('Nueva fecha de vencimiento del plan')
+    expect(input.value).toBe('2026-10-05') // precargado con la fecha actual
+    fireEvent.change(input, { target: { value: '2027-01-15' } })
+    fireEvent.click(screen.getByText('Guardar fecha'))
+
+    expect(window.confirm).toHaveBeenCalledWith(
+      '¿Confirmás cambiar el vencimiento de TODO el plan de Facundo Uria a 15/01/2027? Esto afecta a todas sus disciplinas activas por igual.',
+    )
+    await waitFor(() => expect(editarFechaVencimientoSocio).toHaveBeenCalledWith('user-1', '2027-01-15'))
+    await waitFor(() => expect(onCreditosActualizados).toHaveBeenCalled())
+  })
+
+  it('si se cancela la confirmación, NO llama al RPC', async () => {
+    mockearCarga({
+      entradas: [
+        {
+          disciplineId: 'd-crossfit',
+          disciplineName: 'CrossFit',
+          remainingCredits: 6,
+          lotes: [{ id: 'l1', remainingCredits: 6, expiresAt: '2026-10-05T12:00:00.000Z' }],
+        },
+      ],
+    })
+    window.confirm.mockReturnValue(false)
+
+    render(<CreditosEditablesSocio socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit'] }} />)
+
+    await screen.findByText('CrossFit')
+    fireEvent.click(screen.getByRole('button', { name: 'Editar vencimiento del plan' }))
+    fireEvent.change(screen.getByLabelText('Nueva fecha de vencimiento del plan'), { target: { value: '2027-01-15' } })
+    fireEvent.click(screen.getByText('Guardar fecha'))
+
+    expect(window.confirm).toHaveBeenCalled()
+    expect(editarFechaVencimientoSocio).not.toHaveBeenCalled()
+  })
+
+  it('Cancelar cierra el editor sin llamar al RPC', async () => {
+    mockearCarga({
+      entradas: [
+        {
+          disciplineId: 'd-crossfit',
+          disciplineName: 'CrossFit',
+          remainingCredits: 6,
+          lotes: [{ id: 'l1', remainingCredits: 6, expiresAt: '2026-10-05T12:00:00.000Z' }],
+        },
+      ],
+    })
+
+    render(<CreditosEditablesSocio socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit'] }} />)
+
+    await screen.findByText('CrossFit')
+    fireEvent.click(screen.getByRole('button', { name: 'Editar vencimiento del plan' }))
+    fireEvent.click(screen.getByText('Cancelar'))
+
+    expect(screen.queryByLabelText('Nueva fecha de vencimiento del plan')).toBeNull()
+    expect(screen.getByText('Vencimiento del plan:')).toBeTruthy()
+    expect(editarFechaVencimientoSocio).not.toHaveBeenCalled()
+  })
+
+  it('si el RPC rechaza (ej. el socio se quedó sin nada activo por otra vía mientras tanto), avisa el mensaje real', async () => {
+    mockearCarga({
+      entradas: [
+        {
+          disciplineId: 'd-crossfit',
+          disciplineName: 'CrossFit',
+          remainingCredits: 6,
+          lotes: [{ id: 'l1', remainingCredits: 6, expiresAt: '2026-10-05T12:00:00.000Z' }],
+        },
+      ],
+    })
+    window.confirm.mockReturnValue(true)
+    editarFechaVencimientoSocio.mockRejectedValue(
+      new Error('Este socio no tiene ningún plan activo -- para asignarle una fecha nueva, hay que usar Cobrar, no editar la fecha.'),
+    )
+
+    render(<CreditosEditablesSocio socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit'] }} />)
+
+    await screen.findByText('CrossFit')
+    fireEvent.click(screen.getByRole('button', { name: 'Editar vencimiento del plan' }))
+    fireEvent.change(screen.getByLabelText('Nueva fecha de vencimiento del plan'), { target: { value: '2027-01-15' } })
+    fireEvent.click(screen.getByText('Guardar fecha'))
+
+    await waitFor(() =>
+      expect(window.alert).toHaveBeenCalledWith(
+        'Este socio no tiene ningún plan activo -- para asignarle una fecha nueva, hay que usar Cobrar, no editar la fecha.',
+      ),
+    )
+  })
+
+  // Confirma que este cambio NUNCA toca fijarCreditosDisciplina/
+  // ajustarCreditoDisciplina/agregarAparatosSocio -- editar la fecha es un
+  // camino 100% separado.
+  it('editar la fecha NUNCA llama a ningún otro RPC de créditos', async () => {
+    mockearCarga({
+      entradas: [
+        {
+          disciplineId: 'd-crossfit',
+          disciplineName: 'CrossFit',
+          remainingCredits: 6,
+          lotes: [{ id: 'l1', remainingCredits: 6, expiresAt: '2026-10-05T12:00:00.000Z' }],
+        },
+      ],
+    })
+    window.confirm.mockReturnValue(true)
+
+    render(<CreditosEditablesSocio socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit'] }} />)
+
+    await screen.findByText('CrossFit')
+    fireEvent.click(screen.getByRole('button', { name: 'Editar vencimiento del plan' }))
+    fireEvent.change(screen.getByLabelText('Nueva fecha de vencimiento del plan'), { target: { value: '2027-01-15' } })
+    fireEvent.click(screen.getByText('Guardar fecha'))
+
+    await waitFor(() => expect(editarFechaVencimientoSocio).toHaveBeenCalled())
+    expect(fijarCreditosDisciplina).not.toHaveBeenCalled()
+    expect(ajustarCreditoDisciplina).not.toHaveBeenCalled()
+    expect(agregarAparatosSocio).not.toHaveBeenCalled()
   })
 })

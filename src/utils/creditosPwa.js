@@ -409,3 +409,23 @@ export async function agregarAparatosSocio(userId) {
     throw error
   }
 }
+
+// CAMBIO 3 ("editar la fecha del plan") -- "Vencimiento del plan" en
+// CreditosEditablesSocio.jsx. RPC chico y separado (admin_editar_fecha_
+// vencimiento_socio, ver supabase_migration_admin_editar_fecha_vencimiento_
+// socio.sql -- SIN CORRER TODAVÍA), ADITIVO: no toca acreditar_pack,
+// admin_acreditar_creditos_manual ni ningún camino de Cobrar/comprobantes.
+// Solo mueve expires_at de las filas YA activas (créditos con saldo +
+// Aparatos vigente) a la fecha elegida -- nunca cantidades. `p_nuevaFecha`
+// es un string "YYYY-MM-DD" (el value crudo de un <input type="date">).
+export async function editarFechaVencimientoSocio(userId, nuevaFechaISO) {
+  const { data, error } = await supabase.rpc('admin_editar_fecha_vencimiento_socio', {
+    p_user_id: userId,
+    p_nueva_fecha: nuevaFechaISO,
+  })
+  if (error) {
+    logErrorSupabase(`editarFechaVencimientoSocio (userId=${userId}, nuevaFecha=${nuevaFechaISO})`, error)
+    throw error
+  }
+  return data // cantidad de filas actualizadas
+}

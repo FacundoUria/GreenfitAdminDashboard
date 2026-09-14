@@ -612,7 +612,7 @@ function SocioCard({
           </p>
         </div>
         <div>
-          <p className="text-xs text-gray-500">Vencimiento</p>
+          <p className="text-xs text-gray-500">Vencimiento (día/mes/año)</p>
           <p className="text-gray-300">
             <VencimientoCell socio={socio} />
           </p>
@@ -729,6 +729,7 @@ function SociosTabla({
                   {ordenVencimiento === 'desc' && <ArrowDown className="h-3.5 w-3.5" />}
                   {ordenVencimiento === null && <ArrowUpDown className="h-3.5 w-3.5 opacity-40" />}
                 </button>
+                <span className="block normal-case tracking-normal text-[10px] text-gray-500">(día/mes/año)</span>
               </th>
               <th className="px-5 py-3 text-right font-medium">Acciones</th>
             </tr>

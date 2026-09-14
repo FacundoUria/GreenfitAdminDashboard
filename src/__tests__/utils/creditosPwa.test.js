@@ -11,6 +11,7 @@ import {
   sincronizarVencimientoCreditoPwa,
   fijarCreditosDisciplina,
   ajustarCreditoDisciplina,
+  editarFechaVencimientoSocio,
 } from '../../utils/creditosPwa'
 
 const mockedFrom = supabase.from
@@ -591,5 +592,30 @@ describe('ajustarCreditoDisciplina (wrapper de admin_ajustar_credito_disciplina)
     const errorRpc = { message: 'boom' }
     mockedRpc.mockResolvedValue({ error: errorRpc })
     await expect(ajustarCreditoDisciplina('user-1', 'disc-crossfit', -1)).rejects.toBe(errorRpc)
+  })
+})
+
+// CAMBIO 3 ("editar la fecha del plan") -- wrapper de
+// admin_editar_fecha_vencimiento_socio. ADITIVO: no toca fijarCreditosDisciplina
+// ni ajustarCreditoDisciplina (ver los describe de arriba, sin ningún cambio).
+describe('editarFechaVencimientoSocio (wrapper de admin_editar_fecha_vencimiento_socio)', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('llama al RPC con userId y la nueva fecha, y devuelve la cantidad de filas actualizadas', async () => {
+    mockedRpc.mockResolvedValue({ data: 3, error: null })
+    const resultado = await editarFechaVencimientoSocio('user-1', '2027-01-15')
+    expect(mockedRpc).toHaveBeenCalledWith('admin_editar_fecha_vencimiento_socio', {
+      p_user_id: 'user-1',
+      p_nueva_fecha: '2027-01-15',
+    })
+    expect(resultado).toBe(3)
+  })
+
+  it('relanza el error del RPC (ej. socio sin ningún plan activo) en vez de tragárselo', async () => {
+    const errorRpc = {
+      message: 'Este socio no tiene ningún plan activo -- para asignarle una fecha nueva, hay que usar Cobrar, no editar la fecha.',
+    }
+    mockedRpc.mockResolvedValue({ error: errorRpc })
+    await expect(editarFechaVencimientoSocio('user-1', '2027-01-15')).rejects.toBe(errorRpc)
   })
 })

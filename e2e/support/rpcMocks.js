@@ -228,3 +228,48 @@ export function mockAdminFijarCreditosDisciplina(tables) {
     return null
   }
 }
+
+// admin_editar_fecha_vencimiento_socio() (CAMBIO 3 "editar la fecha del
+// plan", supabase_migration_admin_editar_fecha_vencimiento_socio.sql) --
+// ADITIVO, no reemplaza a admin_acreditar_creditos_manual/
+// admin_fijar_creditos_disciplina de arriba. Mismo guard que el RPC real:
+// rechaza si el socio no tiene ninguna disciplina de créditos con saldo Y
+// vigente, ni Aparatos vigente. Si tiene algo activo, mueve expires_at de
+// TODAS esas filas al mismo valor nuevo -- nunca remaining_credits.
+export function mockAdminEditarFechaVencimientoSocio(tables) {
+  return (request) => {
+    const { p_user_id: userId, p_nueva_fecha: nuevaFecha } = request.postDataJSON()
+    const ahoraISO = new Date().toISOString()
+    const nuevaFechaISO = `${nuevaFecha}T12:00:00.000Z`
+
+    const disciplinaPorId = new Map((tables.disciplines ?? []).map((d) => [d.id, d]))
+    const esFilaActiva = (fila) => {
+      if (fila.user_id !== userId || !fila.expires_at || fila.expires_at <= ahoraISO) return false
+      const disciplina = disciplinaPorId.get(fila.discipline_id)
+      if (!disciplina) return false
+      if (disciplina.kind === 'credits') return (fila.remaining_credits ?? 0) > 0
+      return disciplina.kind === 'membership'
+    }
+
+    const filasActivas = (tables.user_credits ?? []).filter(esFilaActiva)
+    if (filasActivas.length === 0) {
+      return {
+        __e2eError: {
+          status: 400,
+          body: {
+            message:
+              'Este socio no tiene ningún plan activo -- para asignarle una fecha nueva, hay que usar Cobrar, no editar la fecha.',
+          },
+        },
+      }
+    }
+
+    for (const fila of filasActivas) fila.expires_at = nuevaFechaISO
+
+    const profile = (tables.profiles ?? []).find((p) => p.id === userId)
+    const socio = profile ? (tables.socios ?? []).find((s) => s.dni === profile.dni) : null
+    if (socio) socio.fecha_vencimiento = nuevaFecha
+
+    return filasActivas.length
+  }
+}

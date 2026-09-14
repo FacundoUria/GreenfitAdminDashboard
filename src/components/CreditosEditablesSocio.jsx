@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react'
-import { Loader2, Minus, Plus } from 'lucide-react'
+import { Loader2, Minus, Pencil, Plus } from 'lucide-react'
 import { formatFecha } from '../utils/fecha'
 import { resolverUserIdPorDni, fetchCreditosPorDisciplina } from '../utils/fichaSocioPwa'
-import { fijarCreditosDisciplina, ajustarCreditoDisciplina, agregarAparatosSocio } from '../utils/creditosPwa'
+import {
+  fijarCreditosDisciplina,
+  ajustarCreditoDisciplina,
+  agregarAparatosSocio,
+  editarFechaVencimientoSocio,
+} from '../utils/creditosPwa'
 
 // CAMBIO 5 (re-agregar Aparatos) -- mismo criterio PLAN-INDEPENDIENTE que ya
 // usan aparatosActivoReal() en SociosTabla.jsx y NuevoSocioModal.jsx
@@ -29,6 +34,41 @@ function aparatosActivoReal(socio) {
   if (vigente === false) return false
   if (!socio?.fechaVencimiento) return false
   return new Date(`${socio.fechaVencimiento}T00:00:00`).getTime() > Date.now()
+}
+
+// CAMBIO 3 ("editar la fecha del plan") -- bajo "plan único", Aparatos +
+// todas las disciplinas de créditos vigentes de un socio comparten la MISMA
+// fecha (`fila.proximoVencimiento`, ya resuelto por fetchCreditosPorDisciplina
+// -- mismo dato que ya se ve en cada fila de crédito). Se toma la más
+// lejana entre las fuentes reales vigentes -- deberían coincidir todas; si
+// por algo raro no coincidieran, la más lejana es la que sigue vigente
+// después. `null` = sin ningún plan activo (mismo criterio que el guard del
+// RPC admin_editar_fecha_vencimiento_socio) -- ahí esta sección no se
+// ofrece en absoluto, mismo criterio que "+ Agregar disciplina"/"+ Agregar
+// Aparatos" ya usan para casos sin nada real.
+function fechaPlanActual(socio, filas) {
+  const candidatos = []
+  if (aparatosActivoReal(socio) && socio.fechaVencimiento) candidatos.push(socio.fechaVencimiento)
+  for (const fila of filas) {
+    if (fila.proximoVencimiento) candidatos.push(fila.proximoVencimiento)
+  }
+  if (candidatos.length === 0) return null
+  return candidatos.reduce((masLejana, actual) => (new Date(actual) > new Date(masLejana) ? actual : masLejana))
+}
+
+// "YYYY-MM-DD" para precargar el <input type="date"> -- mismo criterio de
+// "un valor 'solo fecha' se interpreta en el huso horario local" que ya usa
+// formatFecha() (evita el corrimiento de un día que da tratar un
+// "YYYY-MM-DD" como medianoche UTC).
+function aFechaInput(valor) {
+  if (!valor) return ''
+  const esSoloFecha = typeof valor === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(valor)
+  const fecha = new Date(esSoloFecha ? `${valor}T00:00:00` : valor)
+  if (Number.isNaN(fecha.getTime())) return ''
+  const y = fecha.getFullYear()
+  const m = String(fecha.getMonth() + 1).padStart(2, '0')
+  const d = String(fecha.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
 }
 
 // Reemplaza a los steppers -/+1/+4/+8/+12 que vivían sueltos en cada fila
@@ -113,6 +153,13 @@ function CreditosEditablesSocio({ socio, disciplinasActivas = [], onCreditosActu
   // "ausencia de UI en vez de alert en runtime" que ya rige acá: se puede
   // agregar Aparatos solo si hay un userId real sobre el que hacerlo.
   const puedeAgregarAparatos = !aparatosVigente && !!userId
+
+  // "Vencimiento del plan" (CAMBIO 3) -- estado del editor inline, mismo
+  // patrón que "+ Agregar disciplina" (abrir/cancelar/guardar separado del
+  // resto).
+  const [editandoFecha, setEditandoFecha] = useState(false)
+  const [nuevaFechaPlan, setNuevaFechaPlan] = useState('')
+  const [guardandoFecha, setGuardandoFecha] = useState(false)
 
   useEffect(() => {
     let cancelado = false
@@ -280,17 +327,69 @@ function CreditosEditablesSocio({ socio, disciplinasActivas = [], onCreditosActu
     }
   }
 
+  const handleAbrirEditorFecha = (fechaActual) => {
+    setNuevaFechaPlan(aFechaInput(fechaActual))
+    setEditandoFecha(true)
+  }
+
+  const handleGuardarFecha = async () => {
+    if (!userId) {
+      window.alert('Este socio todavía no tiene cuenta en la app -- no se puede editar la fecha acá todavía.')
+      return
+    }
+    if (!nuevaFechaPlan) {
+      window.alert('Elegí una fecha.')
+      return
+    }
+
+    const confirmado = window.confirm(
+      `¿Confirmás cambiar el vencimiento de TODO el plan de ${socio.nombre} ${socio.apellido} a ${formatFecha(nuevaFechaPlan)}? Esto afecta a todas sus disciplinas activas por igual.`,
+    )
+    if (!confirmado) return
+
+    setGuardandoFecha(true)
+    try {
+      // admin_editar_fecha_vencimiento_socio -- RPC chico y separado, NO
+      // toca remaining_credits de ninguna disciplina, solo mueve expires_at
+      // de las filas ya activas. No reemplaza a "Cobrar": si el socio no
+      // tiene nada activo, esta sección ni siquiera se ofrece (ver
+      // fechaPlanActual/tienePlanActivo más abajo).
+      await editarFechaVencimientoSocio(userId, nuevaFechaPlan)
+      setEditandoFecha(false)
+      setRefrescarTick((t) => t + 1)
+      onCreditosActualizados?.()
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'No se pudo editar la fecha del plan.')
+    } finally {
+      setGuardandoFecha(false)
+    }
+  }
+
+  // CAMBIO 3 -- fecha única del plan (null = sin nada activo). Se calcula
+  // acá, no dentro del guard de abajo, porque también decide si mostrar
+  // "Vencimiento del plan" en absoluto.
+  const fechaPlan = fechaPlanActual(socio, filas)
+  const tienePlanActivo = fechaPlan !== null
+
   // Antes esto era un chequeo síncrono sobre socios.plan (se sabía sin
   // esperar ninguna respuesta de red) -- ahora "¿hay algo que mostrar?"
   // depende de la carga real, así que solo se puede decidir DESPUÉS de
   // que termine (mientras carga, se muestra igual el spinner de abajo).
-  // Sin nada que mostrar, sin error, sin ninguna disciplina para agregar Y
-  // sin poder agregar Aparatos tampoco (ya vigente, o sin userId real), la
-  // sección entera desaparece -- si hay algo para agregar (una disciplina
-  // de créditos O Aparatos), se muestra igual (aunque `filas` esté vacío)
-  // para que los botones de agregar sigan disponibles en un socio sin nada
-  // activo todavía.
-  if (!cargando && !error && filas.length === 0 && disciplinasDisponibles.length === 0 && !puedeAgregarAparatos) return null
+  // Sin nada que mostrar, sin error, sin ninguna disciplina para agregar,
+  // sin poder agregar Aparatos (ya vigente, o sin userId real) Y sin ningún
+  // plan activo que editar la fecha, la sección entera desaparece -- si hay
+  // algo para agregar/editar, se muestra igual (aunque `filas` esté vacío)
+  // para que esos botones sigan disponibles en un socio sin nada activo
+  // todavía.
+  if (
+    !cargando &&
+    !error &&
+    filas.length === 0 &&
+    disciplinasDisponibles.length === 0 &&
+    !puedeAgregarAparatos &&
+    !tienePlanActivo
+  )
+    return null
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-white/10 bg-greenfit-dark/40 p-4 sm:col-span-2">
@@ -304,6 +403,66 @@ function CreditosEditablesSocio({ socio, disciplinasActivas = [], onCreditosActu
         <p className="text-sm text-red-400">{error}</p>
       ) : (
         <div className="flex flex-col gap-3">
+          {/* CAMBIO 3 -- "Vencimiento del plan": SOLO si el socio tiene algo
+              activo (mismo criterio que "+ Agregar disciplina"/"+ Agregar
+              Aparatos" ya usan para ausencia de UI). Editar acá mueve la
+              fecha de TODAS las disciplinas activas a la vez -- no
+              reemplaza a "Cobrar" (que además ajusta cantidades). */}
+          {tienePlanActivo &&
+            (editandoFecha ? (
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-white/15 bg-greenfit-card px-3 py-2.5">
+                <span className="text-sm text-gray-300">Nuevo vencimiento:</span>
+                <input
+                  type="date"
+                  value={nuevaFechaPlan}
+                  onChange={(e) => setNuevaFechaPlan(e.target.value)}
+                  disabled={guardandoFecha}
+                  aria-label="Nueva fecha de vencimiento del plan"
+                  className="rounded-md border border-white/10 bg-greenfit-dark px-2 py-1.5 text-sm text-white outline-none focus:border-greenfit-primary disabled:opacity-50"
+                />
+                <button
+                  type="button"
+                  onClick={handleGuardarFecha}
+                  disabled={guardandoFecha || !nuevaFechaPlan}
+                  className="flex h-9 shrink-0 items-center justify-center rounded-md bg-greenfit-primary/15 px-3 text-xs font-semibold text-greenfit-primary transition-colors hover:bg-greenfit-primary/25 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {/* "Guardar fecha", no "Guardar" a secas -- con filas de
+                      crédito visibles a la vez, cada una ya tiene su propio
+                      botón "Guardar" (fijar cantidad); un texto distinto
+                      evita la ambigüedad tanto para el admin como para
+                      cualquier query por texto/rol. */}
+                  {guardandoFecha ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Guardar fecha'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditandoFecha(false)}
+                  disabled={guardandoFecha}
+                  className="text-xs font-medium text-gray-400 underline transition-colors hover:text-white disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/5 bg-greenfit-card px-3 py-2.5">
+                <p className="text-sm text-gray-300">
+                  {/* Dos <span> separados (no texto+span inline) -- para que
+                      getByText en los tests pueda matchear cada uno por
+                      separado sin que el textContent combinado del <p>
+                      (que SÍ incluye el de sus hijos) ambigüe la búsqueda. */}
+                  <span>Vencimiento del plan:</span> <span className="font-semibold text-white">{formatFecha(fechaPlan)}</span>
+                </p>
+                <button
+                  type="button"
+                  title="Editar vencimiento del plan"
+                  aria-label="Editar vencimiento del plan"
+                  onClick={() => handleAbrirEditorFecha(fechaPlan)}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-white/10 hover:text-white"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+
           {filas.map((fila) => {
             const enVuelo = procesando === fila.disciplina
             return (
