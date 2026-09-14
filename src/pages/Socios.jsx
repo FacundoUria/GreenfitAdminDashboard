@@ -113,7 +113,7 @@ function mapearSocio(row) {
 
 function Socios() {
   const { usuario } = useAuth()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const [socios, setSocios] = useState([])
   const [loading, setLoading] = useState(true)
@@ -351,6 +351,37 @@ function Socios() {
     setSocioEnEdicion(socio)
     setModalAbierto(true)
   }
+
+  // Deep-link ?editar=<dni> -- mismo patrón que ?filtro=por_vencer
+  // (Home.jsx -> Socios.jsx), pero para abrir la ficha de un socio puntual
+  // en vez de aplicar un filtro. Usado desde InscriptosModal.jsx/Clases.jsx:
+  // click en el nombre de un inscripto (con dni real) navega acá para abrir
+  // su "Editar Socio" directo -- mismo handleEditar() que ya dispara la
+  // tabla, sin fetch ni modal nuevos. Espera a que sociosConEstado tenga
+  // datos (no se puede buscar en una lista todavía vacía) y limpia el query
+  // param apenas se resuelve -- encontrado o no -- para que cerrar el modal
+  // y disparar un refetch (onSaved -> fetchSocios) no lo vuelva a abrir solo.
+  useEffect(() => {
+    const dniEditar = searchParams.get('editar')
+    if (!dniEditar || sociosConEstado.length === 0) return
+
+    const socio = sociosConEstado.find((s) => s.dni === dniEditar)
+    // Reacciona a un query param de ENTRADA (navegación desde otra página),
+    // no a un cambio de estado interno -- mismo patrón ya avalado en el
+    // fetch-on-mount de más arriba.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (socio) handleEditar(socio)
+
+    setSearchParams(
+      (prev) => {
+        const siguiente = new URLSearchParams(prev)
+        siguiente.delete('editar')
+        return siguiente
+      },
+      { replace: true },
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, sociosConEstado])
 
   // Reemplaza al viejo ajuste incremental sobre `socios.creditos` (steppers
   // sueltos en la fila de la tabla, ver handleAjustarCredito -- eliminado):

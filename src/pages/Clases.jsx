@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Loader2, Plus } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import {
@@ -15,6 +16,7 @@ import NuevaClaseModal from '../components/NuevaClaseModal'
 const DIAS_VISIBLES = proximosDias(7)
 
 function Clases() {
+  const navigate = useNavigate()
   const [clasesBase, setClasesBase] = useState([])
   const [bookings, setBookings] = useState([])
   const [loading, setLoading] = useState(true)
@@ -191,15 +193,30 @@ function Clases() {
     await fetchBookings(fechaSeleccionadaStr)
   }
 
+  // Click en el nombre de un inscripto (InscriptosModal.jsx, solo si tiene
+  // dni real) -- reusa el mismo deep-link ?editar=<dni> que ya entiende
+  // Socios.jsx (mismo patrón que ?filtro=por_vencer desde Home.jsx), así
+  // que no hace falta ningún fetch ni modal nuevo acá.
+  const handleAbrirFichaSocio = (dni) => {
+    navigate(`/socios?editar=${dni}`)
+  }
+
   const handleQuitarInscripto = async (clase, inscripto) => {
     const confirmado = window.confirm(`¿Quitar a ${inscripto.nombre} de esta clase?`)
     if (!confirmado) return
 
+    // p_forzar_reintegro: true SIEMPRE -- a diferencia de cuando el socio se
+    // cancela solo desde la PWA (cancel_booking, con tiempo de gracia), acá
+    // es Seba sacando a alguien desde el Admin por cualquier motivo (no
+    // necesariamente una cancelación tardía del socio) -- el crédito se
+    // reintegra incondicional, sin depender de cuánto falte para la clase.
+    // Sin checkbox ni opción: es automático cada vez que se usa este botón.
     const { error: rpcError } = await supabase.rpc('admin_cancel_booking', {
       p_user_id: inscripto.userId,
       p_class_id: clase.id,
       p_booking_date: fechaSeleccionadaStr,
       p_reason: 'Quitado por el admin desde el panel',
+      p_forzar_reintegro: true,
     })
 
     if (rpcError) {
@@ -319,6 +336,7 @@ function Clases() {
         onMarcarAsistencia={handleMarcarAsistencia}
         onAgregarSocio={handleAgregarSocio}
         onQuitarInscripto={handleQuitarInscripto}
+        onAbrirFicha={handleAbrirFichaSocio}
       />
 
       {modalNuevaClaseAbierto && (

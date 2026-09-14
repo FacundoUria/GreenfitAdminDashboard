@@ -15,7 +15,7 @@ function nombresDias(diasSemana) {
     .join(', ')
 }
 
-function InscriptosModal({ open, clase, onClose, onMarcarAsistencia, onAgregarSocio, onQuitarInscripto }) {
+function InscriptosModal({ open, clase, onClose, onMarcarAsistencia, onAgregarSocio, onQuitarInscripto, onAbrirFicha }) {
   const [dniBusqueda, setDniBusqueda] = useState('')
   const [agregando, setAgregando] = useState(false)
 
@@ -82,7 +82,23 @@ function InscriptosModal({ open, clase, onClose, onMarcarAsistencia, onAgregarSo
                       {iniciales(inscripto.nombre)}
                     </div>
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-white">{inscripto.nombre}</p>
+                      {/* Clickeable SOLO con dni real -- mismo criterio de
+                          "ausencia de UI" que ya rige en el resto del
+                          proyecto para socios sin DNI cargado (ver
+                          creditos-sin-dni.spec.js): sin dni no hay forma de
+                          encontrarlo en /socios, así que queda texto plano
+                          en vez de un link que siempre fallaría. */}
+                      {inscripto.dni ? (
+                        <button
+                          type="button"
+                          onClick={() => onAbrirFicha(inscripto.dni)}
+                          className="block w-full truncate text-left text-sm font-medium text-white hover:text-greenfit-primary hover:underline"
+                        >
+                          {inscripto.nombre}
+                        </button>
+                      ) : (
+                        <p className="truncate text-sm font-medium text-white">{inscripto.nombre}</p>
+                      )}
                       <p className="text-xs text-gray-400">
                         {inscripto.asistio === true
                           ? 'Asistió'
