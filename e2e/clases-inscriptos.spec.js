@@ -171,13 +171,25 @@ function mockAdminCancelBooking(tables, ahoraFija) {
     if (idx === -1) {
       return { __e2eError: { status: 400, body: { message: 'Ese socio no tenía una reserva en esta clase' } } }
     }
+    const loteOrigenId = tables.bookings[idx].credit_lote_id ?? null
     tables.bookings.splice(idx, 1)
 
+    // Criterio por LOTES de supabase_migration_fix_admin_cancel_booking_lote_
+    // exacto.sql (el mismo de cancel_booking() de la PWA):
+    //  - reserva con credit_lote_id: +1 SOLO en ese lote y SOLO si sigue
+    //    vigente -- si venció no reintegra nada, ni con forzar, ni en otro lote;
+    //  - reserva sin credit_lote_id: el lote vigente que vence más pronto.
     if (dentroDelLimite || forzarReintegro) {
-      const lote = (tables.user_credits ?? [])
-        .filter((f) => f.user_id === userId && f.discipline_id === clase.discipline_id)
-        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0]
-      if (lote) lote.remaining_credits = (lote.remaining_credits ?? 0) + 1
+      const vigente = (f) => new Date(f.expires_at) > ahoraFija
+      if (loteOrigenId) {
+        const lote = (tables.user_credits ?? []).find((f) => f.id === loteOrigenId)
+        if (lote && vigente(lote)) lote.remaining_credits = (lote.remaining_credits ?? 0) + 1
+      } else {
+        const lote = (tables.user_credits ?? [])
+          .filter((f) => f.user_id === userId && f.discipline_id === clase.discipline_id && vigente(f))
+          .sort((a, b) => new Date(a.expires_at) - new Date(b.expires_at))[0]
+        if (lote) lote.remaining_credits = (lote.remaining_credits ?? 0) + 1
+      }
     }
 
     return dentroDelLimite
@@ -220,4 +232,98 @@ test('PARTE B -- "Quitar de la clase" reintegra el crédito SIEMPRE, aunque falt
   // de este ticket NO hubieran reintegrado nada -- acá sí, porque Seba lo
   // sacó desde el Admin (p_forzar_reintegro:true), no el socio por su cuenta.
   expect(tables.user_credits[0].remaining_credits).toBe(5)
+})
+
+// ---- Reintegro por LOTE (fix de la regresión de admin_cancel_booking) ----
+
+function loteCrossfit(id, remaining, expiresAt, createdAt) {
+  return {
+    id,
+    user_id: PROFILE_MARTINA.id,
+    discipline_id: DISCIPLINA_CROSSFIT.id,
+    remaining_credits: remaining,
+    expires_at: expiresAt,
+    created_at: createdAt,
+    discipline: DISCIPLINA_CROSSFIT,
+  }
+}
+
+// Corre el flujo real de UI ("Quitar de la clase") y devuelve los bodies que
+// llegaron al RPC, para poder confirmar que SIEMPRE viaja p_forzar_reintegro.
+async function quitarInscripto(page, tables) {
+  const bodies = []
+  page.on('dialog', (dialog) => dialog.accept())
+  await page.clock.setFixedTime(HORA_CONGELADA)
+  await loginComoAdmin(page, {
+    tables,
+    rpc: {
+      admin_cancel_booking: (request) => {
+        bodies.push(request.postDataJSON())
+        return mockAdminCancelBooking(tables, HORA_CONGELADA)(request)
+      },
+    },
+  })
+  await mockEmbedDisciplinesEnClasses(page, tables)
+  await irAClases(page)
+  await page.getByRole('button', { name: 'Ver Inscriptos' }).click()
+  await expect(page.getByRole('heading', { name: 'CrossFit 18hs' })).toBeVisible()
+  await page.getByRole('button', { name: 'Quitar de la clase' }).click()
+  await expect(page.getByText('Todavía no hay socios inscriptos en esta clase.')).toBeVisible()
+  return bodies
+}
+
+const VIGENTE = '2026-12-01T12:00:00.000Z'
+const VENCIDO = '2026-08-01T12:00:00.000Z' // antes de HORA_CONGELADA (2026-08-10)
+
+test('lote de origen VIGENTE -- reintegra ahí exacto, no en otro lote (aunque el otro sea más reciente)', async ({ page }) => {
+  const tables = {
+    ...tablasBase(),
+    classes: [CLASE_A_PUNTO_DE_EMPEZAR],
+    bookings: [{ ...BOOKING_MARTINA_PRONTO, credit_lote_id: 'lote-origen' }],
+    user_credits: [
+      loteCrossfit('lote-origen', 3, VIGENTE, '2026-07-01T00:00:00.000Z'),
+      loteCrossfit('lote-mas-reciente', 5, VIGENTE, '2026-08-05T00:00:00.000Z'),
+    ],
+  }
+  await quitarInscripto(page, tables)
+
+  expect(tables.user_credits.find((f) => f.id === 'lote-origen').remaining_credits).toBe(4)
+  expect(tables.user_credits.find((f) => f.id === 'lote-mas-reciente').remaining_credits).toBe(5)
+})
+
+test('lote de origen VENCIDO -- NO reintegra nada (ni en otro lote vigente), ni con p_forzar_reintegro=true', async ({ page }) => {
+  const tables = {
+    ...tablasBase(),
+    classes: [CLASE_A_PUNTO_DE_EMPEZAR],
+    bookings: [{ ...BOOKING_MARTINA_PRONTO, credit_lote_id: 'lote-vencido' }],
+    user_credits: [
+      loteCrossfit('lote-vencido', 3, VENCIDO, '2026-07-01T00:00:00.000Z'),
+      loteCrossfit('lote-vigente', 5, VIGENTE, '2026-08-05T00:00:00.000Z'),
+    ],
+  }
+  const bodies = await quitarInscripto(page, tables)
+
+  expect(bodies[0].p_forzar_reintegro).toBe(true) // el flujo real SIEMPRE fuerza -- y aun así no revive un lote muerto
+  expect(tables.user_credits.find((f) => f.id === 'lote-vencido').remaining_credits).toBe(3)
+  expect(tables.user_credits.find((f) => f.id === 'lote-vigente').remaining_credits).toBe(5)
+})
+
+test('reserva vieja SIN credit_lote_id -- reintegra al lote vigente que VENCE antes, no al más reciente por creación', async ({
+  page,
+}) => {
+  const tables = {
+    ...tablasBase(),
+    classes: [CLASE_A_PUNTO_DE_EMPEZAR],
+    bookings: [{ ...BOOKING_MARTINA_PRONTO, credit_lote_id: null }],
+    user_credits: [
+      loteCrossfit('lote-vence-antes', 2, '2026-09-15T12:00:00.000Z', '2026-07-01T00:00:00.000Z'),
+      loteCrossfit('lote-mas-reciente', 6, '2026-12-01T12:00:00.000Z', '2026-08-05T00:00:00.000Z'),
+      loteCrossfit('lote-vencido', 1, VENCIDO, '2026-06-01T00:00:00.000Z'),
+    ],
+  }
+  await quitarInscripto(page, tables)
+
+  expect(tables.user_credits.find((f) => f.id === 'lote-vence-antes').remaining_credits).toBe(3)
+  expect(tables.user_credits.find((f) => f.id === 'lote-mas-reciente').remaining_credits).toBe(6)
+  expect(tables.user_credits.find((f) => f.id === 'lote-vencido').remaining_credits).toBe(1)
 })

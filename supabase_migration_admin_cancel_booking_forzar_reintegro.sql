@@ -3,6 +3,12 @@
 --
 -- ESTAMOS EN PRODUCCIÓN.
 --
+-- !! SUPERADA por supabase_migration_fix_admin_cancel_booking_lote_exacto.sql !!
+-- Este archivo se escribió sobre la versión de admin_cancel_booking() del 2/9
+-- (pre-lotes): su bloque de reintegro usa "created_at desc" sin filtrar
+-- vigencia. NO volver a correrlo -- la versión correcta (con credit_lote_id
+-- y p_forzar_reintegro) es la del archivo de fix.
+--
 -- CONTEXTO: "Quitar de la clase" (InscriptosModal.jsx, botón UserMinus, ya
 -- en producción) llama a admin_cancel_booking() -- que hasta ahora
 -- reintegraba el crédito con el MISMO criterio que cancel_booking() (la que
