@@ -18,7 +18,7 @@ function colorDisciplina(disciplina) {
   return COLORES_DISCIPLINA[clave ?? 'default']
 }
 
-function ClaseCard({ clase, estado, hayDestacada, onVerInscriptos, onEditar, onCancelar }) {
+function ClaseCard({ clase, estado, cancelada, hayDestacada, onVerInscriptos, onEditar, onCancelar }) {
   const inscriptos = clase.inscriptos.length
   const porcentaje = Math.min(100, Math.round((inscriptos / clase.cupoMaximo) * 100))
   const { barra, texto } = colorOcupacion(porcentaje)
@@ -50,15 +50,22 @@ function ClaseCard({ clase, estado, hayDestacada, onVerInscriptos, onEditar, onC
         </div>
       </div>
 
-      {estado && (
-        <div
-          className={`flex items-center gap-1.5 px-5 py-1.5 text-[11px] font-bold uppercase tracking-wide ${
-            estado === 'en_curso' ? 'bg-greenfit-primary text-greenfit-dark' : 'bg-greenfit-primary/15 text-greenfit-primary'
-          }`}
-        >
-          {estado === 'en_curso' && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-greenfit-dark" />}
-          {estado === 'en_curso' ? 'En curso' : 'Próxima'}
+      {cancelada ? (
+        <div className="flex items-center gap-1.5 bg-red-500/15 px-5 py-1.5 text-[11px] font-bold uppercase tracking-wide text-red-400">
+          <Ban className="h-3 w-3" />
+          Cancelada este día
         </div>
+      ) : (
+        estado && (
+          <div
+            className={`flex items-center gap-1.5 px-5 py-1.5 text-[11px] font-bold uppercase tracking-wide ${
+              estado === 'en_curso' ? 'bg-greenfit-primary text-greenfit-dark' : 'bg-greenfit-primary/15 text-greenfit-primary'
+            }`}
+          >
+            {estado === 'en_curso' && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-greenfit-dark" />}
+            {estado === 'en_curso' ? 'En curso' : 'Próxima'}
+          </div>
+        )
       )}
 
       <div className="flex flex-col gap-4 p-5">
@@ -102,8 +109,14 @@ function ClaseCard({ clase, estado, hayDestacada, onVerInscriptos, onEditar, onC
           <button
             type="button"
             onClick={() => onCancelar(clase)}
+            disabled={cancelada}
+            title={cancelada ? 'Ya está cancelada para este día' : 'Cancelar'}
             aria-label="Cancelar clase"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/10 text-red-400 transition-colors hover:bg-red-500/10"
+            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/10 transition-colors ${
+              cancelada
+                ? 'cursor-not-allowed text-gray-600 opacity-40'
+                : 'text-red-400 hover:bg-red-500/10'
+            }`}
           >
             <Ban className="h-3.5 w-3.5" />
           </button>
@@ -113,7 +126,15 @@ function ClaseCard({ clase, estado, hayDestacada, onVerInscriptos, onEditar, onC
   )
 }
 
-function ClasesGrid({ clases, enCursoIds = new Set(), proximaClaseId = null, onVerInscriptos, onEditar, onCancelar }) {
+function ClasesGrid({
+  clases,
+  enCursoIds = new Set(),
+  proximaClaseId = null,
+  canceladasIds = new Set(),
+  onVerInscriptos,
+  onEditar,
+  onCancelar,
+}) {
   if (clases.length === 0) {
     return (
       <div className="rounded-xl border border-white/5 bg-greenfit-card p-10 text-center text-sm text-gray-400">
@@ -133,6 +154,7 @@ function ClasesGrid({ clases, enCursoIds = new Set(), proximaClaseId = null, onV
             key={clase.id}
             clase={clase}
             estado={estado}
+            cancelada={canceladasIds.has(clase.id)}
             hayDestacada={hayDestacada}
             onVerInscriptos={onVerInscriptos}
             onEditar={onEditar}

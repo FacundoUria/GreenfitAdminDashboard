@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Loader2, Plus } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
+import { formatFecha } from '../utils/fecha'
 import {
   combinarFechaYHora,
   diaAnterior,
@@ -26,6 +27,7 @@ function Clases() {
   const navigate = useNavigate()
   const [clasesBase, setClasesBase] = useState([])
   const [bookings, setBookings] = useState([])
+  const [cancelaciones, setCancelaciones] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [fechaSeleccionada, setFechaSeleccionada] = useState(HOY)
@@ -79,9 +81,27 @@ function Clases() {
     setBookings(data ?? [])
   }, [])
 
+  // Igual que fetchBookings -- por ocurrencia puntual (class_id + fecha),
+  // no por clase entera, así que se re-pide con cada cambio de día. Fail-
+  // open a propósito (mismo criterio que otros fetches "de más" de este
+  // archivo): si la tabla todavía no existe (migración sin correr), la
+  // grilla sigue funcionando, solo sin el badge de "Cancelada".
+  const fetchCancelaciones = useCallback(async (fecha) => {
+    const { data, error: fetchError } = await supabase
+      .from('class_occurrence_cancellations')
+      .select('class_id')
+      .eq('occurrence_date', fecha)
+
+    if (fetchError) {
+      console.error('Error al cargar cancelaciones puntuales desde Supabase:', fetchError.message)
+      return
+    }
+    setCancelaciones(data ?? [])
+  }, [])
+
   const cargarTodo = useCallback(async () => {
     setLoading(true)
-    await Promise.all([fetchClasesBase(), fetchBookings(fechaSeleccionadaStr)])
+    await Promise.all([fetchClasesBase(), fetchBookings(fechaSeleccionadaStr), fetchCancelaciones(fechaSeleccionadaStr)])
     setLoading(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -91,15 +111,18 @@ function Clases() {
     cargarTodo()
   }, [cargarTodo])
 
-  // Re-pide los inscriptos (no las clases) cuando cambia el día elegido.
-  // `cargarTodo` ya cubre la primera carga (classes + bookings juntos), así
-  // que acá solo importan los cambios posteriores de fechaSeleccionada.
+  // Re-pide inscriptos + cancelaciones (no las clases) cuando cambia el día
+  // elegido. `cargarTodo` ya cubre la primera carga, así que acá solo
+  // importan los cambios posteriores de fechaSeleccionada.
   const [fechaCargadaInicial] = useState(fechaSeleccionadaStr)
   useEffect(() => {
     if (fechaSeleccionadaStr === fechaCargadaInicial) return
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchBookings(fechaSeleccionadaStr)
-  }, [fechaSeleccionadaStr, fechaCargadaInicial, fetchBookings])
+    fetchCancelaciones(fechaSeleccionadaStr)
+  }, [fechaSeleccionadaStr, fechaCargadaInicial, fetchBookings, fetchCancelaciones])
+
+  const canceladasIds = useMemo(() => new Set(cancelaciones.map((c) => c.class_id)), [cancelaciones])
 
   const clases = useMemo(
     () => mapearClasesDesdeBookings(clasesBase, bookings),
@@ -129,6 +152,10 @@ function Clases() {
     let proximaInicio = null
 
     for (const clase of clasesDelDia) {
+      // Una clase cancelada este día puntual no tiene actividad real (sus
+      // reservas ya se cancelaron todas) -- no tiene sentido destacarla
+      // como "En curso"/"Próxima".
+      if (canceladasIds.has(clase.id)) continue
       const inicio = combinarFechaYHora(fechaSeleccionadaStr, clase.horaInicio)
       const fin = combinarFechaYHora(fechaSeleccionadaStr, clase.horaFin) ?? inicio
       if (!inicio) continue
@@ -142,7 +169,7 @@ function Clases() {
     }
 
     return { enCursoIds: enCurso, proximaClaseId: proxima }
-  }, [clasesDelDia, esHoy, fechaSeleccionadaStr])
+  }, [clasesDelDia, esHoy, fechaSeleccionadaStr, canceladasIds])
 
   const claseInscriptos = useMemo(
     () => clasesDelDia.find((c) => c.id === claseInscriptosId) ?? null,
@@ -244,28 +271,62 @@ function Clases() {
     setModalNuevaClaseAbierto(true)
   }
 
+  // REDISEÑO -- antes esto hacía un DELETE directo sobre `classes`: borraba
+  // la plantilla recurrente ENTERA (todos los días programados, para
+  // siempre) y encima fallaba con un error genérico apenas hubiera
+  // cualquier reserva asociada (foreign key de `bookings`, sin cascade --
+  // ver investigacion_cancelar_clase_prueba_fk.sql). Lo que hace falta es
+  // cancelar la OCURRENCIA de este día puntual nada más -- `classes` no se
+  // toca acá nunca. admin_cancelar_clase_dia() reintegra el crédito a cada
+  // anotado (mismo criterio incondicional que "Quitar de la clase") y les
+  // deja una notificación in-app; acá solo falta el push real.
   const handleCancelarClase = async (clase) => {
     const confirmado = window.confirm(
-      `¿Seguro que querés cancelar la clase de ${clase.disciplina} de las ${clase.horaInicio}?`,
+      `¿Cancelar la clase de ${clase.disciplina} de las ${clase.horaInicio} del ${formatFecha(fechaSeleccionadaStr)}? Se reintegra el crédito a todos los anotados de ese día y se les avisa. El resto de la semana no se toca.`,
     )
     if (!confirmado) return
 
-    const { data, error: deleteError } = await supabase
-      .from('classes')
-      .delete()
-      .eq('id', clase.id)
-      .select()
+    // Resuelto ANTES de cancelar -- el RPC de abajo borra las reservas, así
+    // que después no quedaría de dónde sacar a quién avisarle por push.
+    const { data: inscriptos, error: inscriptosError } = await supabase
+      .from('bookings')
+      .select('user_id')
+      .eq('class_id', clase.id)
+      .eq('booking_date', fechaSeleccionadaStr)
+    if (inscriptosError) {
+      console.error('Error al resolver los inscriptos antes de cancelar la clase:', inscriptosError.message)
+    }
+    const userIdsAfectados = [...new Set((inscriptos ?? []).map((b) => b.user_id))]
 
-    if (deleteError || !data || data.length === 0) {
-      console.error(
-        'Error al cancelar la clase en Supabase:',
-        deleteError?.message ?? 'no se eliminó ninguna fila (revisá las políticas RLS)',
-      )
-      window.alert('No se pudo cancelar la clase. Intentá nuevamente.')
+    const { data: cantidadCancelados, error: rpcError } = await supabase.rpc('admin_cancelar_clase_dia', {
+      p_class_id: clase.id,
+      p_occurrence_date: fechaSeleccionadaStr,
+    })
+
+    if (rpcError) {
+      window.alert(`No se pudo cancelar la clase: ${rpcError.message}`)
       return
     }
 
-    setClasesBase((prev) => prev.filter((c) => c.id !== clase.id))
+    // Best-effort -- el reintegro y la notificación in-app YA se aplicaron
+    // (RPC de arriba, en la misma transacción); si el push real falla, no
+    // hay nada crítico que revertir, solo se loguea.
+    if (userIdsAfectados.length > 0) {
+      const { error: pushError } = await supabase.functions.invoke('send-push', {
+        body: {
+          title: 'Clase cancelada',
+          body: `${clase.disciplina} de las ${clase.horaInicio} del ${formatFecha(fechaSeleccionadaStr)} fue cancelada por el gimnasio. Ya te reintegramos el crédito.`,
+          audience: 'users',
+          targetUserIds: userIdsAfectados,
+        },
+      })
+      if (pushError) {
+        console.error('No se pudo enviar el push de la cancelación (la cancelación en sí ya se aplicó):', pushError.message)
+      }
+    }
+
+    window.alert(`Clase cancelada para ese día -- se reintegró el crédito a ${cantidadCancelados ?? 0} socio(s).`)
+    await Promise.all([fetchBookings(fechaSeleccionadaStr), fetchCancelaciones(fechaSeleccionadaStr)])
   }
 
   const handleClaseGuardada = () => {
@@ -330,6 +391,7 @@ function Clases() {
           clases={clasesDelDia}
           enCursoIds={enCursoIds}
           proximaClaseId={proximaClaseId}
+          canceladasIds={canceladasIds}
           onVerInscriptos={handleVerInscriptos}
           onEditar={handleEditar}
           onCancelar={handleCancelarClase}
