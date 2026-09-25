@@ -11,6 +11,8 @@ import {
   mapearClasesDesdeBookings,
   proximosDias,
 } from '../utils/clases'
+import { fetchCreditosVigentesPorSocio, fetchSociosParaAnotar } from '../utils/anotarSocios'
+import { mensajeErrorAnotar } from '../utils/buscarSocios'
 import ClasesGrid from '../components/ClasesGrid'
 import InscriptosModal from '../components/InscriptosModal'
 import NuevaClaseModal from '../components/NuevaClaseModal'
@@ -197,9 +199,73 @@ function Clases() {
     setBookings((prev) => prev.map((b) => (b.id === inscriptoId ? { ...b, attended: asistio } : b)))
   }
 
-  // Busca socios (profiles con role='socio') por DNI para anotarlos a la
-  // clase abierta. admin_book_class ya valida cupo y créditos atómicamente
-  // (misma lógica que usa la PWA cuando el socio se anota solo).
+  // Buscador de "Ver inscriptos": la lista de socios (role='socio') y sus
+  // créditos vigentes en la disciplina de la clase se piden UNA vez al abrir
+  // el modal; el filtrado por DNI / nombre / apellido corre en el navegador
+  // (InscriptosModal + utils/buscarSocios.js). Si alguna de las dos consultas
+  // falla, el modal sigue sirviendo para anotar por DNI exacto como siempre.
+  const [sociosBusqueda, setSociosBusqueda] = useState(null)
+  const [cargandoSocios, setCargandoSocios] = useState(false)
+  const [errorSocios, setErrorSocios] = useState(false)
+  const [creditosPorSocio, setCreditosPorSocio] = useState(null)
+  const disciplinaIdAbierta = claseInscriptos?.disciplinaId ?? null
+
+  useEffect(() => {
+    if (claseInscriptosId === null || !disciplinaIdAbierta) return undefined
+    let vigente = true
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setSociosBusqueda(null)
+    setCreditosPorSocio(null)
+    setErrorSocios(false)
+    setCargandoSocios(true)
+    /* eslint-enable react-hooks/set-state-in-effect */
+    Promise.allSettled([fetchSociosParaAnotar(), fetchCreditosVigentesPorSocio(disciplinaIdAbierta)]).then(
+      ([socios, creditos]) => {
+        if (!vigente) return
+        if (socios.status === 'fulfilled') setSociosBusqueda(socios.value)
+        else {
+          console.error('Error al cargar socios para el buscador:', socios.reason?.message)
+          setErrorSocios(true)
+        }
+        if (creditos.status === 'fulfilled') setCreditosPorSocio(creditos.value)
+        else console.error('Error al cargar créditos para el buscador:', creditos.reason?.message)
+        setCargandoSocios(false)
+      },
+    )
+    return () => {
+      vigente = false
+    }
+  }, [claseInscriptosId, disciplinaIdAbierta])
+
+  const refrescarCreditosBusqueda = async () => {
+    if (!disciplinaIdAbierta) return
+    try {
+      setCreditosPorSocio(await fetchCreditosVigentesPorSocio(disciplinaIdAbierta))
+    } catch (err) {
+      console.error('Error al refrescar créditos del buscador:', err.message)
+    }
+  }
+
+  // Anota con admin_book_class (mismo RPC de siempre: valida cupo, créditos,
+  // día de la clase y cancelación puntual, y descuenta el crédito -- la misma
+  // lógica que usa la PWA cuando el socio se anota solo). Los dos caminos
+  // (DNI exacto / socio elegido de la lista) terminan acá.
+  const anotarSocio = async (clase, userId, nombre) => {
+    const { error: rpcError } = await supabase.rpc('admin_book_class', {
+      p_user_id: userId,
+      p_class_id: clase.id,
+      p_booking_date: fechaSeleccionadaStr,
+    })
+
+    if (rpcError) {
+      window.alert(mensajeErrorAnotar(rpcError, nombre))
+      return
+    }
+
+    await Promise.all([fetchBookings(fechaSeleccionadaStr), refrescarCreditosBusqueda()])
+  }
+
+  // Camino de siempre: DNI tipeado -> se busca el perfil por DNI exacto.
   const handleAgregarSocio = async (clase, dniBuscado) => {
     const { data: candidatos, error: buscarError } = await supabase
       .from('profiles')
@@ -213,19 +279,12 @@ function Clases() {
       return
     }
 
-    const { error: rpcError } = await supabase.rpc('admin_book_class', {
-      p_user_id: candidatos[0].id,
-      p_class_id: clase.id,
-      p_booking_date: fechaSeleccionadaStr,
-    })
-
-    if (rpcError) {
-      window.alert(`No se pudo anotar al socio: ${rpcError.message}`)
-      return
-    }
-
-    await fetchBookings(fechaSeleccionadaStr)
+    await anotarSocio(clase, candidatos[0].id, candidatos[0].full_name)
   }
+
+  // Socio elegido de la lista de resultados: ya tenemos su id, no se vuelve a
+  // buscar por DNI.
+  const handleAgregarSocioPorId = (clase, socio) => anotarSocio(clase, socio.id, socio.full_name)
 
   // Click en el nombre de un inscripto (InscriptosModal.jsx, solo si tiene
   // dni real) -- reusa el mismo deep-link ?editar=<dni> que ya entiende
@@ -258,7 +317,8 @@ function Clases() {
       return
     }
 
-    await fetchBookings(fechaSeleccionadaStr)
+    // El reintegro cambia los créditos que muestra el buscador.
+    await Promise.all([fetchBookings(fechaSeleccionadaStr), refrescarCreditosBusqueda()])
   }
 
   const handleAbrirNuevaClase = () => {
@@ -404,6 +464,11 @@ function Clases() {
         onClose={() => setClaseInscriptosId(null)}
         onMarcarAsistencia={handleMarcarAsistencia}
         onAgregarSocio={handleAgregarSocio}
+        onAgregarSocioPorId={handleAgregarSocioPorId}
+        socios={sociosBusqueda}
+        cargandoSocios={cargandoSocios}
+        errorSocios={errorSocios}
+        creditosPorSocio={creditosPorSocio}
         onQuitarInscripto={handleQuitarInscripto}
         onAbrirFicha={handleAbrirFichaSocio}
       />

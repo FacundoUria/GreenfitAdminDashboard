@@ -47,7 +47,7 @@ function esErrorDeRelacionFaltante(error) {
 // `construirQuery` es una FUNCIÓN que arma una consulta nueva en cada
 // vuelta (mismo `.select()/.eq()/.in()` de siempre, sin `.range()` propio),
 // no un objeto de consulta ya armado.
-async function fetchTodasLasFilas(construirQuery, tamanoLote = 1000) {
+export async function fetchTodasLasFilas(construirQuery, tamanoLote = 1000) {
   const filas = []
   let desde = 0
   while (true) {

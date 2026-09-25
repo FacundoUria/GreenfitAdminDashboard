@@ -262,7 +262,7 @@ test('intentar anotar a alguien nuevo en esa misma clase+fecha después de cance
   await expect(page.getByRole('heading', { name: 'CrossFit' })).toBeVisible()
   await expect(page.getByText('Todavía no hay socios inscriptos en esta clase.')).toBeVisible()
 
-  await page.getByPlaceholder('Anotar socio por DNI...').fill('50000000')
+  await page.getByPlaceholder('Buscar socio por DNI, nombre o apellido...').fill('50000000')
   await page.getByRole('button', { name: 'Anotar' }).click()
 
   await expect
