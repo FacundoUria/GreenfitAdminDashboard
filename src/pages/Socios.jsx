@@ -12,12 +12,13 @@ import {
 import { supabase } from '../lib/supabaseClient'
 import { diferenciaEnDias, esDelMesActual, formatFecha, hoyISO } from '../utils/fecha'
 import { estadoOperativoSocio, getSocioMetrics } from '../utils/socioMetrics'
+import { diasHastaVencimientoPlan } from '../utils/fechaPlan'
 import { formatearPlanes, planesDeVencimiento, PLANES_DISPONIBLES } from '../utils/planes'
 import { buscarCoincidenciaPorNombre } from '../utils/coincidenciaSocios'
 import { sincronizarEstadoCuentaPwa, resolverDisciplinaId } from '../utils/creditosPwa'
 import {
   fetchAvataresYNiveles,
-  fetchAparatosVigentePorDni,
+  fetchMembresiasVigentesPorDni,
   fetchCreditosPorDisciplina,
   resolverUserIdPorDni,
   registrarPago,
@@ -75,15 +76,15 @@ function disciplinasRealesDelSocio(socio) {
   return nombres
 }
 
-// Activo (no vencido) y con fecha_vencimiento dentro de los próximos
+// Activo (no vencido) y con el vencimiento REAL de su plan (fechaPlanSocio:
+// créditos y Aparatos de user_credits; la columna fecha_vencimiento solo
+// para quien no tiene cuenta en la app) dentro de los próximos
 // DIAS_POR_VENCER días -- mismo criterio que usa el widget del Dashboard,
 // para que el número que ves ahí y lo que filtra acá coincidan.
 function estaPorVencer(socio) {
-  if (socio.estado !== 'activo' || !socio.fechaVencimiento) return false
-  const vencimiento = new Date(`${socio.fechaVencimiento}T00:00:00`)
-  const msPorDia = 1000 * 60 * 60 * 24
-  const diasRestantes = Math.ceil((vencimiento.getTime() - Date.now()) / msPorDia)
-  return diasRestantes >= 0 && diasRestantes <= DIAS_POR_VENCER
+  if (socio.estado !== 'activo') return false
+  const diasRestantes = diasHastaVencimientoPlan(socio)
+  return diasRestantes !== null && diasRestantes >= 0 && diasRestantes <= DIAS_POR_VENCER
 }
 
 function mapearSocio(row) {
@@ -140,6 +141,13 @@ function Socios() {
   // correspondiera nada real -- el checkbox/columna "mentían" Aparatos
   // activo. Un dni ausente de este Map significa "no hay nada real".
   const [aparatosVigentePorDni, setAparatosVigentePorDni] = useState(new Map())
+  // Membresías vigentes CON su fecha real -- para fechaPlanSocio() ("Por
+  // vencer" y las fechas sugeridas al cobrar salen de user_credits).
+  const [membresiasPorDni, setMembresiasPorDni] = useState(new Map())
+  const aplicarMembresias = ({ vigentePorDni, disciplinasPorDni }) => {
+    setAparatosVigentePorDni(vigentePorDni)
+    setMembresiasPorDni(disciplinasPorDni)
+  }
   const [busqueda, setBusqueda] = useState('')
   // El Dashboard linkea acá con ?filtro=por_vencer (u otro value de
   // filtroOptions) para llegar con la lista ya filtrada. Sin ese query
@@ -219,7 +227,7 @@ function Socios() {
     if (socios.length === 0) return
     fetchAvataresYNiveles(socios.map((s) => s.dni)).then(setGamificacionPorDni)
     fetchCreditosPorDisciplina(socios.map((s) => s.dni)).then(setCreditosPorDni)
-    fetchAparatosVigentePorDni(socios.map((s) => s.dni)).then(setAparatosVigentePorDni)
+    fetchMembresiasVigentesPorDni(socios.map((s) => s.dni)).then(aplicarMembresias)
   }, [socios])
 
   // estadoOperativoSocio() es la MISMA función que usa Home.jsx -- antes
@@ -267,9 +275,10 @@ function Socios() {
           // esas tres funciones ya no calculan esto desde fecha_vencimiento,
           // leen este campo directo.
           aparatosVigenteReal,
+          membresiasVigentes: membresiasPorDni.get(socio.dni) ?? [],
         }
       }),
-    [socios, gamificacionPorDni, creditosPorDni, aparatosVigentePorDni],
+    [socios, gamificacionPorDni, creditosPorDni, aparatosVigentePorDni, membresiasPorDni],
   )
 
   const counts = useMemo(() => {
@@ -398,7 +407,7 @@ function Socios() {
     // "+ Agregar Aparatos" (CreditosEditablesSocio.jsx) dispara este mismo
     // callback -- sin este refresh, aparatosVigenteReal quedaría
     // desactualizado hasta el próximo fetchSocios() completo.
-    fetchAparatosVigentePorDni(socios.map((s) => s.dni)).then(setAparatosVigentePorDni)
+    fetchMembresiasVigentesPorDni(socios.map((s) => s.dni)).then(aplicarMembresias)
   }
 
   const handleCambiarBaja = async (socio) => {

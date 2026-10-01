@@ -16,7 +16,8 @@ import { supabase } from '../lib/supabaseClient'
 import { colorOcupacion } from '../utils/ocupacion'
 import { diaActualPorDefecto, fechaDeEstaSemana, mapearClasesDesdeBookings } from '../utils/clases'
 import { getSocioMetrics, estadoOperativoSocio } from '../utils/socioMetrics'
-import { fetchAparatosVigentePorDni, fetchCreditosPorDisciplina } from '../utils/fichaSocioPwa'
+import { fetchCreditosPorDisciplina, fetchMembresiasVigentesPorDni } from '../utils/fichaSocioPwa'
+import { diasHastaVencimientoPlan } from '../utils/fechaPlan'
 import ActividadReciente from '../components/ActividadReciente'
 
 const usuario = 'Seba'
@@ -31,14 +32,6 @@ function horaActualStr() {
 }
 
 const DIAS_POR_VENCER = 5
-
-function diasHastaVencimiento(socio) {
-  if (!socio.fecha_vencimiento) return null
-
-  const vencimiento = new Date(`${socio.fecha_vencimiento}T00:00:00`)
-  const msPorDia = 1000 * 60 * 60 * 24
-  return Math.ceil((vencimiento.getTime() - Date.now()) / msPorDia)
-}
 
 function Home() {
   const navigate = useNavigate()
@@ -60,6 +53,9 @@ function Home() {
   // merge, CUALQUIER socio con Aparatos genuinamente vigente (la inmensa
   // mayoría) contaría "Inactivo" acá, mismo bug pero en la otra dirección.
   const [aparatosVigentePorDni, setAparatosVigentePorDni] = useState(new Map())
+  // Membresías vigentes CON su fecha real -- para fechaPlanSocio() ("Por
+  // vencer" sale de user_credits, no de socios.fecha_vencimiento).
+  const [membresiasPorDni, setMembresiasPorDni] = useState(new Map())
 
   const fetchDatos = async () => {
     setLoading(true)
@@ -115,7 +111,10 @@ function Home() {
   useEffect(() => {
     if (socios.length === 0) return
     fetchCreditosPorDisciplina(socios.map((s) => s.dni)).then(setCreditosPorDni)
-    fetchAparatosVigentePorDni(socios.map((s) => s.dni)).then(setAparatosVigentePorDni)
+    fetchMembresiasVigentesPorDni(socios.map((s) => s.dni)).then(({ vigentePorDni, disciplinasPorDni }) => {
+      setAparatosVigentePorDni(vigentePorDni)
+      setMembresiasPorDni(disciplinasPorDni)
+    })
   }, [socios])
 
   const sociosConCreditos = useMemo(
@@ -129,8 +128,9 @@ function Home() {
         // a fecha_vencimiento directa, ver fetchAparatosVigentePorDni en
         // fichaSocioPwa.js). Se pasa el valor CRUDO tal cual.
         aparatosVigenteReal: aparatosVigentePorDni.get(s.dni),
+        membresiasVigentes: membresiasPorDni.get(s.dni) ?? [],
       })),
-    [socios, creditosPorDni, aparatosVigentePorDni],
+    [socios, creditosPorDni, aparatosVigentePorDni, membresiasPorDni],
   )
 
   // getSocioMetrics() es la MISMA función que usa Socios.jsx para sus
@@ -150,15 +150,17 @@ function Home() {
     return (restantes.length > 0 ? restantes : clasesHoy).slice(0, 4)
   }, [clasesHoy])
 
-  // "Por vencer" = ACTIVO (no vencido) y con fecha_vencimiento dentro de los
-  // próximos DIAS_POR_VENCER días. El chequeo de estado es explícito (no
+  // "Por vencer" = ACTIVO (no vencido) y con el vencimiento REAL de su plan
+  // (fechaPlanSocio: créditos y Aparatos de user_credits; la columna
+  // fecha_vencimiento solo para quien no tiene cuenta en la app) dentro de
+  // los próximos DIAS_POR_VENCER días. El chequeo de estado es explícito (no
   // alcanza con diasRestantes >= 0) para que quede claro que esto excluye a
   // propósito a los que ya están vencidos.
   const sociosPorVencerCompleto = useMemo(
     () =>
       sociosConCreditos
         .filter((s) => estadoOperativoSocio(s) === 'activo')
-        .map((s) => ({ id: s.id, nombre: s.nombre, apellido: s.apellido, diasRestantes: diasHastaVencimiento(s) }))
+        .map((s) => ({ id: s.id, nombre: s.nombre, apellido: s.apellido, diasRestantes: diasHastaVencimientoPlan(s) }))
         .filter((s) => s.diasRestantes !== null && s.diasRestantes >= 0 && s.diasRestantes <= DIAS_POR_VENCER)
         .sort((a, b) => a.diasRestantes - b.diasRestantes),
     [sociosConCreditos],

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { CreditCard, RefreshCw, X } from 'lucide-react'
 import { esPlanDeCreditos, formatearPlanes, normalizarPlanes, PLANES_DISPONIBLES } from '../utils/planes'
 import { formatFecha, hoyISO, proximoVencimiento, sumarDias, toISODate } from '../utils/fecha'
+import { fechaVencimientoParaCobro } from '../utils/fechaPlan'
 
 const PACKS_RENOVACION = [4, 8, 12, 20]
 
@@ -40,14 +41,20 @@ function armarPlanesParaElegir(disciplinasActivas) {
 //   - Socio ACTIVO (fecha_vencimiento >= hoy, o sin fecha todavía): se
 //     mantiene el criterio de siempre (continuar desde el vencimiento
 //     vigente, o desde hoy si nunca pagó).
-function fechaInicioSugerida(socio) {
+//
+// ETAPA 4 -- "el vencimiento del socio" ya no es socios.fecha_vencimiento a
+// secas (para un socio de solo créditos esa columna queda vieja y el modal
+// decía "está vencido" estando al día): es fechaVencimientoParaCobro(), que
+// sale de sus créditos/Aparatos reales (ver utils/fechaPlan.js).
+function fechaInicioSugerida(vencimientoActual) {
   const hoy = hoyISO()
-  if (!socio.fechaVencimiento) return hoy
-  return socio.fechaVencimiento < hoy ? hoy : socio.fechaVencimiento
+  if (!vencimientoActual) return hoy
+  return vencimientoActual < hoy ? hoy : vencimientoActual
 }
 
 function RegistrarPagoModal({ socio, disciplinasActivas = [], onClose, onConfirmar }) {
   const [planes, setPlanes] = useState(() => normalizarPlanes(socio.plan))
+  const vencimientoActual = fechaVencimientoParaCobro(socio, hoyISO())
   const [error, setError] = useState(null)
 
   const disciplinaPorNombre = useMemo(
@@ -93,15 +100,15 @@ function RegistrarPagoModal({ socio, disciplinasActivas = [], onClose, onConfirm
   // (rangos de 10 días, 15 días, 2 meses, lo que necesite). El valor
   // sugerido por defecto sale de fechaInicioSugerida() de arriba (HOY si
   // el socio está vencido, el vencimiento vigente si sigue activo).
-  const [fechaInicio, setFechaInicio] = useState(() => fechaInicioSugerida(socio))
+  const [fechaInicio, setFechaInicio] = useState(() => fechaInicioSugerida(vencimientoActual))
   const [fechaVencimiento, setFechaVencimiento] = useState(() => {
-    const inicio = fechaInicioSugerida(socio)
+    const inicio = fechaInicioSugerida(vencimientoActual)
     // Socio vencido: el ciclo arranca de cero desde HOY -- el "día de
     // corte" para esta sugerencia es el día-del-mes de HOY, no el
     // `dia_corte` viejo (ese seguía anclado al ciclo ya vencido). Con eso,
     // proximoVencimiento() da exactamente "HOY + 1 mes". Socio activo: se
     // mantiene el `dia_corte` real del socio, igual que siempre.
-    const vencido = socio.fechaVencimiento && socio.fechaVencimiento < hoyISO()
+    const vencido = vencimientoActual && vencimientoActual < hoyISO()
     const diaCorte = vencido
       ? new Date(`${inicio}T00:00:00`).getDate()
       : (socio.diaCorte ?? new Date(`${inicio}T00:00:00`).getDate())
@@ -286,10 +293,10 @@ function RegistrarPagoModal({ socio, disciplinasActivas = [], onClose, onConfirm
               <div className="flex items-start gap-2 text-sm text-gray-300">
                 <RefreshCw className="mt-0.5 h-4 w-4 shrink-0 text-greenfit-primary" />
                 <p>
-                  {socio.fechaVencimiento && socio.fechaVencimiento < hoyISO()
-                    ? `El socio está vencido (venció el ${formatFecha(socio.fechaVencimiento)}) -- por defecto se sugiere arrancar la cuota HOY, con 1 mes de vigencia.`
+                  {vencimientoActual && vencimientoActual < hoyISO()
+                    ? `El socio está vencido (venció el ${formatFecha(vencimientoActual)}) -- por defecto se sugiere arrancar la cuota HOY, con 1 mes de vigencia.`
                     : `Por defecto se sugiere 1 mes desde ${
-                        socio.fechaVencimiento ? `el vencimiento actual (${formatFecha(socio.fechaVencimiento)})` : 'hoy'
+                        vencimientoActual ? `el vencimiento actual (${formatFecha(vencimientoActual)})` : 'hoy'
                       }.`}{' '}
                   Podés cambiar las fechas libremente (ej. 10 días, 15 días, 2 meses). El estado del socio
                   (Activo / Vencido) se recalcula solo según lo que elijas acá.

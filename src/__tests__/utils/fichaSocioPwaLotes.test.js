@@ -165,7 +165,8 @@ describe('fetchMembresiasVigentesPorDni -- mismo criterio que fetchAparatosVigen
     expect(vigentePorDni.get('30000000')).toBe(true) // múltiplo de 3 -> Aparatos vigente
     expect(vigentePorDni.has('30000001')).toBe(false) // sin cuenta: ausente del Map
     expect(vigentePorDni.get('30000003')).toBe(true)
-    expect(disciplinasPorDni.get('30000000')).toEqual([{ disciplineId: 'd-ap', disciplineName: 'Aparatos' }])
+    // Con su fecha real de vencimiento (Etapa 4: de ahí sale el vencimiento general del socio).
+    expect(disciplinasPorDni.get('30000000')).toEqual([{ disciplineId: 'd-ap', disciplineName: 'Aparatos', expiresAt: FUTURO }])
 
     // fetchAparatosVigentePorDni devuelve exactamente ese mismo tri-estado.
     expect(await fetchAparatosVigentePorDni(lista)).toEqual(vigentePorDni)
@@ -178,7 +179,7 @@ describe('fetchMembresiasVigentesPorDni -- mismo criterio que fetchAparatosVigen
         data: [
           { id: 'a', user_id: 'profile-1', expires_at: '2020-01-01T00:00:00.000Z', discipline: APARATOS },
           { id: 'b', user_id: 'profile-2', expires_at: FUTURO, discipline: APARATOS },
-          { id: 'c', user_id: 'profile-2', expires_at: FUTURO, discipline: APARATOS },
+          { id: 'c', user_id: 'profile-2', expires_at: '2100-06-01T12:00:00.000Z', discipline: APARATOS },
         ],
         error: null,
       }
@@ -187,5 +188,7 @@ describe('fetchMembresiasVigentesPorDni -- mismo criterio que fetchAparatosVigen
     expect(vigentePorDni.get('1')).toBe(false)
     expect(disciplinasPorDni.has('1')).toBe(false)
     expect(disciplinasPorDni.get('2')).toHaveLength(1)
+    // ...y se queda con la fecha más lejana de las dos.
+    expect(disciplinasPorDni.get('2')[0].expiresAt).toBe('2100-06-01T12:00:00.000Z')
   })
 })

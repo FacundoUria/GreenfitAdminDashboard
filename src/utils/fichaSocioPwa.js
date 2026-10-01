@@ -292,8 +292,8 @@ export async function fetchAparatosVigentePorDni(dnis, opciones) {
 // vigente cada socio, con el nombre real del catálogo -- para el desglose por
 // disciplina de Reportes. Devuelve:
 //   - vigentePorDni: el Map TRI-ESTADO de siempre (true | false | ausente).
-//   - disciplinasPorDni: Map dni -> [{ disciplineId, disciplineName }] con
-//     las membresías vigentes (sin repetir disciplina).
+//   - disciplinasPorDni: Map dni -> [{ disciplineId, disciplineName, expiresAt }]
+//     con las membresías vigentes (sin repetir disciplina).
 export async function fetchMembresiasVigentesPorDni(dnis, opciones) {
   const vacio = () => ({ vigentePorDni: new Map(), disciplinasPorDni: new Map() })
   const dnisValidos = Array.from(new Set((dnis ?? []).filter(Boolean)))
@@ -342,9 +342,14 @@ export async function fetchMembresiasVigentesPorDni(dnis, opciones) {
     if (!dni) continue
     resultado.set(dni, true)
 
+    // `expiresAt`: la fecha real de vencimiento (la más lejana si hubiera
+    // más de una fila vigente de la misma disciplina) -- ver fechaPlan.js.
     const lista = disciplinasPorDni.get(dni) ?? []
-    if (!lista.some((d) => d.disciplineId === disciplina.id)) {
-      lista.push({ disciplineId: disciplina.id, disciplineName: disciplina.name })
+    const existente = lista.find((d) => d.disciplineId === disciplina.id)
+    if (!existente) {
+      lista.push({ disciplineId: disciplina.id, disciplineName: disciplina.name, expiresAt: fila.expires_at })
+    } else if (new Date(fila.expires_at) > new Date(existente.expiresAt)) {
+      existente.expiresAt = fila.expires_at
     }
     disciplinasPorDni.set(dni, lista)
   }

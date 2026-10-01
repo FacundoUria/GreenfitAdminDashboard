@@ -166,3 +166,46 @@ function toISODateLocal(fecha) {
   const dia = String(fecha.getDate()).padStart(2, '0')
   return `${anio}-${mes}-${dia}`
 }
+
+// ETAPA 4 -- el "vencimiento actual" del socio sale de sus créditos/Aparatos
+// reales (utils/fechaPlan.js), no de socios.fecha_vencimiento a secas.
+describe('RegistrarPagoModal -- el vencimiento sale de user_credits, no de la columna vieja', () => {
+  const enDias = (dias) => {
+    const fecha = new Date()
+    fecha.setDate(fecha.getDate() + dias)
+    return toISODateLocal(fecha)
+  }
+  // 15:00 UTC = mediodía en Argentina: mismo día calendario.
+  const lote = (dia) => [{ disciplineId: 'cf', disciplineName: 'CrossFit', remainingCredits: 4, lotes: [{ id: 'l1', remainingCredits: 4, expiresAt: `${dia}T15:00:00.000Z` }] }]
+
+  it('socio de SOLO CRÉDITOS al día, con la columna vieja (ya pasada): NO dice "está vencido" y sugiere arrancar desde su vencimiento real', () => {
+    const vencimientoReal = enDias(8)
+    const socio = {
+      ...SOCIO_CREDITOS,
+      fechaVencimiento: enDias(-60), // columna vieja: un pago por la app no la actualiza
+      aparatosVigenteReal: false, // tiene cuenta en la app, sin Aparatos
+      creditosPwaPorDisciplina: lote(vencimientoReal),
+    }
+    render(<RegistrarPagoModal socio={socio} onClose={vi.fn()} onConfirmar={vi.fn()} />)
+
+    expect(screen.queryByText(/El socio está vencido/)).toBeNull()
+    expect(screen.getByText(/desde el vencimiento actual/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Fecha de inicio')).toHaveValue(vencimientoReal)
+  })
+
+  it('socio con cuenta, sin nada vigente y una fecha FUTURA fantasma en la columna: arranca desde hoy', () => {
+    const socio = { ...SOCIO_CREDITOS, fechaVencimiento: '2052-08-21', aparatosVigenteReal: false, creditosPwaPorDisciplina: [] }
+    render(<RegistrarPagoModal socio={socio} onClose={vi.fn()} onConfirmar={vi.fn()} />)
+
+    expect(screen.getByLabelText('Fecha de inicio')).toHaveValue(enDias(0))
+    expect(screen.getByText(/1 mes desde hoy/)).toBeInTheDocument()
+  })
+
+  it('socio con cuenta, sin nada vigente y la columna ya pasada: sigue diciendo "está vencido" y arranca hoy', () => {
+    const socio = { ...SOCIO_CREDITOS, fechaVencimiento: enDias(-10), aparatosVigenteReal: false, creditosPwaPorDisciplina: [] }
+    render(<RegistrarPagoModal socio={socio} onClose={vi.fn()} onConfirmar={vi.fn()} />)
+
+    expect(screen.getByText(/El socio está vencido/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Fecha de inicio')).toHaveValue(enDias(0))
+  })
+})
