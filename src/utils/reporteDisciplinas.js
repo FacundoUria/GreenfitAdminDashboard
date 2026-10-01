@@ -5,9 +5,17 @@ export const NOMBRE_SIN_DISCIPLINA = 'Sin disciplina registrada'
 
 // `socios.plan` es un arreglo de nombres (['Aparatos', 'CrossFit']); se
 // tolera también un texto suelto. Devuelve null si no hay nada cargado.
+//
+// "Pase Libre" es el nombre histórico de Aparatos (ya no existe como
+// disciplina): se MUESTRA como "Aparatos". Es solo visualización -- no
+// cambia a nadie de categoría ni toca socios.plan. El resto va tal cual.
 function planComoTexto(plan) {
-  const nombres = (Array.isArray(plan) ? plan : [plan]).map((p) => (typeof p === 'string' ? p.trim() : '')).filter(Boolean)
-  return nombres.length > 0 ? nombres.join(', ') : null
+  const nombres = (Array.isArray(plan) ? plan : [plan])
+    .map((p) => (typeof p === 'string' ? p.trim() : ''))
+    .filter(Boolean)
+    .map((p) => (p.toLowerCase() === 'pase libre' ? 'Aparatos' : p))
+  const sinRepetir = Array.from(new Set(nombres))
+  return sinRepetir.length > 0 ? sinRepetir.join(', ') : null
 }
 
 // Desglose de los socios ACTIVOS por disciplina, para Reportes.

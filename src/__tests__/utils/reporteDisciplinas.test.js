@@ -82,13 +82,33 @@ describe('desglosePorDisciplina', () => {
     )
     const sin = porId(r, ID_SIN_DISCIPLINA).socios
     expect(sin.map((s) => [s.nombre, s.planAdministrativo, s.sinCuentaApp])).toEqual([
-      ['Lucía Test', 'Pase Libre', true],
+      ['Lucía Test', 'Aparatos', true], // "Pase Libre" = nombre viejo de Aparatos
       ['Mora Test', 'Aparatos, CrossFit', true],
       ['Nico Test', null, true],
     ])
     // El plan administrativo NO decide la categoría: Mora no cuenta en CrossFit.
     expect(porId(r, 'cf').cantidad).toBe(0)
     expect(porId(r, 'ap').socios).toEqual([{ id: 4, nombre: 'Beto Test', dni: 'dni-4' }])
+  })
+
+  it('"Pase Libre" (nombre histórico) se muestra como "Aparatos", sin repetirlo; el resto de los planes va tal cual', () => {
+    const r = desglosePorDisciplina(
+      [
+        socio(1, 'Ana', { fecha_vencimiento: FUTURO, plan: ['pase libre '] }),
+        socio(2, 'Beto', { fecha_vencimiento: FUTURO, plan: ['Aparatos', 'Pase Libre', 'Boxeo'] }),
+        socio(3, 'Caro', { fecha_vencimiento: FUTURO, plan: ['CrossFit', 'Kickstrike'] }),
+        socio(4, 'Dani', { fecha_vencimiento: FUTURO, plan: 'Pase Libre' }),
+      ],
+      CATALOGO,
+    )
+    expect(porId(r, ID_SIN_DISCIPLINA).socios.map((s) => s.planAdministrativo)).toEqual([
+      'Aparatos',
+      'Aparatos, Boxeo',
+      'CrossFit, Kickstrike',
+      'Aparatos',
+    ])
+    // Solo visualización: nadie pasa a la tarjeta de Aparatos por esto.
+    expect(porId(r, 'ap').cantidad).toBe(0)
   })
 
   it('usa el catálogo real: disciplina nueva con 0, desactivada solo si todavía tiene socios, y el nombre del catálogo manda', () => {

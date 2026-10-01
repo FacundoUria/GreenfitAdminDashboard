@@ -372,7 +372,7 @@ describe('Reportes -- héroe y desglose por disciplina', () => {
     expect(tabla().getByText('33000333')).toBeInTheDocument()
 
     // Dato secundario: el plan administrativo de socios.plan, con la aclaración.
-    expect(tabla().getByText('Pase Libre — sin cuenta en la app')).toBeInTheDocument()
+    expect(tabla().getByText('Aparatos — sin cuenta en la app')).toBeInTheDocument()
     expect(screen.getByTestId('reportes-nota-plan')).toHaveTextContent(/plan administrativo cargado en el panel: no está verificado contra créditos reales/)
 
     // Y NO aparece en Aparatos.
