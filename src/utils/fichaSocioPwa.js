@@ -60,6 +60,47 @@ export async function fetchTodasLasFilas(construirQuery, tamanoLote = 1000) {
   return { data: filas, error: null }
 }
 
+// Cuántos ids/DNIs van por pedido en un `.in(...)`. Un `.in()` viaja en la
+// URL del pedido: con TODOS los socios juntos (cientos de DNIs, o de uuids de
+// 36 caracteres) la URL puede superar el largo máximo que acepta el servidor
+// -- el pedido falla y, como estas funciones devolvían un Map vacío con solo
+// un console.error, TODOS los socios pasaban a verse "Inactivo" en silencio.
+// 100 uuids son ~4 KB de URL: lejos de cualquier límite.
+export const TAMANO_LOTE_IDS = 100
+
+// Igual que fetchTodasLasFilas, pero para consultas con `.in(columna, ids)`:
+// parte `ids` en lotes de TAMANO_LOTE_IDS y pide cada lote por separado
+// (cada uno paginado), así el resultado no depende del largo de la URL.
+// `construirQuery(lote)` arma una consulta nueva para ese lote y TIENE que
+// incluir un `.order()` fijo (la paginación con .range() sin orden no es
+// determinística: una fila puede repetirse o saltearse entre páginas).
+export async function fetchPorLotesDeIds(ids, construirQuery, tamanoLote = TAMANO_LOTE_IDS) {
+  const lotes = []
+  for (let i = 0; i < ids.length; i += tamanoLote) lotes.push(ids.slice(i, i + tamanoLote))
+
+  const respuestas = await Promise.all(lotes.map((lote) => fetchTodasLasFilas(() => construirQuery(lote))))
+  const conError = respuestas.find((r) => r.error)
+  if (conError) return { data: null, error: conError.error }
+  return { data: respuestas.flatMap((r) => r.data ?? []), error: null }
+}
+
+// Todos los socios de la tabla `socios`, paginados (sin esto, con más de 1000
+// socios la respuesta se cortaba en silencio y todos los números de la
+// pantalla quedaban cortos) y con orden fijo por id.
+export async function fetchTodosLosSocios() {
+  return fetchTodasLasFilas(() => supabase.from('socios').select('*').order('id', { ascending: true }))
+}
+
+// Qué hacer cuando una de las consultas de abajo falla: por defecto se
+// devuelve el Map vacío de siempre (Home/Socios siguen funcionando, con el
+// error en consola); con `{ lanzarSiFalla: true }` se lanza el error para que
+// la pantalla lo MUESTRE en vez de dibujar números falsos (Reportes).
+function fallar(opciones, mensaje, error, valorPorDefecto) {
+  console.error(mensaje, error.message)
+  if (opciones?.lanzarSiFalla) throw new Error(`${mensaje} ${error.message}`)
+  return valorPorDefecto
+}
+
 export async function resolverUserIdPorDni(dni) {
   if (!dni) return null
   const { data } = await supabase.from('profiles').select('id').eq('dni', dni).maybeSingle()
@@ -135,31 +176,30 @@ export async function fetchAvataresYNiveles(dnis) {
 // y mostraba 9. Mismo criterio EXACTO acá: se suman TODOS los lotes
 // activos (remaining_credits>0, expires_at>ahora) por disciplina -- el
 // número que ve Seba tiene que ser SIEMPRE igual al que ve el socio.
-export async function fetchCreditosPorDisciplina(dnis) {
+export async function fetchCreditosPorDisciplina(dnis, opciones) {
   const dnisValidos = Array.from(new Set((dnis ?? []).filter(Boolean)))
   if (dnisValidos.length === 0) return new Map()
 
-  const { data: perfiles, error: perfilesError } = await fetchTodasLasFilas(() =>
-    supabase.from('profiles').select('id, dni').in('dni', dnisValidos),
+  const { data: perfiles, error: perfilesError } = await fetchPorLotesDeIds(dnisValidos, (lote) =>
+    supabase.from('profiles').select('id, dni').in('dni', lote).order('id', { ascending: true }),
   )
   if (perfilesError) {
-    console.error('No se pudieron resolver las cuentas PWA para los créditos por disciplina:', perfilesError.message)
-    return new Map()
+    return fallar(opciones, 'No se pudieron resolver las cuentas PWA para los créditos por disciplina:', perfilesError, new Map())
   }
   const dniPorUserId = new Map((perfiles ?? []).map((p) => [p.id, p.dni]))
   const userIds = Array.from(dniPorUserId.keys())
   if (userIds.length === 0) return new Map()
 
-  const { data: filas, error: creditosError } = await fetchTodasLasFilas(() =>
+  const { data: filas, error: creditosError } = await fetchPorLotesDeIds(userIds, (lote) =>
     supabase
       .from('user_credits')
       .select('id, user_id, remaining_credits, expires_at, discipline:disciplines(id, name, kind)')
-      .in('user_id', userIds),
+      .in('user_id', lote)
+      .order('id', { ascending: true }),
   )
   if (creditosError) {
     if (esErrorDeRelacionFaltante(creditosError)) return new Map()
-    console.error('No se pudieron traer los créditos reales de la PWA:', creditosError.message)
-    return new Map()
+    return fallar(opciones, 'No se pudieron traer los créditos reales de la PWA:', creditosError, new Map())
   }
 
   // Agrupar TODAS las filas por (user_id, discipline_id) -- ya no solo la
@@ -242,16 +282,28 @@ export async function fetchCreditosPorDisciplina(dnis) {
 // las dos responsabilidades en una sola función/shape de retorno hubiera
 // obligado a tocar todos sus call-sites por un fix que en los hechos solo
 // necesita esta.
-export async function fetchAparatosVigentePorDni(dnis) {
-  const dnisValidos = Array.from(new Set((dnis ?? []).filter(Boolean)))
-  if (dnisValidos.length === 0) return new Map()
+export async function fetchAparatosVigentePorDni(dnis, opciones) {
+  const { vigentePorDni } = await fetchMembresiasVigentesPorDni(dnis, opciones)
+  return vigentePorDni
+}
 
-  const { data: perfiles, error: perfilesError } = await fetchTodasLasFilas(() =>
-    supabase.from('profiles').select('id, dni').in('dni', dnisValidos),
+// Misma consulta y mismo criterio que fetchAparatosVigentePorDni (que ahora
+// es un atajo a esta), pero además devuelve QUÉ disciplina de membresía tiene
+// vigente cada socio, con el nombre real del catálogo -- para el desglose por
+// disciplina de Reportes. Devuelve:
+//   - vigentePorDni: el Map TRI-ESTADO de siempre (true | false | ausente).
+//   - disciplinasPorDni: Map dni -> [{ disciplineId, disciplineName }] con
+//     las membresías vigentes (sin repetir disciplina).
+export async function fetchMembresiasVigentesPorDni(dnis, opciones) {
+  const vacio = () => ({ vigentePorDni: new Map(), disciplinasPorDni: new Map() })
+  const dnisValidos = Array.from(new Set((dnis ?? []).filter(Boolean)))
+  if (dnisValidos.length === 0) return vacio()
+
+  const { data: perfiles, error: perfilesError } = await fetchPorLotesDeIds(dnisValidos, (lote) =>
+    supabase.from('profiles').select('id, dni').in('dni', lote).order('id', { ascending: true }),
   )
   if (perfilesError) {
-    console.error('No se pudieron resolver las cuentas PWA para confirmar Aparatos vigente:', perfilesError.message)
-    return new Map()
+    return fallar(opciones, 'No se pudieron resolver las cuentas PWA para confirmar Aparatos vigente:', perfilesError, vacio())
   }
   const dniPorUserId = new Map((perfiles ?? []).map((p) => [p.id, p.dni]))
   const userIds = Array.from(dniPorUserId.keys())
@@ -261,19 +313,23 @@ export async function fetchAparatosVigentePorDni(dnis) {
   // real. Los sin cuenta (dni ausente de `perfiles`) ni siquiera entran
   // acá -- quedan fuera del Map por completo.
   const resultado = new Map()
+  const disciplinasPorDni = new Map()
   for (const dni of dniPorUserId.values()) resultado.set(dni, false)
-  if (userIds.length === 0) return resultado
+  if (userIds.length === 0) return { vigentePorDni: resultado, disciplinasPorDni }
 
-  const { data: filas, error: aparatosError } = await fetchTodasLasFilas(() =>
+  const { data: filas, error: aparatosError } = await fetchPorLotesDeIds(userIds, (lote) =>
     supabase
       .from('user_credits')
-      .select('user_id, expires_at, discipline:disciplines(kind)')
-      .in('user_id', userIds),
+      .select('id, user_id, expires_at, discipline:disciplines(id, name, kind)')
+      .in('user_id', lote)
+      .order('id', { ascending: true }),
   )
   if (aparatosError) {
-    if (esErrorDeRelacionFaltante(aparatosError)) return resultado
-    console.error('No se pudo confirmar Aparatos vigente real de la PWA:', aparatosError.message)
-    return resultado
+    if (esErrorDeRelacionFaltante(aparatosError)) return { vigentePorDni: resultado, disciplinasPorDni }
+    return fallar(opciones, 'No se pudo confirmar Aparatos vigente real de la PWA:', aparatosError, {
+      vigentePorDni: resultado,
+      disciplinasPorDni,
+    })
   }
 
   const ahora = Date.now()
@@ -285,8 +341,14 @@ export async function fetchAparatosVigentePorDni(dnis) {
     const dni = dniPorUserId.get(fila.user_id)
     if (!dni) continue
     resultado.set(dni, true)
+
+    const lista = disciplinasPorDni.get(dni) ?? []
+    if (!lista.some((d) => d.disciplineId === disciplina.id)) {
+      lista.push({ disciplineId: disciplina.id, disciplineName: disciplina.name })
+    }
+    disciplinasPorDni.set(dni, lista)
   }
-  return resultado
+  return { vigentePorDni: resultado, disciplinasPorDni }
 }
 
 // ============================================================

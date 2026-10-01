@@ -10,11 +10,13 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { AlertCircle, Download, Loader2, UserPlus, Users } from 'lucide-react'
+import { AlertCircle, Download, Loader2, UserPlus } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { esDelMesActual } from '../utils/fecha'
 import { estadoOperativoSocio, getSocioMetrics } from '../utils/socioMetrics'
-import { fetchAparatosVigentePorDni, fetchCreditosPorDisciplina } from '../utils/fichaSocioPwa'
+import { fetchCreditosPorDisciplina, fetchMembresiasVigentesPorDni, fetchTodosLosSocios } from '../utils/fichaSocioPwa'
+import { desglosePorDisciplina } from '../utils/reporteDisciplinas'
+import { COLOR_NEUTRO, colorDisciplina } from '../utils/coloresDisciplina'
 
 const DIAS_SEMANA_LABELS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
 
@@ -172,35 +174,208 @@ function ChartCard({ title, data, exportFilename, tipo = 'line', dataKeyX = 'mes
   )
 }
 
+function iniciales(nombre) {
+  const partes = (nombre ?? '').trim().split(/\s+/).filter(Boolean)
+  if (partes.length === 0) return '?'
+  if (partes.length === 1) return partes[0].slice(0, 2).toUpperCase()
+  return (partes[0][0] + partes[partes.length - 1][0]).toUpperCase()
+}
+
+const colorDeCategoria = (categoria) => (categoria.esDisciplina ? colorDisciplina(categoria.nombre) : COLOR_NEUTRO)
+
+// Bloque principal del rediseño: héroe "Socios Activos" + barra de
+// distribución + una tarjeta por disciplina (del catálogo real) + la lista de
+// socios (nombre y DNI) de la disciplina elegida.
+function DesgloseDisciplinas({ activos, categorias }) {
+  const [seleccionId, setSeleccionId] = useState(null)
+  const seleccionada =
+    categorias.find((c) => c.id === seleccionId) ?? categorias.find((c) => c.cantidad > 0) ?? categorias[0] ?? null
+  const sumaTarjetas = categorias.reduce((suma, c) => suma + c.cantidad, 0)
+  const conSocios = categorias.filter((c) => c.cantidad > 0)
+
+  return (
+    <>
+      <section className="flex flex-col gap-4">
+        <div className="flex items-baseline gap-4">
+          <span
+            data-testid="reportes-socios-activos"
+            className="text-7xl font-light leading-none tracking-tight text-white lg:text-8xl"
+          >
+            {activos}
+          </span>
+          <div className="inline-flex items-center gap-2 pb-1">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-greenfit-primary" />
+            <span className="text-xs font-medium uppercase tracking-wider text-gray-400">Socios Activos</span>
+          </div>
+        </div>
+
+        {/* Barra de distribución: cada tramo es la parte de esa disciplina
+            sobre la SUMA de las tarjetas (así siempre llena el 100%). */}
+        <div className="flex flex-col gap-2 pt-2">
+          <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-white/5" data-testid="reportes-barra">
+            {conSocios.map((c) => (
+              <div
+                key={c.id}
+                className={`h-full transition-all duration-300 ${colorDeCategoria(c).dot}`}
+                style={{ width: `${(c.cantidad / sumaTarjetas) * 100}%` }}
+                title={`${c.nombre}: ${c.cantidad} (${c.porcentaje}% de los activos)`}
+              />
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 px-0.5 text-[11px] text-gray-400">
+            {conSocios.map((c) => (
+              <span key={c.id} className="inline-flex items-center gap-1.5">
+                <span className={`h-1.5 w-1.5 rounded-full ${colorDeCategoria(c).dot}`} />
+                {c.nombre} {c.porcentaje}%
+              </span>
+            ))}
+          </div>
+          <p className="text-xs text-gray-500">
+            Un socio con más de una disciplina cuenta en cada una: la suma de las tarjetas puede superar el total de
+            Socios Activos. El porcentaje es sobre el total de activos.
+          </p>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {categorias.map((c) => {
+          const color = colorDeCategoria(c)
+          const activa = seleccionada?.id === c.id
+          return (
+            <button
+              key={c.id}
+              type="button"
+              data-testid={`reportes-tarjeta-${c.id}`}
+              aria-pressed={activa}
+              onClick={() => setSeleccionId(c.id)}
+              className={`rounded-xl bg-greenfit-card p-5 text-left transition-all duration-200 hover:bg-white/5 ${
+                activa ? 'bg-gradient-to-b from-greenfit-primary/[0.06] to-transparent ring-1 ring-greenfit-primary/40' : ''
+              }`}
+            >
+              <div className="mb-4 flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${color.dot}`} />
+                  <span className="truncate text-sm font-semibold tracking-wide text-white">{c.nombre}</span>
+                </div>
+                <span className={`shrink-0 rounded px-2 py-0.5 text-[11px] font-medium ${color.texto} ${color.chip}`}>
+                  {c.porcentaje}%
+                </span>
+              </div>
+              <div className="text-4xl font-light tracking-tight text-white">{c.cantidad}</div>
+            </button>
+          )
+        })}
+      </section>
+
+      {seleccionada && (
+        <section className="rounded-2xl bg-greenfit-card p-6 sm:p-8" data-testid="reportes-tabla">
+          <div className="mb-2 flex items-center justify-between border-b border-white/5 pb-6">
+            <div className="flex items-center gap-2.5">
+              <span className={`h-2 w-2 rounded-full ${colorDeCategoria(seleccionada).dot}`} />
+              <span className="text-sm font-medium tracking-wide text-white">{seleccionada.nombre}</span>
+            </div>
+            <span className="text-xs text-gray-500">
+              {seleccionada.cantidad === 1 ? '1 socio' : `${seleccionada.cantidad} socios`}
+            </span>
+          </div>
+
+          {!seleccionada.esDisciplina && (
+            <p className="pt-4 text-xs leading-relaxed text-gray-500" data-testid="reportes-nota-plan">
+              El plan que figura debajo de cada nombre es el plan administrativo cargado en el panel: no está
+              verificado contra créditos reales de la app.
+            </p>
+          )}
+
+          {seleccionada.cantidad === 0 ? (
+            <p className="py-6 text-center text-sm text-gray-500">Ningún socio activo en esta disciplina.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="border-b border-white/5 text-[11px] uppercase tracking-wider text-gray-500">
+                    <th className="px-2 py-3 font-normal">Socio</th>
+                    <th className="px-4 py-3 font-normal">DNI</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5 text-xs">
+                  {seleccionada.socios.map((socio) => (
+                    <tr key={socio.id ?? socio.dni} className="transition-colors hover:bg-white/5">
+                      <td className="px-2 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-white/5 text-[11px] font-medium text-gray-300">
+                            {iniciales(socio.nombre)}
+                          </div>
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-[13px] font-medium text-white">{socio.nombre}</span>
+                            {!seleccionada.esDisciplina && (socio.planAdministrativo || socio.sinCuentaApp) && (
+                              <span className="text-[11px] text-gray-500">
+                                {[socio.planAdministrativo, socio.sinCuentaApp ? 'sin cuenta en la app' : null]
+                                  .filter(Boolean)
+                                  .join(' — ')}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-400">{socio.dni ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+    </>
+  )
+}
+
 function Reportes() {
   const [socios, setSocios] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [rango, setRango] = useState('6m')
-  // Créditos REALES de la PWA por disciplina, en batch -- mismo dato/mismo
-  // criterio que Home.jsx/Socios.jsx. CAMBIO 3 (bug real: "Activo" sin nada
-  // real): estadoOperativoSocio() lo necesita para decidir bien un socio
-  // 100% créditos, sin fecha_vencimiento.
+  // Créditos REALES de la PWA por disciplina -- mismo dato/mismo criterio que
+  // Home.jsx/Socios.jsx (estadoOperativoSocio() lo necesita para decidir bien
+  // un socio 100% créditos, sin fecha_vencimiento).
   const [creditosPorDni, setCreditosPorDni] = useState(new Map())
-  // Aparatos REALMENTE vigente por DNI -- mismo dato que Home.jsx/
-  // Socios.jsx (fetchAparatosVigentePorDni). BUG REAL #2 (caso Agustina
-  // Aguero, ver socioMetrics.js): sin este merge, estadoOperativoSocio()
-  // contaría "Inactivo" a cualquier socio con Aparatos genuinamente
-  // vigente (la inmensa mayoría) en vez de "Activo".
-  const [aparatosVigentePorDni, setAparatosVigentePorDni] = useState(new Map())
+  // Aparatos/membresías REALMENTE vigentes por DNI: el Map tri-estado de
+  // siempre (ver socioMetrics.js, caso Agustina Aguero) + QUÉ disciplina de
+  // membresía tiene cada socio, para el desglose.
+  const [membresias, setMembresias] = useState({ vigentePorDni: new Map(), disciplinasPorDni: new Map() })
+  // Catálogo real de disciplinas (tabla `disciplines`).
+  const [disciplinas, setDisciplinas] = useState([])
 
-  const fetchSocios = async () => {
+  // Todo se carga ANTES de dibujar un solo número. Si CUALQUIERA de las
+  // consultas falla, se muestra el error con "Reintentar": nunca números
+  // armados con datos incompletos (antes, un fallo de créditos/Aparatos
+  // dejaba a todos como "Inactivo" en silencio).
+  const fetchDatos = async () => {
     setLoading(true)
     setError(null)
 
-    const { data, error: fetchError } = await supabase.from('socios').select('*')
+    try {
+      const { data: filasSocios, error: sociosError } = await fetchTodosLosSocios()
+      if (sociosError) throw new Error(`No se pudieron cargar los socios: ${sociosError.message}`)
 
-    if (fetchError) {
-      console.error('Error al cargar socios para Reportes:', fetchError.message)
-      setError('No se pudieron cargar los datos. Verificá la conexión con Supabase.')
+      const dnis = (filasSocios ?? []).map((s) => s.dni)
+      const [creditos, membresiasVigentes, catalogo] = await Promise.all([
+        fetchCreditosPorDisciplina(dnis, { lanzarSiFalla: true }),
+        fetchMembresiasVigentesPorDni(dnis, { lanzarSiFalla: true }),
+        supabase.from('disciplines').select('id, name, kind, is_active').order('name', { ascending: true }),
+      ])
+      if (catalogo.error) throw new Error(`No se pudo cargar el catálogo de disciplinas: ${catalogo.error.message}`)
+
+      setSocios(filasSocios ?? [])
+      setCreditosPorDni(creditos)
+      setMembresias(membresiasVigentes)
+      setDisciplinas(catalogo.data ?? [])
+    } catch (err) {
+      console.error('Error al cargar Reportes:', err.message)
+      setError(
+        'No se pudieron cargar todos los datos de los socios. No se muestran los números para no dar un total incompleto. Verificá la conexión con Supabase.',
+      )
       setSocios([])
-    } else {
-      setSocios(data ?? [])
     }
 
     setLoading(false)
@@ -208,15 +383,8 @@ function Reportes() {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchSocios()
+    fetchDatos()
   }, [])
-
-  // Aparte del fetch principal -- mismo criterio que Home.jsx/Socios.jsx.
-  useEffect(() => {
-    if (socios.length === 0) return
-    fetchCreditosPorDisciplina(socios.map((s) => s.dni)).then(setCreditosPorDni)
-    fetchAparatosVigentePorDni(socios.map((s) => s.dni)).then(setAparatosVigentePorDni)
-  }, [socios])
 
   const sociosConCreditos = useMemo(
     () =>
@@ -228,9 +396,10 @@ function Reportes() {
         // confirmada sin nada real -- y `undefined` -- sin cuenta PWA, cae
         // a fecha_vencimiento directa, ver fetchAparatosVigentePorDni en
         // fichaSocioPwa.js). Se pasa el valor CRUDO tal cual.
-        aparatosVigenteReal: aparatosVigentePorDni.get(s.dni),
+        aparatosVigenteReal: membresias.vigentePorDni.get(s.dni),
+        membresiasVigentes: membresias.disciplinasPorDni.get(s.dni) ?? [],
       })),
-    [socios, creditosPorDni, aparatosVigentePorDni],
+    [socios, creditosPorDni, membresias],
   )
 
   // Mismo criterio EXACTO que ya usan Home.jsx y Socios.jsx -- antes acá se
@@ -243,9 +412,11 @@ function Reportes() {
   // alcanza con tocarlo ahí una sola vez.
   const metricasVigentes = useMemo(() => getSocioMetrics(sociosConCreditos), [sociosConCreditos])
 
+  // Desglose por disciplina de esos mismos activos (catálogo real).
+  const desglose = useMemo(() => desglosePorDisciplina(sociosConCreditos, disciplinas), [sociosConCreditos, disciplinas])
+
   const kpis = useMemo(
     () => [
-      { label: 'Socios Activos', value: metricasVigentes.activos, icon: Users },
       { label: 'Cuota Vencida', value: metricasVigentes.vencidos, icon: AlertCircle },
       {
         label: 'Nuevos del mes',
@@ -356,7 +527,7 @@ function Reportes() {
         <p>{error}</p>
         <button
           type="button"
-          onClick={fetchSocios}
+          onClick={fetchDatos}
           className="rounded-lg border border-red-400/40 px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-red-500/10"
         >
           Reintentar
@@ -366,7 +537,9 @@ function Reportes() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-10">
+      <DesgloseDisciplinas activos={metricasVigentes.activos} categorias={desglose.categorias} />
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {kpis.map((kpi) => (
           <KpiCard key={kpi.label} {...kpi} />

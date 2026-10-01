@@ -1,22 +1,6 @@
 import { Ban, Clock, Eye, Pencil, Users } from 'lucide-react'
 import { colorOcupacion } from '../utils/ocupacion'
-
-const COLORES_DISCIPLINA = {
-  crossfit: { header: 'from-orange-600 to-orange-500', dot: 'bg-orange-400' },
-  boxeo: { header: 'from-red-600 to-red-500', dot: 'bg-red-400' },
-  kickstrike: { header: 'from-rose-600 to-rose-500', dot: 'bg-rose-400' },
-  musculación: { header: 'from-sky-600 to-sky-500', dot: 'bg-sky-400' },
-  aparatos: { header: 'from-sky-600 to-sky-500', dot: 'bg-sky-400' },
-  yoga: { header: 'from-purple-600 to-purple-500', dot: 'bg-purple-400' },
-  funcional: { header: 'from-teal-600 to-teal-500', dot: 'bg-teal-400' },
-  default: { header: 'from-greenfit-primary to-lime-500', dot: 'bg-greenfit-primary' },
-}
-
-function colorDisciplina(disciplina) {
-  const nombre = (disciplina ?? '').toLowerCase()
-  const clave = Object.keys(COLORES_DISCIPLINA).find((c) => c !== 'default' && nombre.includes(c))
-  return COLORES_DISCIPLINA[clave ?? 'default']
-}
+import { colorDisciplina } from '../utils/coloresDisciplina'
 
 function ClaseCard({ clase, estado, cancelada, hayDestacada, onVerInscriptos, onEditar, onCancelar }) {
   const inscriptos = clase.inscriptos.length

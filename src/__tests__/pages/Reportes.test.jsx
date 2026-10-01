@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import Reportes from '../../pages/Reportes'
 
 // Bug real (auditoría de Reportes): los KPIs y el gráfico "Socios Activos
@@ -40,31 +40,27 @@ import { supabase } from '../../lib/supabaseClient'
 
 const mockedFrom = supabase.from
 
-// Thenable CON `.in()` -- Reportes.jsx hace `supabase.from('socios').select('*')`
-// (awaited directo), pero desde CAMBIO 3 también llama a
-// fetchCreditosPorDisciplina()/fetchAparatosVigentePorDni()
-// (utils/fichaSocioPwa.js), que encadenan `.select(...).in(...)` sobre
-// `profiles`/`user_credits`. Un solo objeto que sea awaitable Y tenga
-// `.in()` (ambos resolviendo al mismo resultado) cubre los dos patrones sin
-// duplicar el mock.
-function makeChain(data) {
-  const resultado = { data, error: null }
-  return {
-    select: vi.fn().mockReturnValue({
-      then: (resolve) => resolve(resultado),
-      // .range() incluido -- fetchCreditosPorDisciplina/
-      // fetchAparatosVigentePorDni ahora paginan con fetchTodasLasFilas()
-      // (bug Fernanda Isgro, DNI 38756811, 1220+ filas de user_credits en
-      // producción), que siempre llama a .range() antes de awaitear. Con
-      // `data` chico (todos los fixtures de este archivo), una sola vuelta
-      // alcanza -- mismo comportamiento de siempre.
-      in: vi.fn().mockReturnValue({
-        then: (resolve) => resolve(resultado),
-        range: vi.fn().mockResolvedValue(resultado),
-      }),
-    }),
-  }
+// Cadena de consulta genérica: cada método (.select/.in/.order/.eq) devuelve
+// la misma cadena, que es awaitable y además tiene .range() -- Reportes.jsx
+// pagina TODO con fetchTodasLasFilas()/fetchPorLotesDeIds() (socios,
+// profiles y user_credits, cada una con su .order() fijo), y el catálogo de
+// disciplinas se awaitea directo. Con fixtures chicos, una sola página
+// alcanza. `error` opcional para simular que una consulta falla.
+function makeChain(data, error = null) {
+  const resultado = { data: error ? null : data, error }
+  const chain = {}
+  ;['select', 'in', 'order', 'eq'].forEach((metodo) => {
+    chain[metodo] = vi.fn(() => chain)
+  })
+  chain.range = vi.fn().mockResolvedValue(resultado)
+  chain.then = (resolve) => resolve(resultado)
+  return chain
 }
+
+const DISCIPLINA_APARATOS_MOCK = { id: 'disc-aparatos', name: 'Aparatos', kind: 'membership', is_active: true }
+const DISCIPLINA_CROSSFIT_MOCK = { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits', is_active: true }
+const DISCIPLINA_BOXEO_MOCK = { id: 'disc-boxeo', name: 'Boxeo', kind: 'credits', is_active: true }
+const CATALOGO_MOCK = [DISCIPLINA_APARATOS_MOCK, DISCIPLINA_BOXEO_MOCK, DISCIPLINA_CROSSFIT_MOCK]
 
 // `profiles`/`userCredits` opcionales -- BUG REAL #2 (Agustina Aguero, ver
 // socioMetrics.js): estadoOperativoSocio() ya no confía en
@@ -72,14 +68,14 @@ function makeChain(data) {
 // resuelto contra una fila real de user_credits. Los tests que representan
 // un socio con Aparatos GENUINAMENTE vigente pasan esa fila acá; los que no
 // la pasan están representando a propósito "sin nada real detrás".
-function mockSupabaseTables(socios, { profiles = [], userCredits = [] } = {}) {
-  mockedFrom.mockImplementation((tabla) => {
-    if (tabla === 'socios') return makeChain(socios)
-    if (tabla === 'profiles') return makeChain(profiles)
-    if (tabla === 'user_credits') return makeChain(userCredits)
-    return makeChain([])
-  })
+// `disciplinas` = catálogo (tabla disciplines); `errores` = tabla -> error.
+function mockSupabaseTables(socios, { profiles = [], userCredits = [], disciplinas = CATALOGO_MOCK, errores = {} } = {}) {
+  const porTabla = { socios, profiles, user_credits: userCredits, disciplines: disciplinas }
+  mockedFrom.mockImplementation((tabla) => makeChain(porTabla[tabla] ?? [], errores[tabla] ?? null))
 }
+
+// Número grande del héroe "Socios Activos".
+const sociosActivos = () => screen.getByTestId('reportes-socios-activos')
 
 // Alta bien antigua -- cae dentro de CUALQUIER mes del rango por defecto (6
 // meses) del gráfico "Socios Activos (mensual)", así el caso de prueba
@@ -104,7 +100,6 @@ const SOCIO_ACTIVO_NORMAL = {
 // sin esto, BUG REAL #2 la contaría "Inactivo" (fecha sin nada real
 // detrás), exactamente el bug que motivó ese fix.
 const PROFILE_ACTIVO_NORMAL = { id: 'profile-s1', dni: SOCIO_ACTIVO_NORMAL.dni }
-const DISCIPLINA_APARATOS_MOCK = { id: 'disc-aparatos', name: 'Aparatos', kind: 'membership' }
 const USER_CREDITS_ACTIVO_NORMAL = [
   {
     user_id: PROFILE_ACTIVO_NORMAL.id,
@@ -144,8 +139,8 @@ describe('Reportes -- KPIs y "Socios Activos (mensual)" excluyen a los dados de 
     // recién después de que `loading` ya bajó (ver Reportes.jsx) -- esperar
     // a que aparezca el texto "Socios Activos" no alcanza para que ese
     // segundo fetch haya asentado, `waitFor` reintenta hasta que sí.
-    const activos = await screen.findByText('Socios Activos')
-    await waitFor(() => expect(activos.nextElementSibling).toHaveTextContent('1')) // solo el normal -- el dado de baja queda afuera
+    await screen.findByText('Socios Activos')
+    await waitFor(() => expect(sociosActivos()).toHaveTextContent(/^1$/)) // solo el normal -- el dado de baja queda afuera
 
     expect(screen.getByText('Cuota Vencida').nextElementSibling).toHaveTextContent('0')
   })
@@ -188,8 +183,8 @@ describe('Reportes -- KPIs y "Socios Activos (mensual)" excluyen a los dados de 
     })
     render(<Reportes />)
 
-    const activos = await screen.findByText('Socios Activos')
-    await waitFor(() => expect(activos.nextElementSibling).toHaveTextContent('1'))
+    await screen.findByText('Socios Activos')
+    await waitFor(() => expect(sociosActivos()).toHaveTextContent(/^1$/))
   })
 
   // CAMBIO 3 (bug real: "Activo" sin nada real) -- un socio 100% créditos
@@ -209,8 +204,8 @@ describe('Reportes -- KPIs y "Socios Activos (mensual)" excluyen a los dados de 
     mockSupabaseTables([socioSinNadaReal])
     render(<Reportes />)
 
-    const activos = await screen.findByText('Socios Activos')
-    expect(activos.nextElementSibling).toHaveTextContent('0')
+    await screen.findByText('Socios Activos')
+    expect(sociosActivos()).toHaveTextContent(/^0$/)
   })
 
   // BUG REAL #2, URGENTE (filtro "Activo" mostrando socios con badge
@@ -246,8 +241,8 @@ describe('Reportes -- KPIs y "Socios Activos (mensual)" excluyen a los dados de 
     // Map todavía está vacío) -- mismo valor que "sin cuenta PWA", que
     // confía en la fecha completa. Sin `waitFor`, se podría leer un "1"
     // transitorio en vez del "0" final ya asentado.
-    const activos = await screen.findByText('Socios Activos')
-    await waitFor(() => expect(activos.nextElementSibling).toHaveTextContent('0'))
+    await screen.findByText('Socios Activos')
+    await waitFor(() => expect(sociosActivos()).toHaveTextContent(/^0$/))
   })
 
   it('regresión -- "Nuevos del mes" sigue contando altas de este mes sin importar activo/baja (no se tocó ese criterio)', async () => {
@@ -274,5 +269,229 @@ describe('Reportes -- KPIs y "Socios Activos (mensual)" excluyen a los dados de 
     const data = JSON.parse(barChart.getAttribute('data-chart'))
     const total = data.reduce((suma, dia) => suma + dia.valor, 0)
     expect(total).toBe(1)
+  })
+})
+
+// ============================================================
+// Rediseño (héroe + barra + tarjetas por disciplina + tabla) y fixes de datos
+// ============================================================
+
+const socio = (id, nombre, apellido, dni, extra = {}) => ({
+  id,
+  nombre,
+  apellido,
+  dni,
+  activo: true,
+  estado: 'Activo',
+  fecha_vencimiento: null,
+  created_at: ALTA_ANTIGUA,
+  ...extra,
+})
+const perfil = (dni) => ({ id: `profile-${dni}`, dni })
+const creditos = (dni, disciplina, cantidad, vence = `${VENCIMIENTO_FUTURO}T12:00:00.000Z`) => ({
+  id: `uc-${dni}-${disciplina.id}`,
+  user_id: `profile-${dni}`,
+  remaining_credits: cantidad,
+  expires_at: vence,
+  discipline: disciplina,
+})
+const membresia = (dni, disciplina = DISCIPLINA_APARATOS_MOCK, vence = `${VENCIMIENTO_FUTURO}T12:00:00.000Z`) => ({
+  id: `uc-${dni}-${disciplina.id}`,
+  user_id: `profile-${dni}`,
+  remaining_credits: null,
+  expires_at: vence,
+  discipline: disciplina,
+})
+
+// Martina: solo Aparatos. Ana: CrossFit + Aparatos (cuenta en las dos).
+// Beto: Boxeo. Lucía: sin cuenta en la app, cobrada por mostrador (activa por
+// fecha_vencimiento). Bruno: dado de baja CON créditos vigentes de CrossFit.
+// Carla: cuenta en la app, créditos de Boxeo ya vencidos (no está activa).
+const MARTINA = socio('s1', 'Martina', 'Ríos', '30111222', { fecha_vencimiento: VENCIMIENTO_FUTURO })
+const ANA = socio('s2', 'Ana', 'Gómez', '31000111')
+const BETO = socio('s3', 'Beto', 'Luna', '32000222')
+const LUCIA = socio('s4', 'Lucía', 'Paz', '33000333', { fecha_vencimiento: VENCIMIENTO_FUTURO, plan: ['Pase Libre'] })
+const BRUNO_BAJA = socio('s5', 'Bruno', 'Álvarez', '34000444', { activo: false })
+const CARLA_VENCIDA = socio('s6', 'Carla', 'Sosa', '35000555')
+
+function mockGimnasio(opciones = {}) {
+  mockSupabaseTables([MARTINA, ANA, BETO, LUCIA, BRUNO_BAJA, CARLA_VENCIDA], {
+    // Lucía NO tiene perfil: nunca se registró en la app.
+    profiles: [MARTINA, ANA, BETO, BRUNO_BAJA, CARLA_VENCIDA].map((s) => perfil(s.dni)),
+    userCredits: [
+      membresia(MARTINA.dni),
+      creditos(ANA.dni, DISCIPLINA_CROSSFIT_MOCK, 5),
+      membresia(ANA.dni),
+      creditos(BETO.dni, DISCIPLINA_BOXEO_MOCK, 2),
+      creditos(BRUNO_BAJA.dni, DISCIPLINA_CROSSFIT_MOCK, 8),
+      creditos(CARLA_VENCIDA.dni, DISCIPLINA_BOXEO_MOCK, 3, '2020-01-01T00:00:00.000Z'),
+    ],
+    ...opciones,
+  })
+}
+
+const tarjeta = (id) => screen.getByTestId(`reportes-tarjeta-${id}`)
+const tabla = () => within(screen.getByTestId('reportes-tabla'))
+
+describe('Reportes -- héroe y desglose por disciplina', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('el héroe muestra los Socios Activos con el mismo criterio de siempre (excluye al dado de baja y al vencido)', async () => {
+    mockGimnasio()
+    render(<Reportes />)
+
+    // Martina, Ana, Beto y Lucía. Bruno (baja) y Carla (vencida) no cuentan.
+    await waitFor(() => expect(sociosActivos()).toHaveTextContent(/^4$/))
+  })
+
+  it('una tarjeta por disciplina: un socio con 2 disciplinas cuenta en las 2, y se aclara que la suma puede superar el total', async () => {
+    mockGimnasio()
+    render(<Reportes />)
+    await waitFor(() => expect(sociosActivos()).toHaveTextContent(/^4$/))
+
+    expect(tarjeta('disc-aparatos')).toHaveTextContent('Aparatos')
+    expect(tarjeta('disc-aparatos')).toHaveTextContent('50%')
+    expect(within(tarjeta('disc-aparatos')).getByText('2')).toBeInTheDocument() // Martina + Ana
+    expect(within(tarjeta('disc-crossfit')).getByText('1')).toBeInTheDocument() // Ana (Bruno está de baja)
+    expect(within(tarjeta('disc-boxeo')).getByText('1')).toBeInTheDocument() // Beto (Carla está vencida)
+
+    // 2 + 1 + 1 + 1 (sin disciplina) = 5 tarjetas-socio para 4 activos.
+    expect(screen.getByText(/la suma de las tarjetas puede superar el total de\s+Socios Activos/)).toBeInTheDocument()
+  })
+
+  it('los socios sin cuenta en la app (activos por fecha) van a "Sin disciplina registrada", no a Aparatos', async () => {
+    mockGimnasio()
+    render(<Reportes />)
+    await waitFor(() => expect(sociosActivos()).toHaveTextContent(/^4$/))
+
+    expect(tarjeta('sin-disciplina')).toHaveTextContent('Sin disciplina registrada')
+    expect(within(tarjeta('sin-disciplina')).getByText('1')).toBeInTheDocument()
+
+    fireEvent.click(tarjeta('sin-disciplina'))
+    expect(tabla().getByText('Lucía Paz')).toBeInTheDocument()
+    expect(tabla().getByText('33000333')).toBeInTheDocument()
+
+    // Dato secundario: el plan administrativo de socios.plan, con la aclaración.
+    expect(tabla().getByText('Pase Libre — sin cuenta en la app')).toBeInTheDocument()
+    expect(screen.getByTestId('reportes-nota-plan')).toHaveTextContent(/plan administrativo cargado en el panel: no está verificado contra créditos reales/)
+
+    // Y NO aparece en Aparatos.
+    // (ni el plan ni la aclaración se muestran en una disciplina real)
+    fireEvent.click(tarjeta('disc-aparatos'))
+    expect(tabla().queryByText('Lucía Paz')).toBeNull()
+    expect(screen.queryByTestId('reportes-nota-plan')).toBeNull()
+    expect(tabla().queryByText(/sin cuenta en la app/)).toBeNull()
+  })
+
+  it('sin socios de mostrador, la categoría "Sin disciplina registrada" no aparece', async () => {
+    mockSupabaseTables([MARTINA], { profiles: [perfil(MARTINA.dni)], userCredits: [membresia(MARTINA.dni)] })
+    render(<Reportes />)
+    await waitFor(() => expect(sociosActivos()).toHaveTextContent(/^1$/))
+    expect(screen.queryByTestId('reportes-tarjeta-sin-disciplina')).toBeNull()
+  })
+
+  it('las tarjetas salen del CATÁLOGO real: aparece una disciplina nueva (aunque tenga 0) y no una desactivada sin socios', async () => {
+    mockGimnasio({
+      disciplinas: [
+        ...CATALOGO_MOCK,
+        { id: 'disc-yoga', name: 'Yoga', kind: 'credits', is_active: true }, // no está en ninguna lista fija
+        { id: 'disc-vieja', name: 'Spinning', kind: 'credits', is_active: false },
+      ],
+    })
+    render(<Reportes />)
+    await waitFor(() => expect(sociosActivos()).toHaveTextContent(/^4$/))
+
+    expect(tarjeta('disc-yoga')).toHaveTextContent('Yoga')
+    expect(within(tarjeta('disc-yoga')).getByText('0')).toBeInTheDocument()
+    expect(screen.queryByTestId('reportes-tarjeta-disc-vieja')).toBeNull()
+
+    fireEvent.click(tarjeta('disc-yoga'))
+    expect(tabla().getByText('Ningún socio activo en esta disciplina.')).toBeInTheDocument()
+  })
+
+  it('la tabla muestra SOLO nombre y DNI (sin Plan ni Estado) de la disciplina elegida', async () => {
+    mockGimnasio()
+    render(<Reportes />)
+    await waitFor(() => expect(sociosActivos()).toHaveTextContent(/^4$/))
+
+    // Arranca en la disciplina con más socios (Aparatos).
+    expect(tabla().getByText('Aparatos')).toBeInTheDocument()
+    expect(tabla().getByText('2 socios')).toBeInTheDocument()
+    expect(tabla().getByText('Ana Gómez')).toBeInTheDocument()
+    expect(tabla().getByText('Martina Ríos')).toBeInTheDocument()
+    expect(tabla().getByText('30111222')).toBeInTheDocument()
+
+    const encabezados = tabla().getAllByRole('columnheader').map((th) => th.textContent)
+    expect(encabezados).toEqual(['Socio', 'DNI'])
+    expect(tabla().queryByText('Plan')).toBeNull()
+    expect(tabla().queryByText('Estado')).toBeNull()
+    expect(tabla().queryByText(/Al día|Activo/)).toBeNull()
+  })
+
+  it('tocar otra disciplina cambia la lista; el dado de baja no aparece aunque tenga créditos vigentes', async () => {
+    mockGimnasio()
+    render(<Reportes />)
+    await waitFor(() => expect(sociosActivos()).toHaveTextContent(/^4$/))
+
+    fireEvent.click(tarjeta('disc-crossfit'))
+    expect(tarjeta('disc-crossfit')).toHaveAttribute('aria-pressed', 'true')
+    expect(tabla().getByText('1 socio')).toBeInTheDocument()
+    expect(tabla().getByText('Ana Gómez')).toBeInTheDocument()
+    expect(tabla().queryByText('Bruno Álvarez')).toBeNull() // dado de baja, con 8 créditos vigentes
+    expect(tabla().queryByText('Martina Ríos')).toBeNull()
+
+    fireEvent.click(tarjeta('disc-boxeo'))
+    expect(tabla().getByText('Beto Luna')).toBeInTheDocument()
+    expect(tabla().queryByText('Carla Sosa')).toBeNull() // créditos vencidos
+  })
+})
+
+describe('Reportes -- fixes de datos', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('pagina la tabla socios con orden fijo: con 1200 socios cuenta los 1200 (antes se cortaba en 1000 en silencio)', async () => {
+    const muchos = Array.from({ length: 1200 }, (_, i) =>
+      socio(`m${String(i).padStart(4, '0')}`, 'Socio', `Nº${i}`, String(40000000 + i), { fecha_vencimiento: VENCIMIENTO_FUTURO }),
+    )
+    // Cadena de `socios` que pagina de verdad: .range(desde, hasta) corta el arreglo.
+    const cadenaSocios = makeChain(muchos)
+    cadenaSocios.range = vi.fn((desde, hasta) => Promise.resolve({ data: muchos.slice(desde, hasta + 1), error: null }))
+    mockedFrom.mockImplementation((tabla) => {
+      if (tabla === 'socios') return cadenaSocios
+      if (tabla === 'disciplines') return makeChain(CATALOGO_MOCK)
+      return makeChain([])
+    })
+    render(<Reportes />)
+
+    await waitFor(() => expect(sociosActivos()).toHaveTextContent(/^1200$/))
+    expect(cadenaSocios.order).toHaveBeenCalledWith('id', { ascending: true })
+    expect(cadenaSocios.range.mock.calls).toEqual([
+      [0, 999],
+      [1000, 1999],
+    ])
+  })
+
+  it('si falla la consulta de créditos, AVISA con "Reintentar" y no muestra ningún número (antes: todos inactivos en silencio)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    mockGimnasio({ errores: { user_credits: { message: 'URI too long' } } })
+    render(<Reportes />)
+
+    expect(await screen.findByText(/No se pudieron cargar todos los datos de los socios/)).toBeInTheDocument()
+    expect(screen.getByText('Reintentar')).toBeInTheDocument()
+    expect(screen.queryByTestId('reportes-socios-activos')).toBeNull()
+    expect(screen.queryByText('Socios Activos')).toBeNull()
+    console.error.mockRestore()
+  })
+
+  it('si falla la consulta de socios o la del catálogo, también avisa; "Reintentar" vuelve a cargar', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    mockGimnasio({ errores: { disciplines: { message: 'boom' } } })
+    render(<Reportes />)
+    expect(await screen.findByText(/No se pudieron cargar todos los datos de los socios/)).toBeInTheDocument()
+
+    mockGimnasio() // la conexión volvió
+    fireEvent.click(screen.getByText('Reintentar'))
+    await waitFor(() => expect(sociosActivos()).toHaveTextContent(/^4$/))
+    console.error.mockRestore()
   })
 })
