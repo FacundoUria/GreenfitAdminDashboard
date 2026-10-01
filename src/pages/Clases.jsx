@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Loader2, Plus } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
@@ -28,11 +28,30 @@ const DIAS_VISIBLES = [diaAnterior(HOY), ...proximosDias(7)]
 function Clases() {
   const navigate = useNavigate()
   const [clasesBase, setClasesBase] = useState([])
-  const [bookings, setBookings] = useState([])
-  const [cancelaciones, setCancelaciones] = useState([])
+  // Inscriptos y cancelaciones se guardan JUNTO con el día al que pertenecen.
+  // En pantalla solo se usan si ese día es el elegido ahora (ver `bookings` /
+  // `cancelaciones` más abajo): mientras no llega la respuesta del día
+  // elegido se ve "Cargando", nunca los datos de otro día.
+  //
+  // Bug real (2026-10-01): había un solo arreglo `bookings` sin fecha y dos
+  // formas de que quedara con datos de OTRO día bajo el día elegido:
+  //   1) al volver al día con el que se abrió la pantalla (hoy), un `return`
+  //      temprano evitaba volver a pedir los inscriptos -> HOY quedaba con
+  //      los de mañana ("0, 0, 0") siempre, sin necesidad de tocar rápido;
+  //   2) sin protección contra respuestas fuera de orden, una respuesta
+  //      atrasada de otro día pisaba la del día elegido.
+  // Con la lista equivocada, "Ver inscriptos" mostraba socios de otro día y
+  // marcar asistencia escribía sobre la reserva de ese otro día.
+  const [inscriptosDia, setInscriptosDia] = useState({ fecha: null, filas: [] })
+  const [cancelacionesDia, setCancelacionesDia] = useState({ fecha: null, filas: [] })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [errorInscriptos, setErrorInscriptos] = useState(null)
   const [fechaSeleccionada, setFechaSeleccionada] = useState(HOY)
+  // Número del último pedido de cada tipo: solo la respuesta del ÚLTIMO
+  // pedido puede escribir en pantalla; las que llegan tarde se descartan.
+  const pedidoInscriptos = useRef(0)
+  const pedidoCancelaciones = useRef(0)
   const [claseInscriptosId, setClaseInscriptosId] = useState(null)
   const [modalNuevaClaseAbierto, setModalNuevaClaseAbierto] = useState(false)
   const [claseEnEdicion, setClaseEnEdicion] = useState(null)
@@ -71,16 +90,22 @@ function Clases() {
   // Los inscriptos son por ocurrencia puntual (class_id + booking_date), así
   // que se re-piden cada vez que cambia el día elegido, no una sola vez.
   const fetchBookings = useCallback(async (fecha) => {
+    const estePedido = ++pedidoInscriptos.current
     const { data, error: fetchError } = await supabase
       .from('bookings')
       .select('id, user_id, class_id, attended, profiles(full_name, dni)')
       .eq('booking_date', fecha)
 
+    // Respuesta atrasada (ya se pidió otra cosa después): se descarta entera.
+    if (estePedido !== pedidoInscriptos.current) return
+
     if (fetchError) {
       console.error('Error al cargar inscriptos desde Supabase:', fetchError.message)
+      setErrorInscriptos('No se pudieron cargar los inscriptos de este día. Verificá la conexión con Supabase.')
       return
     }
-    setBookings(data ?? [])
+    setErrorInscriptos(null)
+    setInscriptosDia({ fecha, filas: data ?? [] })
   }, [])
 
   // Igual que fetchBookings -- por ocurrencia puntual (class_id + fecha),
@@ -89,40 +114,58 @@ function Clases() {
   // archivo): si la tabla todavía no existe (migración sin correr), la
   // grilla sigue funcionando, solo sin el badge de "Cancelada".
   const fetchCancelaciones = useCallback(async (fecha) => {
+    const estePedido = ++pedidoCancelaciones.current
     const { data, error: fetchError } = await supabase
       .from('class_occurrence_cancellations')
       .select('class_id')
       .eq('occurrence_date', fecha)
 
+    if (estePedido !== pedidoCancelaciones.current) return
+
     if (fetchError) {
       console.error('Error al cargar cancelaciones puntuales desde Supabase:', fetchError.message)
-      return
     }
-    setCancelaciones(data ?? [])
+    // Fail-open también con error: se marca el día como "resuelto" sin
+    // cancelaciones, así la grilla de ESE día se muestra igual (sin el badge).
+    setCancelacionesDia({ fecha, filas: fetchError ? [] : data ?? [] })
   }, [])
 
-  const cargarTodo = useCallback(async () => {
-    setLoading(true)
-    await Promise.all([fetchClasesBase(), fetchBookings(fechaSeleccionadaStr), fetchCancelaciones(fechaSeleccionadaStr)])
-    setLoading(false)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
+  // Las clases (plantillas recurrentes) se piden una sola vez: no dependen
+  // del día elegido.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    cargarTodo()
-  }, [cargarTodo])
+    fetchClasesBase().finally(() => setLoading(false))
+  }, [fetchClasesBase])
 
-  // Re-pide inscriptos + cancelaciones (no las clases) cuando cambia el día
-  // elegido. `cargarTodo` ya cubre la primera carga, así que acá solo
-  // importan los cambios posteriores de fechaSeleccionada.
-  const [fechaCargadaInicial] = useState(fechaSeleccionadaStr)
+  // Inscriptos + cancelaciones se piden al entrar y en CADA cambio de día,
+  // sin excepciones -- incluido al volver al día con el que se abrió la
+  // pantalla (antes había un `return` que salteaba justo ese caso).
   useEffect(() => {
-    if (fechaSeleccionadaStr === fechaCargadaInicial) return
     // eslint-disable-next-line react-hooks/set-state-in-effect
+    setErrorInscriptos(null)
     fetchBookings(fechaSeleccionadaStr)
     fetchCancelaciones(fechaSeleccionadaStr)
-  }, [fechaSeleccionadaStr, fechaCargadaInicial, fetchBookings, fetchCancelaciones])
+  }, [fechaSeleccionadaStr, fetchBookings, fetchCancelaciones])
+
+  // "Reintentar": recarga todo para el día elegido AHORA.
+  const cargarTodo = useCallback(async () => {
+    setLoading(true)
+    setErrorInscriptos(null)
+    await Promise.all([fetchClasesBase(), fetchBookings(fechaSeleccionadaStr), fetchCancelaciones(fechaSeleccionadaStr)])
+    setLoading(false)
+  }, [fetchClasesBase, fetchBookings, fetchCancelaciones, fechaSeleccionadaStr])
+
+  // Datos del día ELEGIDO: si lo cargado es de otro día, se trata como "no
+  // hay datos todavía" (lista vacía + cargando), nunca se muestra.
+  const hayDatosDelDia = inscriptosDia.fecha === fechaSeleccionadaStr && cancelacionesDia.fecha === fechaSeleccionadaStr
+  const bookings = useMemo(
+    () => (inscriptosDia.fecha === fechaSeleccionadaStr ? inscriptosDia.filas : []),
+    [inscriptosDia, fechaSeleccionadaStr],
+  )
+  const cancelaciones = useMemo(
+    () => (cancelacionesDia.fecha === fechaSeleccionadaStr ? cancelacionesDia.filas : []),
+    [cancelacionesDia, fechaSeleccionadaStr],
+  )
 
   const canceladasIds = useMemo(() => new Set(cancelaciones.map((c) => c.class_id)), [cancelaciones])
 
@@ -181,10 +224,28 @@ function Clases() {
   const handleVerInscriptos = (clase) => setClaseInscriptosId(clase.id)
 
   const handleMarcarAsistencia = async (claseId, inscriptoId, asistio) => {
+    // La asistencia solo se marca sobre una reserva del día que se está
+    // viendo. Doble resguardo, porque escribir "asistió" en la reserva de
+    // OTRO día era el efecto más grave del bug de arriba:
+    //   1) acá: la reserva tiene que estar en la lista del día elegido (y de
+    //      esa clase); si no, no se manda nada.
+    //   2) en la consulta: el UPDATE exige además booking_date = día elegido y
+    //      class_id = esa clase, así que aunque llegara un id de otro día el
+    //      servidor no toca ninguna fila.
+    const fechaVista = fechaSeleccionadaStr
+    const esDelDiaVisto = bookings.some((b) => b.id === inscriptoId && b.class_id === claseId)
+    if (!esDelDiaVisto) {
+      console.error('Marcar asistencia: la reserva no pertenece al día/clase que se está viendo', { inscriptoId, claseId, fechaVista })
+      window.alert('Esa reserva no corresponde al día que estás viendo. Actualizá la pantalla e intentá de nuevo.')
+      return
+    }
+
     const { data, error: updateError } = await supabase
       .from('bookings')
       .update({ attended: asistio })
       .eq('id', inscriptoId)
+      .eq('booking_date', fechaVista)
+      .eq('class_id', claseId)
       .select()
 
     if (updateError || !data || data.length === 0) {
@@ -196,7 +257,19 @@ function Clases() {
       return
     }
 
-    setBookings((prev) => prev.map((b) => (b.id === inscriptoId ? { ...b, attended: asistio } : b)))
+    // Solo se actualiza en pantalla si la lista sigue siendo la de ese día.
+    setInscriptosDia((prev) =>
+      prev.fecha === fechaVista
+        ? { ...prev, filas: prev.filas.map((b) => (b.id === inscriptoId ? { ...b, attended: asistio } : b)) }
+        : prev,
+    )
+  }
+
+  // Cambiar de día cierra "Ver inscriptos": el modal nunca queda abierto
+  // sobre la lista de otro día.
+  const handleElegirDia = (fecha) => {
+    if (formatDateOnly(fecha) !== fechaSeleccionadaStr) setClaseInscriptosId(null)
+    setFechaSeleccionada(fecha)
   }
 
   // Buscador de "Ver inscriptos": la lista de socios (role='socio') y sus
@@ -406,7 +479,7 @@ function Clases() {
               <button
                 key={fechaStr}
                 type="button"
-                onClick={() => setFechaSeleccionada(fecha)}
+                onClick={() => handleElegirDia(fecha)}
                 className={`flex min-h-[52px] w-16 shrink-0 flex-col items-center justify-center rounded-lg px-2 py-2 text-sm font-medium transition-colors ${
                   seleccionado
                     ? 'bg-greenfit-primary text-greenfit-dark'
@@ -430,14 +503,16 @@ function Clases() {
         </button>
       </div>
 
-      {loading ? (
+      {/* "Cargando" mientras no esté la respuesta del día ELEGIDO: nunca se
+          dibuja la grilla con inscriptos de otro día. */}
+      {loading || (!hayDatosDelDia && !error && !errorInscriptos) ? (
         <div className="flex items-center justify-center gap-2 rounded-xl bg-greenfit-card p-10 text-sm text-gray-400">
           <Loader2 className="h-4 w-4 animate-spin" />
           Cargando clases...
         </div>
-      ) : error ? (
+      ) : error || errorInscriptos ? (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-red-500/20 bg-red-500/5 p-10 text-center text-sm text-red-400">
-          <p>{error}</p>
+          <p>{error || errorInscriptos}</p>
           <button
             type="button"
             onClick={cargarTodo}
