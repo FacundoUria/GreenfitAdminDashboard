@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Loader2, Pencil, Plus, Trash2, X } from 'lucide-react'
-import { deleteExercise, fetchExercises, saveExercise } from '../../utils/routinesApi'
+import {
+  CODIGO_EJERCICIO_EN_USO,
+  deleteExercise,
+  fetchExercises,
+  fetchUsoEjercicios,
+  saveExercise,
+} from '../../utils/routinesApi'
 import { GRUPOS_MUSCULARES, colorGrupoMuscular } from '../../utils/muscleGroups'
+import { estaEnUso, textoNoSePuedeBorrar, textoUsoCorto } from '../../utils/usoEjercicios'
 
 function formVacio() {
   return { id: null, name: '', muscleGroup: GRUPOS_MUSCULARES[0], description: '', videoUrl: '' }
@@ -13,16 +20,26 @@ function EjerciciosLibreriaModal({ onClose }) {
   const [form, setForm] = useState(formVacio())
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState(null)
+  // Dónde se usa cada ejercicio (Map id -> conteos), o null si no se pudo
+  // saber: en ese caso no se ofrece borrar NINGUNO (nunca se borra a ciegas).
+  const [uso, setUso] = useState(null)
+  const [errorUso, setErrorUso] = useState(null)
+  // Resultado de borrar (o por qué no se pudo), visible arriba de la lista.
+  const [aviso, setAviso] = useState(null)
 
   const cargar = async () => {
     setCargando(true)
-    try {
-      setEjercicios(await fetchExercises())
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudieron cargar los ejercicios.')
-    } finally {
-      setCargando(false)
+    const [lista, conteos] = await Promise.allSettled([fetchExercises(), fetchUsoEjercicios()])
+    if (lista.status === 'fulfilled') setEjercicios(lista.value)
+    else setError(lista.reason instanceof Error ? lista.reason.message : 'No se pudieron cargar los ejercicios.')
+    if (conteos.status === 'fulfilled') {
+      setUso(conteos.value)
+      setErrorUso(null)
+    } else {
+      setUso(null)
+      setErrorUso(conteos.reason instanceof Error ? conteos.reason.message : 'error desconocido')
     }
+    setCargando(false)
   }
 
   useEffect(() => {
@@ -59,14 +76,52 @@ function EjerciciosLibreriaModal({ onClose }) {
     })
   }
 
-  const handleEliminar = async (id) => {
-    const confirmado = window.confirm('¿Eliminar este ejercicio de la biblioteca? Ya no podrá elegirse en rutinas nuevas.')
+  // Antes de borrar se vuelve a preguntar dónde se usa (la lista pudo quedar
+  // vieja). La base igual rechaza borrar uno en uso (23503): si pasa, se avisa.
+  const handleEliminar = async (ejercicio) => {
+    setAviso(null)
+    let usoActual
+    try {
+      usoActual = (await fetchUsoEjercicios([ejercicio.id])).get(ejercicio.id)
+    } catch (err) {
+      setAviso({
+        tipo: 'error',
+        texto: `No se pudo verificar si "${ejercicio.name}" está en uso, así que no se borró. ${err instanceof Error ? err.message : ''}`.trim(),
+      })
+      return
+    }
+    if (!usoActual) {
+      setAviso({ tipo: 'error', texto: `"${ejercicio.name}" ya no está en la biblioteca.` })
+      await cargar()
+      return
+    }
+    if (estaEnUso(usoActual)) {
+      setAviso({ tipo: 'error', texto: `"${ejercicio.name}": ${textoNoSePuedeBorrar(usoActual)}` })
+      await cargar()
+      return
+    }
+
+    const confirmado = window.confirm(
+      `¿Borrar "${ejercicio.name}" de la biblioteca? No lo usa ninguna rutina ni plantilla, y no tiene pesos cargados. No se puede deshacer.`,
+    )
     if (!confirmado) return
     try {
-      await deleteExercise(id)
+      await deleteExercise(ejercicio.id)
+      setAviso({ tipo: 'ok', texto: `Se borró "${ejercicio.name}".` })
       await cargar()
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'No se pudo eliminar el ejercicio.')
+      if (err?.code === CODIGO_EJERCICIO_EN_USO) {
+        setAviso({
+          tipo: 'error',
+          texto: `No se puede borrar "${ejercicio.name}": se empezó a usar mientras tanto. Actualizamos la lista.`,
+        })
+        await cargar()
+      } else {
+        setAviso({
+          tipo: 'error',
+          texto: `No se pudo borrar "${ejercicio.name}": ${err instanceof Error ? err.message : 'error desconocido'}`,
+        })
+      }
     }
   }
 
@@ -151,6 +206,24 @@ function EjerciciosLibreriaModal({ onClose }) {
           Tu biblioteca{ejercicios.length > 0 ? ` (${ejercicios.length})` : ''}
         </p>
 
+        {errorUso && (
+          <p role="alert" className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
+            No se pudo saber dónde se usa cada ejercicio, así que por ahora no se puede borrar ninguno. ({errorUso})
+          </p>
+        )}
+        {aviso && (
+          <p
+            role={aviso.tipo === 'error' ? 'alert' : 'status'}
+            className={`mb-3 rounded-lg border px-3 py-2 text-sm ${
+              aviso.tipo === 'error'
+                ? 'border-red-500/30 bg-red-500/10 text-red-300'
+                : 'border-greenfit-primary/30 bg-greenfit-primary/10 text-greenfit-primary'
+            }`}
+          >
+            {aviso.texto}
+          </p>
+        )}
+
         {cargando ? (
           <div className="flex items-center justify-center gap-2 py-10 text-sm text-gray-400">
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -162,6 +235,10 @@ function EjerciciosLibreriaModal({ onClose }) {
           <ul className="flex max-h-80 flex-col gap-2 overflow-y-auto">
             {ejercicios.map((ex) => {
               const color = colorGrupoMuscular(ex.muscle_group)
+              const usoEjercicio = uso?.get(ex.id)
+              const enUso = estaEnUso(usoEjercicio)
+              // Solo se ofrece borrar si se sabe que NO está en uso.
+              const sePuedeBorrar = uso !== null && !enUso
               return (
                 <li
                   key={ex.id}
@@ -172,6 +249,9 @@ function EjerciciosLibreriaModal({ onClose }) {
                       {ex.muscle_group}
                     </span>
                     <span className="truncate text-sm text-white">{ex.name}</span>
+                    {enUso && (
+                      <span className="shrink-0 text-[11px] text-gray-500">{textoUsoCorto(usoEjercicio)}</span>
+                    )}
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
                     <button
@@ -182,14 +262,16 @@ function EjerciciosLibreriaModal({ onClose }) {
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => handleEliminar(ex.id)}
-                      aria-label="Eliminar ejercicio"
-                      className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-red-500/10 hover:text-red-400"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    {sePuedeBorrar && (
+                      <button
+                        type="button"
+                        onClick={() => handleEliminar(ex)}
+                        aria-label={`Eliminar ${ex.name}`}
+                        className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-red-500/10 hover:text-red-400"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
                 </li>
               )

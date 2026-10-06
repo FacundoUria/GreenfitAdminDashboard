@@ -22,9 +22,41 @@ export async function saveExercise({ id, name, muscleGroup, description, videoUr
   return data
 }
 
+// El error se lanza CON el código de Postgres: un 23503 (foreign key) quiere
+// decir que el ejercicio está en uso -- desde
+// supabase_migration_ejercicios_fk_restrict.sql la base no deja borrarlo
+// (antes cascadeaba y desaparecía de todas las rutinas, con los pesos de
+// cada socio). La pantalla lo distingue de cualquier otro error.
+export const CODIGO_EJERCICIO_EN_USO = '23503'
+
 export async function deleteExercise(id) {
   const { error } = await supabase.from('exercises').delete().eq('id', id)
+  if (error) {
+    const err = new Error(error.message)
+    err.code = error.code
+    throw err
+  }
+}
+
+// Dónde se usa cada ejercicio: rutinas de socios, plantillas, socios y pesos
+// cargados. Lo cuenta el servidor (función admin_uso_ejercicios, SECURITY
+// DEFINER con is_admin()): los pesos son de otros socios y la RLS no deja
+// leerlos desde el panel. `ids` null = todos los ejercicios.
+// Devuelve Map exercise_id -> { rutinasAsignadas, plantillas, socios, pesos }.
+export async function fetchUsoEjercicios(ids = null) {
+  const { data, error } = await supabase.rpc('admin_uso_ejercicios', { p_exercise_ids: ids })
   if (error) throw new Error(error.message)
+  return new Map(
+    (data ?? []).map((fila) => [
+      fila.exercise_id,
+      {
+        rutinasAsignadas: fila.rutinas_asignadas ?? 0,
+        plantillas: fila.plantillas ?? 0,
+        socios: fila.socios ?? 0,
+        pesos: fila.pesos ?? 0,
+      },
+    ]),
+  )
 }
 
 // ── Rutinas (plantillas y asignadas) ────────────────────────────────
