@@ -15,15 +15,23 @@ function Toast({ message }) {
 }
 
 // Banner de advertencia persistente (NO un toast que desaparece solo) --
-// pedido explícito: si la reversión trae aviso de que la fecha de Aparatos
-// no se pudo restaurar automática, tiene que verse bien visible, no como un
-// detalle chico. Se cierra a mano, no con un timeout.
-function BannerAdvertencia({ message, onCerrar }) {
-  if (!message) return null
+// pedido explícito: todo lo que la reversión tenga para avisar (fecha de
+// Aparatos cambiada a mano, algo ya vencido, reservas futuras, lo que sigue
+// vigente) tiene que verse bien visible, no como un detalle chico. Un aviso
+// por línea. Se cierra a mano, no con un timeout.
+function BannerAdvertencia({ advertencia, onCerrar }) {
+  if (!advertencia) return null
   return (
-    <div className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200">
+    <div role="alert" className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200">
       <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
-      <p className="flex-1">{message}</p>
+      <div className="flex-1">
+        <p className="font-semibold">{advertencia.titulo}</p>
+        <ul className="mt-1 flex list-disc flex-col gap-1 pl-4">
+          {advertencia.avisos.map((aviso) => (
+            <li key={aviso}>{aviso}</li>
+          ))}
+        </ul>
+      </div>
       <button
         type="button"
         onClick={onCerrar}
@@ -143,7 +151,7 @@ function Pagos() {
       ? `Se le va a quitar: ${fila.detalleRevertidoTexto}.`
       : 'No se encontró el detalle de qué se le otorgó -- puede que este pago sea de antes de este cambio y no se pueda revertir automático.'
     const confirmado = window.confirm(
-      `¿Revertir la acreditación del comprobante de ${fila.socioNombre}?\n\n${detalle}\n\nLo que el socio ya haya usado (clases reservadas) no se recupera -- solo se quita lo que le queda sin usar. Esta acción no se puede deshacer.`,
+      `¿Revertir la acreditación del comprobante de ${fila.socioNombre}?\n\n${detalle}\n\nSe le vence ya todo lo que dio este pago, incluido Aparatos. No se le devuelve el plan anterior. Las reservas futuras no se cancelan. Lo que el socio ya haya usado no se recupera. Esta acción no se puede deshacer.`,
     )
     if (!confirmado) return
 
@@ -151,15 +159,15 @@ function Pagos() {
     setErrorFila(fila.id, null)
     setAdvertencia(null)
     try {
-      const { revertido, aparatosAdvertencia } = await revertirComprobante(fila.id)
+      const { revertido, avisos } = await revertirComprobante(fila.id)
       if (!revertido) {
         window.alert('Este comprobante ya había sido revertido antes (probablemente desde otra pestaña). La lista se va a actualizar.')
         await cargar()
         return
       }
-      if (aparatosAdvertencia) {
+      if (avisos.length > 0) {
         // Bien visible -- banner persistente, no un toast que se va solo.
-        setAdvertencia(`${fila.socioNombre}: ${aparatosAdvertencia}`)
+        setAdvertencia({ titulo: `${fila.socioNombre}: acreditación revertida, con avisos`, avisos })
       } else {
         mostrarToast(`Acreditación revertida -- se le quitó lo que quedaba sin usar a ${fila.socioNombre}.`)
       }
@@ -192,7 +200,7 @@ function Pagos() {
         </button>
       </div>
 
-      <BannerAdvertencia message={advertencia} onCerrar={() => setAdvertencia(null)} />
+      <BannerAdvertencia advertencia={advertencia} onCerrar={() => setAdvertencia(null)} />
 
       {error ? (
         <p className="rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-400">{error}</p>

@@ -43,7 +43,9 @@ export function buildDetalleRevertidoTexto(detalleAcreditacion, disciplinasPorId
       return disciplina ? `${c.credits_otorgados} créditos ${disciplina.name}` : null
     })
     .filter(Boolean)
-  if (detalleAcreditacion.aparatos) partes.unshift('la extensión de Aparatos')
+  // Revertir vence el Aparatos que dio ESTE pago (regla F), no solo "la
+  // extensión": ver supabase_migration_fix_revertir_comprobante_regla_f.sql.
+  if (detalleAcreditacion.aparatos) partes.unshift('Aparatos')
   return partes.join(' + ') || null
 }
 
@@ -144,20 +146,30 @@ export async function fetchHistorialComprobantes(limite = 50) {
   })
 }
 
-// admin_revertir_comprobante(): deshace una acreditación ya hecha (créditos
-// y, si corresponde, la extensión de Aparatos) -- ver la RPC en
-// supabase_migration_auto_acreditar_y_revertir_comprobante.sql. Devuelve
-// `revertido=false` (sin tirar error) si la fila ya estaba anulada -- misma
-// idempotencia que antes tenía aprobarComprobante() con reviewed_at.
-// `aparatosAdvertencia` viene con texto SOLO si Aparatos no se pudo
-// revertir automático (algo lo modificó después) -- la UI tiene que
-// mostrarlo bien visible, no como un detalle chico.
+// La RPC devuelve todos sus avisos en un solo texto, separados por " | "
+// (la columna se sigue llamando aparatos_advertencia para no cambiar la firma).
+export function separarAvisos(texto) {
+  if (!texto) return []
+  return texto
+    .split(' | ')
+    .map((aviso) => aviso.trim())
+    .filter(Boolean)
+}
+
+// admin_revertir_comprobante() -- regla F: vence YA todo lo que dio ese pago
+// (créditos en 0 y Aparatos), sin insertar nada y sin devolver el plan
+// anterior. Ver supabase_migration_fix_revertir_comprobante_regla_f.sql.
+// Devuelve `revertido=false` (sin tirar error) si el pago ya estaba anulado.
+// `avisos`: todo lo que Seba tiene que saber (fecha de Aparatos cambiada a
+// mano, ya vencido, reservas futuras, lo que sigue vigente, socio sin ficha)
+// -- la UI tiene que mostrarlo bien visible, no como un detalle chico. Si
+// algo del pago no se puede identificar, la RPC tira error y no cambia nada.
 export async function revertirComprobante(pagoId) {
   const { data, error } = await supabase.rpc('admin_revertir_comprobante', { p_pagos_socio_id: pagoId })
   if (error) throw new Error(error.message)
   const fila = Array.isArray(data) ? data[0] : data
   return {
     revertido: Boolean(fila?.reversion_ok),
-    aparatosAdvertencia: fila?.aparatos_advertencia ?? null,
+    avisos: separarAvisos(fila?.aparatos_advertencia),
   }
 }

@@ -11,6 +11,7 @@ import {
   fetchHistorialComprobantes,
   fetchCountComprobantesPendientes,
   revertirComprobante,
+  separarAvisos,
   BUCKET_COMPROBANTES,
 } from '../../utils/pagosSocio'
 
@@ -66,7 +67,40 @@ describe('buildDetalleRevertidoTexto (confirmación de "Revertir" -- Fase 3)', (
       creditos: [{ discipline_id: 'disc-crossfit', credits_otorgados: 12 }],
       aparatos: { discipline_id: 'disc-aparatos', fecha_vencimiento_antes: null, fecha_vencimiento_despues: '2026-10-05' },
     }
-    expect(buildDetalleRevertidoTexto(detalle, disciplinasPorId)).toBe('la extensión de Aparatos + 12 créditos CrossFit')
+    // Regla F: se le vence el Aparatos del pago, no solo "la extensión".
+    expect(buildDetalleRevertidoTexto(detalle, disciplinasPorId)).toBe('Aparatos + 12 créditos CrossFit')
+  })
+
+  it('solo Aparatos', () => {
+    const detalle = {
+      creditos: [],
+      aparatos: { discipline_id: 'disc-aparatos', fecha_vencimiento_antes: null, fecha_vencimiento_despues: '2026-10-05' },
+    }
+    expect(buildDetalleRevertidoTexto(detalle, disciplinasPorId)).toBe('Aparatos')
+  })
+})
+
+describe('separarAvisos (la RPC une sus avisos con " | ")', () => {
+  it('sin texto, ninguno', () => {
+    expect(separarAvisos(null)).toEqual([])
+    expect(separarAvisos('')).toEqual([])
+  })
+
+  it('un aviso', () => {
+    expect(separarAvisos('Sigue vigente (no es de este pago, no se tocó): Boxeo (3 créditos) hasta el 06/11/2026.')).toEqual([
+      'Sigue vigente (no es de este pago, no se tocó): Boxeo (3 créditos) hasta el 06/11/2026.',
+    ])
+  })
+
+  it('varios avisos, en el mismo orden', () => {
+    expect(
+      separarAvisos(
+        'El Aparatos de este pago tenía la fecha cambiada a mano (vencía el 21/11/2026): igual se le venció. | Tiene 1 reserva(s) futura(s) pagada(s) con créditos de este pago (CrossFit 19hs del 09/10): no se cancelaron. Si se cancelan, el crédito no vuelve porque el lote quedó vencido.',
+      ),
+    ).toEqual([
+      'El Aparatos de este pago tenía la fecha cambiada a mano (vencía el 21/11/2026): igual se le venció.',
+      'Tiene 1 reserva(s) futura(s) pagada(s) con créditos de este pago (CrossFit 19hs del 09/10): no se cancelaron. Si se cancelan, el crédito no vuelve porque el lote quedó vencido.',
+    ])
   })
 })
 
@@ -238,27 +272,51 @@ describe('fetchHistorialComprobantes (listado de la pantalla Pagos -- Fase 3, re
   })
 })
 
-describe('revertirComprobante (RPC admin_revertir_comprobante -- Fase 3, reemplaza a aprobarComprobante/rechazarComprobante)', () => {
-  it('camino feliz sin advertencia', async () => {
+describe('revertirComprobante (RPC admin_revertir_comprobante -- regla F)', () => {
+  it('camino feliz sin avisos', async () => {
     mockedRpc.mockResolvedValue({ data: [{ reversion_ok: true, aparatos_advertencia: null }], error: null })
     const resultado = await revertirComprobante('pago-1')
     expect(mockedRpc).toHaveBeenCalledWith('admin_revertir_comprobante', { p_pagos_socio_id: 'pago-1' })
-    expect(resultado).toEqual({ revertido: true, aparatosAdvertencia: null })
+    expect(resultado).toEqual({ revertido: true, avisos: [] })
   })
 
-  it('camino feliz CON advertencia de Aparatos (algo lo modificó después) -- se propaga el texto tal cual', async () => {
+  it('camino feliz CON avisos: cada uno por separado, con el texto tal cual', async () => {
     mockedRpc.mockResolvedValue({
-      data: [{ reversion_ok: true, aparatos_advertencia: 'La fecha de vencimiento de Aparatos no se pudo revertir automáticamente -- cambió desde que se otorgó esta acreditación. Ajustala a mano en "Editar Socio".' }],
+      data: [
+        {
+          reversion_ok: true,
+          aparatos_advertencia:
+            'El Aparatos de este pago tenía la fecha cambiada a mano (vencía el 21/11/2026): igual se le venció. | Sigue vigente (no es de este pago, no se tocó): Boxeo (3 créditos) hasta el 06/11/2026.',
+        },
+      ],
       error: null,
     })
     const resultado = await revertirComprobante('pago-1')
-    expect(resultado.revertido).toBe(true)
-    expect(resultado.aparatosAdvertencia).toContain('no se pudo revertir automáticamente')
+    expect(resultado).toEqual({
+      revertido: true,
+      avisos: [
+        'El Aparatos de este pago tenía la fecha cambiada a mano (vencía el 21/11/2026): igual se le venció.',
+        'Sigue vigente (no es de este pago, no se tocó): Boxeo (3 créditos) hasta el 06/11/2026.',
+      ],
+    })
   })
 
   it('si ya había sido revertido antes (otra pestaña), devuelve revertido=false sin tirar error', async () => {
-    mockedRpc.mockResolvedValue({ data: [{ reversion_ok: false, aparatos_advertencia: null }], error: null })
-    expect(await revertirComprobante('pago-1')).toEqual({ revertido: false, aparatosAdvertencia: null })
+    mockedRpc.mockResolvedValue({
+      data: [{ reversion_ok: false, aparatos_advertencia: 'Este pago ya estaba revertido: no se cambió nada.' }],
+      error: null,
+    })
+    expect(await revertirComprobante('pago-1')).toEqual({
+      revertido: false,
+      avisos: ['Este pago ya estaba revertido: no se cambió nada.'],
+    })
+  })
+
+  it('si algo del pago no se puede identificar, la RPC da error y se propaga el mensaje exacto', async () => {
+    const mensaje =
+      'No se pudo revertir: el lote de créditos de CrossFit que figura en este pago no lo creó este pago (puede ser un comprobante de antes del 10/09, cuando los créditos se sumaban a un lote existente). No se cambió nada: corregí los créditos a mano desde Socios.'
+    mockedRpc.mockResolvedValue({ data: null, error: { message: mensaje } })
+    await expect(revertirComprobante('pago-1')).rejects.toThrow(mensaje)
   })
 
   it('con un error real del RPC, lo propaga', async () => {

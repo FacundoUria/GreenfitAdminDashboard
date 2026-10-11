@@ -47,7 +47,7 @@ const PAGO_MARTINA = {
   paquete: 'Aparatos Pase Libre',
   pack: { name: 'Aparatos Pase Libre', creditos: [], incluye_aparatos: true },
   creditosTexto: 'Aparatos Pase Libre',
-  detalleRevertidoTexto: 'la extensión de Aparatos',
+  detalleRevertidoTexto: 'Aparatos',
   monto: 21000,
   fecha: '2026-09-01T09:00:00.000Z',
   estado: 'pagado',
@@ -139,7 +139,7 @@ describe('Pagos (Fase 3 -- historial de comprobantes, acreditación automática 
   })
 
   it('Revertir: pide confirmación describiendo lo que se le va a quitar (detalleRevertidoTexto, no la definición actual del pack), y al confirmar revierte', async () => {
-    revertirComprobante.mockResolvedValue({ revertido: true, aparatosAdvertencia: null })
+    revertirComprobante.mockResolvedValue({ revertido: true, avisos: [] })
     render(<Pagos />)
     await waitFor(() => expect(screen.getByText('Bruno Álvarez')).toBeInTheDocument())
 
@@ -149,6 +149,23 @@ describe('Pagos (Fase 3 -- historial de comprobantes, acreditación automática 
     expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('12 créditos CrossFit'))
     expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('Bruno Álvarez'))
     await waitFor(() => expect(revertirComprobante).toHaveBeenCalledWith('pago-1'))
+  })
+
+  // Regla F: la confirmación tiene que decir la verdad sobre lo que va a pasar.
+  it('Revertir: la confirmación avisa que vence todo lo del pago (incluido Aparatos), que NO devuelve el plan anterior y que NO cancela reservas futuras', async () => {
+    revertirComprobante.mockResolvedValue({ revertido: true, avisos: [] })
+    render(<Pagos />)
+    await waitFor(() => expect(screen.getByText('Martina Ríos')).toBeInTheDocument())
+
+    fireEvent.click(within(screen.getByText('Martina Ríos').closest('li')).getByRole('button', { name: /revertir/i }))
+
+    const texto = confirmSpy.mock.calls[0][0]
+    expect(texto).toContain('Se le va a quitar: Aparatos.')
+    expect(texto).toContain('Se le vence ya todo lo que dio este pago, incluido Aparatos.')
+    expect(texto).toContain('No se le devuelve el plan anterior.')
+    expect(texto).toContain('Las reservas futuras no se cancelan.')
+    expect(texto).toContain('Esta acción no se puede deshacer.')
+    expect(texto).not.toContain('extensión')
   })
 
   it('Revertir: si se cancela la confirmación, no llama al RPC', async () => {
@@ -162,43 +179,64 @@ describe('Pagos (Fase 3 -- historial de comprobantes, acreditación automática 
     expect(revertirComprobante).not.toHaveBeenCalled()
   })
 
-  it('Revertir sin advertencia: muestra un toast de éxito, SIN mostrar el banner de advertencia', async () => {
-    revertirComprobante.mockResolvedValue({ revertido: true, aparatosAdvertencia: null })
+  it('Revertir sin avisos: muestra un toast de éxito con el nombre, SIN mostrar el banner de advertencia', async () => {
+    revertirComprobante.mockResolvedValue({ revertido: true, avisos: [] })
     render(<Pagos />)
     await waitFor(() => expect(screen.getByText('Bruno Álvarez')).toBeInTheDocument())
 
     fireEvent.click(within(screen.getByText('Bruno Álvarez').closest('li')).getByRole('button', { name: /revertir/i }))
 
-    await waitFor(() => expect(screen.getByText(/Acreditación revertida/)).toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.getByText('Acreditación revertida -- se le quitó lo que quedaba sin usar a Bruno Álvarez.')).toBeInTheDocument(),
+    )
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
-  // Pedido explícito: la advertencia de Aparatos tiene que verse BIEN
-  // VISIBLE (banner persistente), no como un detalle chico que se puede
-  // pasar por alto.
-  it('Revertir CON advertencia de Aparatos: muestra un banner persistente y visible con el texto exacto', async () => {
+  // Pedido explícito: los avisos tienen que verse BIEN VISIBLES (banner
+  // persistente, uno por línea), no como un detalle chico que se puede pasar
+  // por alto ni como un toast que se va solo.
+  it('Revertir CON avisos: banner persistente con el nombre del socio y CADA aviso en su propia línea, sin toast', async () => {
+    const AVISOS = [
+      'El Aparatos de este pago tenía la fecha cambiada a mano (vencía el 21/11/2026): igual se le venció.',
+      'Tiene 1 reserva(s) futura(s) pagada(s) con créditos de este pago (CrossFit 19hs del 09/10): no se cancelaron. Si se cancelan, el crédito no vuelve porque el lote quedó vencido.',
+      'Sigue vigente (no es de este pago, no se tocó): Boxeo (3 créditos) hasta el 06/11/2026.',
+    ]
+    revertirComprobante.mockResolvedValue({ revertido: true, avisos: AVISOS })
+    render(<Pagos />)
+    await waitFor(() => expect(screen.getByText('Martina Ríos')).toBeInTheDocument())
+
+    fireEvent.click(within(screen.getByText('Martina Ríos').closest('li')).getByRole('button', { name: /revertir/i }))
+
+    const banner = await screen.findByRole('alert')
+    expect(within(banner).getByText('Martina Ríos: acreditación revertida, con avisos')).toBeInTheDocument()
+    const lineas = within(banner).getAllByRole('listitem').map((li) => li.textContent)
+    expect(lineas).toEqual(AVISOS)
+    expect(screen.queryByText(/Acreditación revertida --/)).not.toBeInTheDocument()
+
+    // Sigue ahí hasta que Seba lo cierra a mano.
+    await new Promise((r) => setTimeout(r, 50))
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('Cerrar advertencia'))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('Revertir con un solo aviso (lo del pago ya estaba vencido): también va al banner, no al toast', async () => {
     revertirComprobante.mockResolvedValue({
       revertido: true,
-      aparatosAdvertencia: 'La fecha de vencimiento de Aparatos no se pudo revertir automáticamente -- cambió desde que se otorgó esta acreditación. Ajustala a mano en "Editar Socio".',
+      avisos: ['El Aparatos de este pago ya estaba vencido (venció, lo reemplazó otro cobro o se quitó a mano): no había nada para quitar.'],
     })
     render(<Pagos />)
     await waitFor(() => expect(screen.getByText('Martina Ríos')).toBeInTheDocument())
 
     fireEvent.click(within(screen.getByText('Martina Ríos').closest('li')).getByRole('button', { name: /revertir/i }))
 
-    await waitFor(() =>
-      expect(screen.getByText(/no se pudo revertir automáticamente/)).toBeInTheDocument()
-    )
-    // El nombre del socio va incluido en el banner, para que quede claro a
-    // quién corresponde ajustar la fecha a mano (regex compuesta -- "Martina
-    // Ríos" sola matchea también la fila de la lista, no solo el banner).
-    expect(screen.getByText(/Martina Ríos: La fecha/)).toBeInTheDocument()
-    // El banner se puede cerrar a mano.
-    fireEvent.click(screen.getByLabelText('Cerrar advertencia'))
-    expect(screen.queryByText(/no se pudo revertir automáticamente/)).not.toBeInTheDocument()
+    const banner = await screen.findByRole('alert')
+    expect(banner).toHaveTextContent('ya estaba vencido')
+    expect(screen.queryByText(/Acreditación revertida --/)).not.toBeInTheDocument()
   })
 
   it('Revertir: si el comprobante ya había sido revertido por otra pestaña (revertido=false), avisa y refresca la lista real', async () => {
-    revertirComprobante.mockResolvedValue({ revertido: false, aparatosAdvertencia: null })
+    revertirComprobante.mockResolvedValue({ revertido: false, avisos: ['Este pago ya estaba revertido: no se cambió nada.'] })
     fetchHistorialComprobantes.mockResolvedValueOnce([PAGO_BRUNO, PAGO_MARTINA]).mockResolvedValueOnce([{ ...PAGO_BRUNO, estado: 'anulado' }, PAGO_MARTINA])
     render(<Pagos />)
     await waitFor(() => expect(screen.getByText('Bruno Álvarez')).toBeInTheDocument())
@@ -221,6 +259,53 @@ describe('Pagos (Fase 3 -- historial de comprobantes, acreditación automática 
     await waitFor(() => expect(screen.getByText('No existe ningún pago con ese id.')).toBeInTheDocument())
     expect(screen.getByText('Bruno Álvarez')).toBeInTheDocument()
     expect(within(filaBruno).getByRole('button', { name: /revertir/i })).not.toBeDisabled()
+  })
+
+  // Si algo del pago no se puede identificar, la RPC no cambia nada y lo dice:
+  // ese mensaje completo tiene que quedar visible bajo ESA fila.
+  it('Revertir: "No se pudo revertir … No se cambió nada" se ve completo bajo esa fila, la fila sigue "Pagado" y no hay toast', async () => {
+    const mensaje =
+      'No se pudo revertir: el lote de créditos de CrossFit que figura en este pago no lo creó este pago (puede ser un comprobante de antes del 10/09, cuando los créditos se sumaban a un lote existente). No se cambió nada: corregí los créditos a mano desde Socios.'
+    revertirComprobante.mockRejectedValue(new Error(mensaje))
+    render(<Pagos />)
+    await waitFor(() => expect(screen.getByText('Bruno Álvarez')).toBeInTheDocument())
+
+    const filaBruno = screen.getByText('Bruno Álvarez').closest('li')
+    fireEvent.click(within(filaBruno).getByRole('button', { name: /revertir/i }))
+
+    await waitFor(() => expect(within(filaBruno).getByText(mensaje)).toBeInTheDocument())
+    expect(within(screen.getByText('Martina Ríos').closest('li')).queryByText(mensaje)).not.toBeInTheDocument()
+    expect(within(filaBruno).getByText('Pagado')).toBeInTheDocument()
+    expect(screen.queryByText(/Acreditación revertida/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('Revertir: un error de red también se ve en la fila (nunca en silencio)', async () => {
+    revertirComprobante.mockRejectedValue(new Error('Failed to fetch'))
+    render(<Pagos />)
+    await waitFor(() => expect(screen.getByText('Bruno Álvarez')).toBeInTheDocument())
+
+    const filaBruno = screen.getByText('Bruno Álvarez').closest('li')
+    fireEvent.click(within(filaBruno).getByRole('button', { name: /revertir/i }))
+
+    await waitFor(() => expect(within(filaBruno).getByText('Failed to fetch')).toBeInTheDocument())
+  })
+
+  it('Revertir: mientras procesa, el botón queda deshabilitado (un doble click no revierte dos veces)', async () => {
+    let resolver
+    revertirComprobante.mockReturnValue(new Promise((r) => (resolver = r)))
+    render(<Pagos />)
+    await waitFor(() => expect(screen.getByText('Bruno Álvarez')).toBeInTheDocument())
+
+    const filaBruno = screen.getByText('Bruno Álvarez').closest('li')
+    const boton = within(filaBruno).getByRole('button', { name: /revertir/i })
+    fireEvent.click(boton)
+    await waitFor(() => expect(boton).toBeDisabled())
+    fireEvent.click(boton)
+    expect(revertirComprobante).toHaveBeenCalledTimes(1)
+
+    resolver({ revertido: true, avisos: [] })
+    await waitFor(() => expect(boton).not.toBeDisabled())
   })
 
   it('se suscribe en vivo a pagos_socio y refresca la lista cuando llega un evento (comprobante nuevo, o revertido desde otra pestaña)', async () => {
