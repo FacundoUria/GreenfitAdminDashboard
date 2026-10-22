@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { CreditCard, RefreshCw, X } from 'lucide-react'
 import { esPlanDeCreditos, formatearPlanes, normalizarPlanes, PLANES_DISPONIBLES } from '../utils/planes'
-import { formatFecha, hoyISO, proximoVencimiento, sumarDias, toISODate } from '../utils/fecha'
+import { formatFecha, proximoVencimiento, sumarDias, toISODate } from '../utils/fecha'
+import { ahoraEnArgentina } from '../utils/ahoraArgentina'
 import { fechaVencimientoParaCobro } from '../utils/fechaPlan'
 
 const PACKS_RENOVACION = [4, 8, 12, 20]
@@ -47,14 +48,14 @@ function armarPlanesParaElegir(disciplinasActivas) {
 // decía "está vencido" estando al día): es fechaVencimientoParaCobro(), que
 // sale de sus créditos/Aparatos reales (ver utils/fechaPlan.js).
 function fechaInicioSugerida(vencimientoActual) {
-  const hoy = hoyISO()
+  const hoy = ahoraEnArgentina().fecha
   if (!vencimientoActual) return hoy
   return vencimientoActual < hoy ? hoy : vencimientoActual
 }
 
 function RegistrarPagoModal({ socio, disciplinasActivas = [], onClose, onConfirmar }) {
   const [planes, setPlanes] = useState(() => normalizarPlanes(socio.plan))
-  const vencimientoActual = fechaVencimientoParaCobro(socio, hoyISO())
+  const vencimientoActual = fechaVencimientoParaCobro(socio, ahoraEnArgentina().fecha)
   const [error, setError] = useState(null)
 
   const disciplinaPorNombre = useMemo(
@@ -108,7 +109,7 @@ function RegistrarPagoModal({ socio, disciplinasActivas = [], onClose, onConfirm
     // `dia_corte` viejo (ese seguía anclado al ciclo ya vencido). Con eso,
     // proximoVencimiento() da exactamente "HOY + 1 mes". Socio activo: se
     // mantiene el `dia_corte` real del socio, igual que siempre.
-    const vencido = vencimientoActual && vencimientoActual < hoyISO()
+    const vencido = vencimientoActual && vencimientoActual < ahoraEnArgentina().fecha
     const diaCorte = vencido
       ? new Date(`${inicio}T00:00:00`).getDate()
       : (socio.diaCorte ?? new Date(`${inicio}T00:00:00`).getDate())
@@ -293,7 +294,7 @@ function RegistrarPagoModal({ socio, disciplinasActivas = [], onClose, onConfirm
               <div className="flex items-start gap-2 text-sm text-gray-300">
                 <RefreshCw className="mt-0.5 h-4 w-4 shrink-0 text-greenfit-primary" />
                 <p>
-                  {vencimientoActual && vencimientoActual < hoyISO()
+                  {vencimientoActual && vencimientoActual < ahoraEnArgentina().fecha
                     ? `El socio está vencido (venció el ${formatFecha(vencimientoActual)}) -- por defecto se sugiere arrancar la cuota HOY, con 1 mes de vigencia.`
                     : `Por defecto se sugiere 1 mes desde ${
                         vencimientoActual ? `el vencimiento actual (${formatFecha(vencimientoActual)})` : 'hoy'

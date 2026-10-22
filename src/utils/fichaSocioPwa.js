@@ -1,5 +1,4 @@
 import { supabase } from '../lib/supabaseClient'
-import { hoyISO } from './fecha'
 import { ahoraEnArgentina } from './ahoraArgentina'
 
 // Puente de lectura entre el panel admin (tabla legacy `socios`) y el schema
@@ -380,7 +379,7 @@ export async function fetchHistorialAsistencias(userId) {
       .from('bookings')
       .select('id, booking_date, attended, classes(title, instructor)')
       .eq('user_id', userId)
-      .lte('booking_date', hoyISO())
+      .lte('booking_date', ahoraEnArgentina().fecha)
       .order('booking_date', { ascending: false }),
     supabase
       .from('xp_events')

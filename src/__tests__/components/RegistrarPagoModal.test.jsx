@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import RegistrarPagoModal from '../../components/RegistrarPagoModal'
+import { ahoraEnArgentina } from '../../utils/ahoraArgentina'
 
 // Socio con plan de VENCIMIENTO (Pase Libre) -- es el único caso en el que
 // el modal muestra los datepickers de fecha de inicio/vencimiento en vez
@@ -60,7 +61,7 @@ describe('RegistrarPagoModal -- fechas de inicio/vencimiento personalizables', (
 
   it('precarga fecha de inicio = hoy y vencimiento = +1 mes cuando el socio nunca pagó', () => {
     render(<RegistrarPagoModal socio={SOCIO_PASE_LIBRE} onClose={vi.fn()} onConfirmar={vi.fn()} />)
-    const hoy = new Date().toISOString().slice(0, 10)
+    const hoy = ahoraEnArgentina().fecha
     expect(screen.getByLabelText('Fecha de inicio')).toHaveValue(hoy)
     // No fijamos el día exacto (depende del mes), solo que quedó precargada
     // con ALGO posterior a la fecha de inicio -- el detalle de "+1 mes
@@ -112,7 +113,7 @@ describe('RegistrarPagoModal -- sugerencia inteligente de fechas (EXCLUSIVA de e
   // (no la fecha de vencimiento vieja, ya pasada), y el vencimiento sugerido
   // HOY + 1 mes.
   it('socio vencido: sugiere fecha de inicio = HOY (no la fecha vencida vieja) y vencimiento = HOY + 1 mes', () => {
-    const hoy = new Date().toISOString().slice(0, 10)
+    const hoy = ahoraEnArgentina().fecha
     const socioVencido = {
       id: 's3',
       nombre: 'Bruno',
@@ -140,7 +141,7 @@ describe('RegistrarPagoModal -- sugerencia inteligente de fechas (EXCLUSIVA de e
   // Caso 2: socio ACTIVO (vencimiento futuro) -- se mantiene la sugerencia
   // de siempre, anclada al vencimiento vigente (no a hoy).
   it('socio activo (vencimiento futuro): mantiene la sugerencia original -- inicio = vencimiento actual', () => {
-    const hoy = new Date().toISOString().slice(0, 10)
+    const hoy = ahoraEnArgentina().fecha
     const vencimientoFuturo = sumarDiasStr(hoy, 15)
     const socioActivo = {
       id: 's4',
@@ -170,8 +171,10 @@ function toISODateLocal(fecha) {
 // ETAPA 4 -- el "vencimiento actual" del socio sale de sus créditos/Aparatos
 // reales (utils/fechaPlan.js), no de socios.fecha_vencimiento a secas.
 describe('RegistrarPagoModal -- el vencimiento sale de user_credits, no de la columna vieja', () => {
+  // Cuenta desde el "hoy" de Argentina (el mismo que usa el modal), no desde
+  // el día local de la PC.
   const enDias = (dias) => {
-    const fecha = new Date()
+    const fecha = new Date(`${ahoraEnArgentina().fecha}T00:00:00`)
     fecha.setDate(fecha.getDate() + dias)
     return toISODateLocal(fecha)
   }
@@ -208,4 +211,75 @@ describe('RegistrarPagoModal -- el vencimiento sale de user_credits, no de la co
     expect(screen.getByText(/El socio está vencido/)).toBeInTheDocument()
     expect(screen.getByLabelText('Fecha de inicio')).toHaveValue(enDias(0))
   })
+})
+
+// Bug real: "hoy" salía de hoyISO() (UTC) -- de 21:00 a 23:59 de Argentina el
+// modal proponía arrancar la cuota MAÑANA, y un socio que vencía hoy se
+// trataba como "vencido". Instantes en UTC (con Z): el resultado no depende
+// de la zona de la PC. Jueves 22/10/2026 -> viernes 23/10/2026.
+describe('RegistrarPagoModal -- "hoy" en hora de Argentina (franja 21:00 a 23:59)', () => {
+  afterEach(() => vi.useRealTimers())
+
+  const INSTANTES = [
+    ['20:59', '2026-10-22T23:59:00Z'],
+    ['21:00', '2026-10-23T00:00:00Z'],
+    ['23:59', '2026-10-23T02:59:00Z'],
+    ['00:00', '2026-10-23T03:00:00Z'],
+  ]
+
+  const conVencimiento = (fechaVencimiento, diaCorte) => ({ ...SOCIO_PASE_LIBRE, id: `s-${fechaVencimiento}`, fechaVencimiento, diaCorte })
+
+  // [caso, socio, esperado por instante (20:59, 21:00, 23:59, 00:00)]
+  // esperado = [inicio, vencimiento, mensaje]
+  const VENCIDO = /El socio está vencido/
+  const DESDE_VENCIMIENTO = /desde el vencimiento actual/
+  const DESDE_HOY = /1 mes desde hoy/
+  const CASOS = [
+    ['socio sin pagos', SOCIO_PASE_LIBRE, [
+      ['2026-10-22', '2026-11-22', DESDE_HOY],
+      ['2026-10-22', '2026-11-22', DESDE_HOY],
+      ['2026-10-22', '2026-11-22', DESDE_HOY],
+      ['2026-10-23', '2026-11-23', DESDE_HOY],
+    ]],
+    ['socio vencido (12/10)', conVencimiento('2026-10-12', 5), [
+      ['2026-10-22', '2026-11-22', VENCIDO],
+      ['2026-10-22', '2026-11-22', VENCIDO],
+      ['2026-10-22', '2026-11-22', VENCIDO],
+      ['2026-10-23', '2026-11-23', VENCIDO],
+    ]],
+    ['socio que vence HOY (22/10, corte 22)', conVencimiento('2026-10-22', 22), [
+      ['2026-10-22', '2026-11-22', DESDE_VENCIMIENTO],
+      ['2026-10-22', '2026-11-22', DESDE_VENCIMIENTO],
+      ['2026-10-22', '2026-11-22', DESDE_VENCIMIENTO],
+      ['2026-10-23', '2026-11-23', VENCIDO], // a las 00:00 ya venció ayer
+    ]],
+    ['socio activo (vence 30/10, corte 30)', conVencimiento('2026-10-30', 30), [
+      ['2026-10-30', '2026-11-30', DESDE_VENCIMIENTO],
+      ['2026-10-30', '2026-11-30', DESDE_VENCIMIENTO],
+      ['2026-10-30', '2026-11-30', DESDE_VENCIMIENTO],
+      ['2026-10-30', '2026-11-30', DESDE_VENCIMIENTO],
+    ]],
+  ]
+
+  for (const [caso, socio, esperados] of CASOS) {
+    INSTANTES.forEach(([hora, instante], i) => {
+      const [inicio, vencimiento, mensaje] = esperados[i]
+      it(`${caso}, ${hora} de Argentina: inicio ${inicio}, vencimiento ${vencimiento}`, () => {
+        vi.useFakeTimers({ toFake: ['Date'] })
+        vi.setSystemTime(new Date(instante))
+        const onConfirmar = vi.fn().mockResolvedValue(undefined)
+        render(<RegistrarPagoModal socio={socio} onClose={vi.fn()} onConfirmar={onConfirmar} />)
+
+        expect(screen.getByLabelText('Fecha de inicio')).toHaveValue(inicio)
+        expect(screen.getByLabelText('Fecha de vencimiento')).toHaveValue(vencimiento)
+        expect(screen.getByText(mensaje)).toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Confirmar' }))
+        expect(onConfirmar).toHaveBeenCalledWith(
+          socio,
+          expect.objectContaining({ vencimiento: { fechaInicio: inicio, fechaVencimiento: vencimiento } }),
+        )
+      })
+    })
+  }
 })

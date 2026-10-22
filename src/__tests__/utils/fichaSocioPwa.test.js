@@ -388,6 +388,30 @@ describe('fetchCreditosPorDisciplina / fetchAparatosVigentePorDni -- paginación
   })
 })
 
+// Bug real: el tope de fecha del historial salía de hoyISO() (UTC) -- de 21:00
+// a 23:59 de Argentina incluía las reservas de MAÑANA como "Asistió".
+describe('fetchHistorialAsistencias -- "hoy" en hora de Argentina (franja 21:00 a 23:59)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.useFakeTimers({ toFake: ['Date'] })
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it.each([
+    ['20:59', '2026-10-22T23:59:00Z', '2026-10-22'],
+    ['21:00', '2026-10-23T00:00:00Z', '2026-10-22'],
+    ['23:59', '2026-10-23T02:59:00Z', '2026-10-22'],
+    ['00:00', '2026-10-23T03:00:00Z', '2026-10-23'],
+  ])('%s de Argentina: pide reservas hasta el %s', async (_hora, instante, tope) => {
+    vi.setSystemTime(new Date(instante))
+    const chainBookings = makeChain({ data: [], error: null })
+    mockedFrom.mockImplementation((tabla) => (tabla === 'bookings' ? chainBookings : makeChain({ data: [], error: null })))
+
+    await fetchHistorialAsistencias('u1')
+    expect(chainBookings.lte).toHaveBeenCalledWith('booking_date', tope)
+  })
+})
+
 describe('fetchHistorialAsistencias (unifica Reservas de Clases + Check-in "¡Hoy entrené!")', () => {
   beforeEach(() => vi.clearAllMocks())
 

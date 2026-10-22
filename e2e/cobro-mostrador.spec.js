@@ -3,6 +3,7 @@ import { loginComoAdmin, ADMIN_DEMO } from './support/auth.js'
 import { tablasBase } from './support/fixtures.js'
 import { irASocios } from './support/nav.js'
 import { mockAdminAcreditarCreditosManual } from './support/rpcMocks.js'
+import { ahoraEnArgentina } from '../src/utils/ahoraArgentina.js'
 
 // Flujo completo de "Cobro Mostrador": Seba selecciona un socio, toca
 // "Cobrar", le asigna créditos a una disciplina puntual (ej. Kickstrike) y
@@ -342,9 +343,9 @@ test('Registrar Pago: si falta la columna fecha_inicio_cuota (migración pendien
   expect(tables.socios[0].fecha_inicio_cuota).toBeUndefined()
 })
 
-// Mismo criterio UTC que registrar-pago-fechas.spec.js -- evita que un test
-// corrido cerca de medianoche en un huso detrás de UTC calcule "hoy" distinto
-// de lo que calcula el browser.
+// Aritmética de fechas en UTC (sumar días a un "YYYY-MM-DD" sin que la zona
+// de la PC lo corra). El "hoy" de referencia sale de ahoraEnArgentina(), el
+// mismo que usa el modal -- antes era UTC y fallaba de 21:00 a 23:59.
 function isoUTC(date) {
   return date.toISOString().slice(0, 10)
 }
@@ -411,7 +412,7 @@ test('Registrar Pago: una disciplina nueva (por vencimiento, con días configura
   // código, sale de `disciplines`.
   await expect(page.getByText('Yoga Terapéutico', { exact: true })).toBeVisible()
 
-  const hoy = isoUTC(new Date())
+  const hoy = ahoraEnArgentina().fecha
   const vencimientoEsperado = sumarDiasUTC(hoy, 45)
 
   await page.getByText('Yoga Terapéutico', { exact: true }).click()

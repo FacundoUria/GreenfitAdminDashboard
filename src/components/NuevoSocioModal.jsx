@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { X } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
-import { diferenciaEnDias, hoyISO, proximoVencimiento, toISODate } from '../utils/fecha'
+import { diferenciaEnDias, proximoVencimiento, toISODate } from '../utils/fecha'
+import { ahoraEnArgentina } from '../utils/ahoraArgentina'
 import { PLANES_DISPONIBLES, normalizarPlanes, planesDeCreditos, tienePlanDeVencimiento } from '../utils/planes'
 import { resolverDisciplinaId } from '../utils/creditosPwa'
 import { resolverUserIdPorDni } from '../utils/fichaSocioPwa'
@@ -39,7 +40,7 @@ function formInicial(socio) {
       email: socio.email ?? '',
       telefono: socio.telefono ?? '',
       planes: normalizarPlanes(socio.plan),
-      fechaInicio: hoyISO(),
+      fechaInicio: ahoraEnArgentina().fecha,
       creditosPorDisciplina: {},
     }
   }
@@ -51,7 +52,7 @@ function formInicial(socio) {
     email: '',
     telefono: '',
     planes: [],
-    fechaInicio: hoyISO(),
+    fechaInicio: ahoraEnArgentina().fecha,
     creditosPorDisciplina: {},
   }
 }
@@ -374,7 +375,7 @@ function NuevoSocioModal({
       }
       resultado = await supabase.from('socios').update(cambios).eq('id', socio.id).select()
     } else {
-      const fechaInicio = form.fechaInicio || hoyISO()
+      const fechaInicio = form.fechaInicio || ahoraEnArgentina().fecha
       fechaInicioAlta = fechaInicio
       // El día de alta fija el "día de corte" del ciclo de cobro del socio para siempre.
       const diaCorte = new Date(`${fechaInicio}T00:00:00`).getDate()

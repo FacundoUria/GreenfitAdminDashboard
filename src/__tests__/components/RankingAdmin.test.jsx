@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 
 vi.mock('../../utils/comunidadAdmin', () => ({
@@ -143,5 +143,34 @@ describe('RankingAdmin (Comunidad > Ranking -- panel Admin)', () => {
     await waitFor(() => expect(screen.getByText('Martina Ríos')).toBeTruthy())
 
     expect(screen.queryByText(/Reseteo programado/)).toBeNull()
+  })
+})
+
+// Bug real: el aviso "ya llegó la fecha" comparaba contra hoyISO() (UTC) --
+// de 21:00 a 23:59 de Argentina aparecía un día antes. Instantes en UTC.
+describe('RankingAdmin -- aviso de reseteo con el "hoy" de Argentina (franja 21:00 a 23:59)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    fetchDisciplinasGrupalesAdmin.mockResolvedValue([])
+    fetchRankingAdmin.mockResolvedValue(RANKING)
+    vi.useFakeTimers({ toFake: ['Date'] })
+  })
+  afterEach(() => vi.useRealTimers())
+
+  // [hora, instante, ¿vencido con reseteo el 23/10?, ¿vencido con reseteo el 22/10?]
+  it.each([
+    ['20:59', '2026-10-22T23:59:00Z', false, true],
+    ['21:00', '2026-10-23T00:00:00Z', false, true],
+    ['23:59', '2026-10-23T02:59:00Z', false, true],
+    ['00:00', '2026-10-23T03:00:00Z', true, true],
+  ])('%s de Argentina', async (_hora, instante, vencido23, vencido22) => {
+    vi.setSystemTime(new Date(instante))
+    for (const [reseteo, vencido] of [['2026-10-23', vencido23], ['2026-10-22', vencido22]]) {
+      mockUseConfiguracion.mockReturnValue({ configuracion: { proximo_reseteo_ranking: reseteo } })
+      const { unmount } = render(<RankingAdmin />)
+      await waitFor(() => expect(screen.getByText('Martina Ríos')).toBeTruthy())
+      expect(Boolean(screen.queryByText(/ya llegó la fecha/))).toBe(vencido)
+      unmount()
+    }
   })
 })

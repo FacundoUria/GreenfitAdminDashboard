@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { AlertTriangle, Loader2, RotateCcw } from 'lucide-react'
 import { fetchDisciplinasGrupalesAdmin, fetchRankingAdmin, resetearRankingAdmin } from '../../utils/comunidadAdmin'
 import { useConfiguracion } from '../../context/useConfiguracion'
-import { formatFecha, hoyISO } from '../../utils/fecha'
+import { formatFecha } from '../../utils/fecha'
+import { ahoraEnArgentina } from '../../utils/ahoraArgentina'
 
 function iniciales(nombre) {
   const partes = (nombre ?? '?').trim().split(/\s+/)
@@ -181,7 +182,7 @@ function RankingAdmin() {
   const podio = ranking.slice(0, 3)
   const resto = ranking.slice(3)
   const proximoReseteo = configuracion?.proximo_reseteo_ranking ?? null
-  const reseteoVencido = Boolean(proximoReseteo && proximoReseteo <= hoyISO())
+  const reseteoVencido = Boolean(proximoReseteo && proximoReseteo <= ahoraEnArgentina().fecha)
 
   return (
     <div className="flex flex-col gap-5">

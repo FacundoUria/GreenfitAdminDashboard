@@ -1,13 +1,12 @@
 // Fecha, hora y día de la semana de AHORA en hora de Argentina, sin depender
-// de la zona horaria de la PC. Por ahora la usa SOLO el Check-in Rápido
-// (buscarSociosClaseActiva en fichaSocioPwa.js).
+// de la zona horaria de la PC. La usan el Check-in Rápido, el modal de cobro,
+// el alta de socio, el cobro en Socios, el historial de la Ficha 360° y el
+// aviso de reseteo del Ranking.
 //
-// Bug real: el Check-in armaba la fecha de "hoy" con toISOString() (UTC) --
-// entre las 21:00 y las 23:59 de Argentina eso ya es mañana, así que buscaba
-// las reservas del día siguiente para la clase de esa noche.
-//
-// hoyISO() (fecha.js) tiene el mismo problema pero la usan Pagos/Socios para
-// cobros y vencimientos -- se corrige en otra tanda, no se reemplaza acá.
+// Bug real: esos lugares armaban la fecha de "hoy" con toISOString() (UTC),
+// directo o vía hoyISO() de fecha.js -- entre las 21:00 y las 23:59 de
+// Argentina eso ya es mañana. hoyISO() queda sin cambios (y sin uso); solo
+// cambia de dónde sale "hoy", no cómo se calcula ningún vencimiento.
 
 const ZONA_ARGENTINA = 'America/Argentina/Mendoza'
 

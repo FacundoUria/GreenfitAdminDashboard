@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 
 vi.mock('../../lib/supabaseClient', () => ({
@@ -375,3 +375,79 @@ describe('NuevoSocioModal -- sincroniza el teléfono editado con profiles.phone 
 // modelo de plan único: la única fecha válida es la que el socio ya tiene
 // activo, y se maneja con "Cobrar" o con "+ Agregar disciplina"
 // (CreditosEditablesSocio.jsx), no con un date picker suelto acá.
+
+// Bug real: la Fecha de Inicio del alta salía de hoyISO() (UTC) -- de 21:00 a
+// 23:59 de Argentina proponía MAÑANA, y con ella quedaban ultimo_pago,
+// dia_corte, fecha_vencimiento y el p_fecha_inicio de la RPC un día corridos.
+// Instantes en UTC (con Z): no depende de la zona de la PC.
+describe('NuevoSocioModal -- "hoy" del alta en hora de Argentina (franja 21:00 a 23:59)', () => {
+  let socioInsertado
+  beforeEach(() => {
+    vi.clearAllMocks()
+    socioInsertado = null
+    window.alert = vi.fn()
+    supabase.rpc.mockResolvedValue({ data: null, error: null })
+    supabase.from.mockImplementation((tabla) => {
+      if (tabla === 'socios') {
+        return {
+          insert: (fila) => {
+            socioInsertado = fila
+            return { select: () => Promise.resolve({ data: [{ id: 'nuevo-1' }], error: null }) }
+          },
+        }
+      }
+      // profiles: la cuenta de la app ya existe -> corre la RPC de acreditación.
+      return { select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: { id: 'u-nuevo' }, error: null }) }) }) }
+    })
+  })
+  afterEach(() => vi.useRealTimers())
+
+  function completarAlta() {
+    fireEvent.change(screen.getByLabelText('Nombre'), { target: { value: 'Facundo' } })
+    fireEvent.change(screen.getByLabelText('Apellido'), { target: { value: 'Test' } })
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'facu@test.com' } })
+    fireEvent.change(screen.getByLabelText('DNI'), { target: { value: '30999888' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Pase Libre' }))
+  }
+
+  it.each([
+    ['20:59', '2026-10-22T23:59:00Z', '2026-10-22'],
+    ['21:00', '2026-10-23T00:00:00Z', '2026-10-22'],
+    ['23:59', '2026-10-23T02:59:00Z', '2026-10-22'],
+    ['00:00', '2026-10-23T03:00:00Z', '2026-10-23'],
+  ])('%s de Argentina: la Fecha de Inicio propuesta es %s', (_hora, instante, esperada) => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(instante))
+    render(<NuevoSocioModal onClose={vi.fn()} onSaved={vi.fn()} />)
+    expect(screen.getByLabelText('Fecha de Inicio')).toHaveValue(esperada)
+  })
+
+  it('21:00 de Argentina: el alta guarda 22/10 como inicio, corte 22, vencimiento 22/11 y manda p_fecha_inicio 22/10', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-23T00:00:00Z'))
+    render(<NuevoSocioModal onClose={vi.fn()} onSaved={vi.fn()} />)
+    completarAlta()
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    await waitFor(() => expect(supabase.rpc).toHaveBeenCalledWith('admin_acreditar_creditos_manual', expect.anything()))
+    expect(socioInsertado).toEqual(
+      expect.objectContaining({ ultimo_pago: '2026-10-22', dia_corte: 22, fecha_vencimiento: '2026-11-22' }),
+    )
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      'admin_acreditar_creditos_manual',
+      expect.objectContaining({ p_fecha_inicio: '2026-10-22', p_dias_vigencia: 31, p_incluye_aparatos: true }),
+    )
+  })
+
+  it('21:00 de Argentina con la Fecha de Inicio vacía: el respaldo también usa 22/10', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-23T00:00:00Z'))
+    render(<NuevoSocioModal onClose={vi.fn()} onSaved={vi.fn()} />)
+    completarAlta()
+    fireEvent.change(screen.getByLabelText('Fecha de Inicio'), { target: { value: '' } })
+    fireEvent.submit(screen.getByRole('button', { name: 'Guardar' }).closest('form'))
+
+    await waitFor(() => expect(socioInsertado).not.toBeNull())
+    expect(socioInsertado).toEqual(expect.objectContaining({ ultimo_pago: '2026-10-22', dia_corte: 22, fecha_vencimiento: '2026-11-22' }))
+  })
+})

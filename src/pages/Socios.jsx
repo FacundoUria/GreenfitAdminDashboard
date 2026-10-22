@@ -10,7 +10,8 @@ import {
   Users,
 } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
-import { diferenciaEnDias, esDelMesActual, formatFecha, hoyISO } from '../utils/fecha'
+import { diferenciaEnDias, esDelMesActual, formatFecha } from '../utils/fecha'
+import { ahoraEnArgentina } from '../utils/ahoraArgentina'
 import { estadoOperativoSocio, getSocioMetrics } from '../utils/socioMetrics'
 import { diasHastaVencimientoPlan } from '../utils/fechaPlan'
 import { formatearPlanes, planesDeVencimiento, PLANES_DISPONIBLES } from '../utils/planes'
@@ -445,7 +446,7 @@ function Socios() {
   }
 
   const handleConfirmarPago = async (socio, payload) => {
-    const hoy = hoyISO()
+    const hoy = ahoraEnArgentina().fecha
     const cambios = { ultimo_pago: hoy }
 
     if (payload.plan) {

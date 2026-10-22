@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import { loginComoAdmin } from './support/auth.js'
 import { tablasBase } from './support/fixtures.js'
 import { irASocios } from './support/nav.js'
+import { ahoraEnArgentina } from '../src/utils/ahoraArgentina.js'
 
 // Lógica inteligente de fechas -- EXCLUSIVA de "Registrar Pago". Cubre los
 // dos casos pedidos.
@@ -14,9 +15,9 @@ import { irASocios } from './support/nav.js'
 // válida bajo el modelo de plan único es la que el socio ya tiene activo,
 // y se maneja con "Cobrar" o "+ Agregar disciplina" (CreditosEditablesSocio.jsx).
 
-// Mismo criterio UTC que registrar-pago-fechas.spec.js/cobro-mostrador.spec.js
-// -- evita que un test corrido cerca de medianoche en un huso detrás de UTC
-// calcule "hoy" distinto de lo que calcula el browser.
+// Aritmética de fechas en UTC (sumar días a un "YYYY-MM-DD" sin que la zona
+// de la PC lo corra). El "hoy" de referencia sale de ahoraEnArgentina(), el
+// mismo que usa el modal -- antes era UTC y fallaba de 21:00 a 23:59.
 function isoUTC(date) {
   return date.toISOString().slice(0, 10)
 }
@@ -26,7 +27,7 @@ function sumarDiasUTC(iso, dias) {
   return isoUTC(fecha)
 }
 
-const HOY = isoUTC(new Date())
+const HOY = ahoraEnArgentina().fecha
 const VENCIMIENTO_VENCIDO = sumarDiasUTC(HOY, -10) // venció hace 10 días
 const VENCIMIENTO_FUTURO = sumarDiasUTC(HOY, 15) // vence en 15 días
 
