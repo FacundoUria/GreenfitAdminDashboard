@@ -95,14 +95,14 @@ test('Check-in Rápido otorga +100 XP y respeta el límite de 1 por día', async
 //     wraparound y el filtro la descarta. Congelar el reloj evita pelear
 //     contra esa ventana angosta en vez de contra la lógica que se quiere
 //     probar.
-const HORA_CONGELADA = new Date('2026-08-10T18:10:00') // Lunes 18:10 -- clase de Lunes 18 a 19 en curso.
+const HORA_CONGELADA = new Date('2026-08-10T18:10:00-03:00') // Lunes 18:10 de Argentina -- clase de Lunes 18 a 19 en curso.
 
 const CLASE_ACTIVA = {
   id: 'clase-e2e-activa',
   title: 'CrossFit 18hs',
   start_time: '18:00:00',
   end_time: '19:00:00',
-  days_of_week: [1], // Lunes -- HORA_CONGELADA.getDay() === 1.
+  days_of_week: [1], // Lunes -- 10/08/2026 en Argentina.
   discipline: { name: 'CrossFit' },
 }
 
@@ -110,7 +110,7 @@ const INSCRIPTO_CLASE = {
   id: 'booking-e2e-activa',
   user_id: 'e2e-profile-inscripto-clase',
   class_id: 'clase-e2e-activa',
-  booking_date: HORA_CONGELADA.toISOString().slice(0, 10), // misma fecha (UTC) que usa buscarSociosClaseActiva para filtrar bookings de "hoy".
+  booking_date: '2026-08-10', // "hoy" en hora de Argentina para HORA_CONGELADA (escrita a mano, no derivada del reloj).
   attended: false,
   profiles: { full_name: 'Carla Suárez', dni: '35444555' },
 }
@@ -148,3 +148,65 @@ test('un inscripto que ya tiene la asistencia marcada aparece directo como "Pres
   await expect(modal.getByText('Presente', { exact: true })).toBeVisible()
   await expect(modal.getByRole('button', { name: /dar presente/i })).toHaveCount(0)
 })
+
+// -- Franja 21:00 a 23:59 de Argentina --
+//
+// Bug real: la fecha de "hoy" salía en UTC (toISOString) -- a las 21:30 de
+// Argentina UTC ya es el día siguiente, así que se buscaban las reservas de
+// MAÑANA para la clase de esa noche. Se corre con el navegador en hora de
+// Argentina y en UTC: el resultado tiene que ser el mismo, no depende de la
+// zona de la PC.
+const NOCHE_2130_AR = new Date('2026-10-23T00:30:00Z') // jueves 22/10 21:30 en Argentina.
+
+const CLASE_NOCHE = {
+  id: 'clase-e2e-noche',
+  title: 'CrossFit 21hs',
+  start_time: '21:00:00',
+  end_time: '22:00:00',
+  days_of_week: [4, 5], // jueves y viernes -- la misma clase existe "mañana" también.
+  discipline: { name: 'CrossFit' },
+}
+
+const RESERVA_HOY_NOCHE = {
+  id: 'booking-e2e-noche-hoy',
+  user_id: 'e2e-profile-noche-hoy',
+  class_id: 'clase-e2e-noche',
+  booking_date: '2026-10-22',
+  attended: false,
+  profiles: { full_name: 'Paula Jueves', dni: '36111222' },
+}
+
+const RESERVA_MANANA_NOCHE = {
+  id: 'booking-e2e-noche-manana',
+  user_id: 'e2e-profile-noche-manana',
+  class_id: 'clase-e2e-noche',
+  booking_date: '2026-10-23',
+  attended: false,
+  profiles: { full_name: 'Diego Viernes', dni: '36333444' },
+}
+
+for (const timezoneId of ['America/Argentina/Mendoza', 'UTC']) {
+  test.describe(`navegador en ${timezoneId}`, () => {
+    test.use({ timezoneId })
+
+    test('21:30 de Argentina: sugiere la reserva de HOY (22/10), no la de mañana, y le da presente a esa', async ({ page }) => {
+      await page.clock.setFixedTime(NOCHE_2130_AR)
+      await loginComoAdmin(page, {
+        tables: { ...tablasBase(), classes: [CLASE_NOCHE], bookings: [RESERVA_HOY_NOCHE, RESERVA_MANANA_NOCHE] },
+      })
+
+      await page.getByRole('button', { name: 'Check-in Rápido' }).click()
+      const modal = page.getByRole('dialog', { name: 'Check-in Rápido' })
+      await expect(modal.getByText('Inscriptos en la clase en curso')).toBeVisible()
+      await expect(modal.getByText('Paula Jueves')).toBeVisible()
+      await expect(modal.getByText('CrossFit · 21:00 a 22:00')).toBeVisible()
+      await expect(modal.getByText('Diego Viernes')).toHaveCount(0)
+
+      // Un solo botón (el de la reserva de hoy) -- "Dar Presente" no tiene
+      // forma de llegar a la reserva del 23.
+      await expect(modal.getByRole('button', { name: /dar presente/i })).toHaveCount(1)
+      await modal.getByRole('button', { name: /dar presente/i }).click()
+      await expect(modal.getByText('Presente', { exact: true })).toBeVisible()
+    })
+  })
+}

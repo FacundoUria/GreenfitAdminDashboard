@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabaseClient'
 import { hoyISO } from './fecha'
+import { ahoraEnArgentina } from './ahoraArgentina'
 
 // Puente de lectura entre el panel admin (tabla legacy `socios`) y el schema
 // real que usa la PWA de socios (profiles/bookings/xp_events/routines,
@@ -596,10 +597,10 @@ function restarMinutos(horaStr, minutos) {
 const VENTANA_PREVIA_MIN = 30
 
 export async function buscarSociosClaseActiva() {
-  const ahora = new Date()
-  const diaSemana = ahora.getDay()
-  const horaActual = ahora.toTimeString().slice(0, 8)
-  const hoyStr = ahora.toISOString().slice(0, 10)
+  // Fecha, día y hora del MISMO instante, en hora de Argentina -- antes la
+  // fecha salía en UTC (toISOString) y de 21:00 a 23:59 buscaba las
+  // reservas de mañana.
+  const { fecha: hoyStr, hora: horaActual, diaSemana } = ahoraEnArgentina()
 
   const { data: clases, error: clasesError } = await supabase
     .from('classes')

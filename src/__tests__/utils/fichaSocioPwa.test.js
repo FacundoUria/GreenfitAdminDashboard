@@ -556,7 +556,7 @@ describe('buscarSociosClaseActiva (sugerencias inteligentes del Check-in Rápido
 
   it('trae los inscriptos de una clase EN CURSO ahora mismo', async () => {
     // Lunes 18:10 -- una clase de Lunes 18 a 19 está en curso.
-    vi.setSystemTime(new Date('2026-08-10T18:10:00'))
+    vi.setSystemTime(new Date('2026-08-10T18:10:00-03:00'))
     mockedFrom.mockImplementation((table) => {
       if (table === 'classes') {
         return makeChain({
@@ -604,7 +604,7 @@ describe('buscarSociosClaseActiva (sugerencias inteligentes del Check-in Rápido
 
   it('también incluye una clase que arranca dentro de los próximos 30 minutos', async () => {
     // 17:45 -- una clase de 18:00 arranca en 15 minutos, dentro de la ventana.
-    vi.setSystemTime(new Date('2026-08-10T17:45:00'))
+    vi.setSystemTime(new Date('2026-08-10T17:45:00-03:00'))
     mockedFrom.mockImplementation((table) => {
       if (table === 'classes') {
         return makeChain({
@@ -623,7 +623,7 @@ describe('buscarSociosClaseActiva (sugerencias inteligentes del Check-in Rápido
   })
 
   it('no trae nada si ninguna clase está en curso ni por arrancar (fuera de la ventana de 30 min)', async () => {
-    vi.setSystemTime(new Date('2026-08-10T08:00:00'))
+    vi.setSystemTime(new Date('2026-08-10T08:00:00-03:00'))
     mockedFrom.mockImplementation((table) => {
       if (table === 'classes') {
         return makeChain({
@@ -640,7 +640,7 @@ describe('buscarSociosClaseActiva (sugerencias inteligentes del Check-in Rápido
   })
 
   it('ignora clases de otro día de la semana', async () => {
-    vi.setSystemTime(new Date('2026-08-10T18:10:00')) // lunes
+    vi.setSystemTime(new Date('2026-08-10T18:10:00-03:00')) // lunes
     mockedFrom.mockImplementation((table) => {
       if (table === 'classes') {
         return makeChain({
@@ -657,7 +657,7 @@ describe('buscarSociosClaseActiva (sugerencias inteligentes del Check-in Rápido
   })
 
   it('un inscripto con attended=true ya viene marcado con yaRegistrado', async () => {
-    vi.setSystemTime(new Date('2026-08-10T18:10:00'))
+    vi.setSystemTime(new Date('2026-08-10T18:10:00-03:00'))
     mockedFrom.mockImplementation((table) => {
       if (table === 'classes') {
         return makeChain({
@@ -692,7 +692,7 @@ describe('buscarSociosClaseActiva (sugerencias inteligentes del Check-in Rápido
   // disciplina() -- mejor prevenir que bloquear después del click, ver
   // supabase_migration_fix_checkin_rapido_sin_vencimiento.sql.
   it('filtra a un socio que YA NO está habilitado para la disciplina de la clase (créditos vencidos/agotados)', async () => {
-    vi.setSystemTime(new Date('2026-08-10T18:10:00'))
+    vi.setSystemTime(new Date('2026-08-10T18:10:00-03:00'))
     mockedFrom.mockImplementation((table) => {
       if (table === 'classes') {
         return makeChain({
@@ -737,7 +737,7 @@ describe('buscarSociosClaseActiva (sugerencias inteligentes del Check-in Rápido
   })
 
   it('deja pasar a un socio SÍ habilitado para la disciplina de la clase', async () => {
-    vi.setSystemTime(new Date('2026-08-10T18:10:00'))
+    vi.setSystemTime(new Date('2026-08-10T18:10:00-03:00'))
     mockedFrom.mockImplementation((table) => {
       if (table === 'classes') {
         return makeChain({
@@ -779,7 +779,7 @@ describe('buscarSociosClaseActiva (sugerencias inteligentes del Check-in Rápido
   })
 
   it('un inscripto YA registrado (attended=true) se deja pasar sin siquiera consultar habilitación', async () => {
-    vi.setSystemTime(new Date('2026-08-10T18:10:00'))
+    vi.setSystemTime(new Date('2026-08-10T18:10:00-03:00'))
     mockedFrom.mockImplementation((table) => {
       if (table === 'classes') {
         return makeChain({
@@ -820,7 +820,7 @@ describe('buscarSociosClaseActiva (sugerencias inteligentes del Check-in Rápido
   })
 
   it('si el chequeo de habilitación falla (RPC no desplegada, etc.), deja al candidato visible -- fail-open, la protección real es el trigger', async () => {
-    vi.setSystemTime(new Date('2026-08-10T18:10:00'))
+    vi.setSystemTime(new Date('2026-08-10T18:10:00-03:00'))
     mockedFrom.mockImplementation((table) => {
       if (table === 'classes') {
         return makeChain({
@@ -858,6 +858,109 @@ describe('buscarSociosClaseActiva (sugerencias inteligentes del Check-in Rápido
 
     const resultado = await buscarSociosClaseActiva()
     expect(resultado).toHaveLength(1)
+  })
+})
+
+// Bug real: la fecha de "hoy" salía de toISOString() (UTC) -- de 21:00 a
+// 23:59 de Argentina buscaba las reservas de MAÑANA para la clase de esa
+// noche (y si alguien ya había reservado mañana, "Dar Presente" marcaba esa).
+// Instantes en UTC (con Z) para que el resultado no dependa de la zona de la
+// PC que corre los tests.
+describe('buscarSociosClaseActiva -- "hoy" en hora de Argentina (franja 21:00 a 23:59)', () => {
+  // Jueves 22/10/2026 y viernes 23/10/2026. A: clase de noche que se dicta
+  // jueves y viernes (la misma class_id existe los dos días).
+  const CLASE_A = { id: 'clase-a', title: 'CrossFit 21hs', start_time: '21:00:00', end_time: '22:00:00', days_of_week: [4, 5], discipline: { name: 'CrossFit' } }
+  const CLASE_JUEVES_TARDE = { id: 'clase-jue-2330', title: 'Boxeo 23:30', start_time: '23:30:00', end_time: '23:59:59', days_of_week: [4], discipline: { name: 'Boxeo' } }
+  const CLASE_VIERNES_00 = { id: 'clase-vie-00', title: 'Boxeo 00:30', start_time: '00:30:00', end_time: '01:30:00', days_of_week: [5], discipline: { name: 'Boxeo' } }
+
+  const reserva = (id, classId, fecha) => ({
+    id,
+    user_id: `u-${id}`,
+    class_id: classId,
+    booking_date: fecha,
+    attended: false,
+    profiles: { full_name: `Socio ${id}`, dni: null },
+  })
+
+  // Cadena de `bookings` que SÍ aplica los filtros in/eq como la base, y
+  // guarda con qué booking_date se consultó.
+  let fechasConsultadas
+  function mockClasesYReservas(clases, reservas) {
+    fechasConsultadas = []
+    mockedFrom.mockImplementation((table) => {
+      if (table === 'classes') return makeChain({ data: clases, error: null })
+      if (table === 'bookings') {
+        const filtros = { classIds: null, fecha: null }
+        const chain = {
+          select: vi.fn(() => chain),
+          in: vi.fn((col, valores) => {
+            if (col === 'class_id') filtros.classIds = valores
+            return chain
+          }),
+          eq: vi.fn((col, valor) => {
+            if (col === 'booking_date') {
+              filtros.fecha = valor
+              fechasConsultadas.push(valor)
+            }
+            return chain
+          }),
+          then: (resolve, reject) =>
+            Promise.resolve({
+              data: reservas.filter((r) => filtros.classIds.includes(r.class_id) && r.booking_date === filtros.fecha),
+              error: null,
+            }).then(resolve, reject),
+        }
+        return chain
+      }
+      throw new Error(`tabla inesperada en el test: ${table}`)
+    })
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.useFakeTimers()
+    mockedRpc.mockResolvedValue({ data: true, error: null }) // todos habilitados
+  })
+  afterEach(() => vi.useRealTimers())
+
+  const RESERVAS = [reserva('jue', 'clase-a', '2026-10-22'), reserva('vie', 'clase-a', '2026-10-23')]
+
+  it('20:59 (23:59Z): sugiere la clase de las 21 con la reserva de HOY (22/10)', async () => {
+    vi.setSystemTime(new Date('2026-10-22T23:59:00Z'))
+    mockClasesYReservas([CLASE_A], RESERVAS)
+
+    const resultado = await buscarSociosClaseActiva()
+    expect(fechasConsultadas).toEqual(['2026-10-22'])
+    expect(resultado.map((r) => r.bookingId)).toEqual(['jue'])
+  })
+
+  it('21:00 (00:00Z del día siguiente): sigue consultando el 22/10 -- la reserva de mañana NO aparece', async () => {
+    vi.setSystemTime(new Date('2026-10-23T00:00:00Z'))
+    mockClasesYReservas([CLASE_A], RESERVAS)
+
+    const resultado = await buscarSociosClaseActiva()
+    expect(fechasConsultadas).toEqual(['2026-10-22'])
+    expect(resultado.map((r) => r.bookingId)).toEqual(['jue'])
+    // Regresión: "Dar Presente" nunca podría recibir la reserva del 23.
+    expect(resultado.map((r) => r.bookingId)).not.toContain('vie')
+  })
+
+  it('23:59 (02:59Z): la clase de 21 a 22 ya terminó; una de 23:30 del jueves consulta el 22/10', async () => {
+    vi.setSystemTime(new Date('2026-10-23T02:59:00Z'))
+    mockClasesYReservas([CLASE_A, CLASE_JUEVES_TARDE], [...RESERVAS, reserva('jue-2330', 'clase-jue-2330', '2026-10-22')])
+
+    const resultado = await buscarSociosClaseActiva()
+    expect(fechasConsultadas).toEqual(['2026-10-22'])
+    expect(resultado.map((r) => r.bookingId)).toEqual(['jue-2330'])
+  })
+
+  it('00:00 (03:00Z): ya es viernes 23/10 -- la clase del jueves no aparece y la del viernes de 00:30 (arranca en 30 min) consulta el 23/10', async () => {
+    vi.setSystemTime(new Date('2026-10-23T03:00:00Z'))
+    mockClasesYReservas([CLASE_A, CLASE_JUEVES_TARDE, CLASE_VIERNES_00], [...RESERVAS, reserva('vie-00', 'clase-vie-00', '2026-10-23')])
+
+    const resultado = await buscarSociosClaseActiva()
+    expect(fechasConsultadas).toEqual(['2026-10-23'])
+    expect(resultado.map((r) => r.bookingId)).toEqual(['vie-00'])
   })
 })
 
