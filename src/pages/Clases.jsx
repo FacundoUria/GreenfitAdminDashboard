@@ -1,33 +1,40 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader2, Plus } from 'lucide-react'
+import { CalendarDays, Loader2, Plus } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { formatFecha } from '../utils/fecha'
+import { combinarFechaYHora, mapearClasesDesdeBookings } from '../utils/clases'
+import { ahoraEnArgentina } from '../utils/ahoraArgentina'
 import {
-  combinarFechaYHora,
-  diaAnterior,
-  etiquetaDia,
-  formatDateOnly,
-  mapearClasesDesdeBookings,
-  proximosDias,
-} from '../utils/clases'
+  avisoDiaPasado,
+  clasesDeUnDiaPasado,
+  diaSemanaISO,
+  diasDeLaTira,
+  esSoloLectura,
+  etiquetaDiaISO,
+  fechaCortaISO,
+  numeroDiaISO,
+} from '../utils/calendarioClases'
 import { fetchCreditosVigentesPorSocio, fetchSociosParaAnotar } from '../utils/anotarSocios'
 import { mensajeErrorAnotar } from '../utils/buscarSocios'
 import ClasesGrid from '../components/ClasesGrid'
 import InscriptosModal from '../components/InscriptosModal'
 import NuevaClaseModal from '../components/NuevaClaseModal'
+import CalendarioClases from '../components/CalendarioClases'
 
-// "Ayer" adelante de "Hoy" -- para que Seba pueda revisar quién asistió o
-// si hubo algún problema en la clase del día anterior. El resto de los días
-// (Hoy, Mañana, y los siguientes) queda exactamente igual que antes. `HOY`
-// se guarda aparte -- DIAS_VISIBLES[0] ahora es Ayer, no Hoy, y la pantalla
-// tiene que seguir abriendo en el día de hoy por defecto.
-const HOY = proximosDias(1)[0]
-const DIAS_VISIBLES = [diaAnterior(HOY), ...proximosDias(7)]
+// Cada cuánto se revisa si cambió el día (panel abierto después de medianoche).
+const REVISAR_HOY_MS = 60_000
 
 function Clases() {
   const navigate = useNavigate()
+  // "Hoy" en hora de Argentina, como texto YYYY-MM-DD. Antes se calculaba una
+  // sola vez al cargar el módulo: con el panel abierto después de medianoche
+  // la tira seguía mostrando el día anterior como "Hoy".
+  const [hoy, setHoy] = useState(() => ahoraEnArgentina().fecha)
   const [clasesBase, setClasesBase] = useState([])
+  // TODAS las clases (sin filtrar por show_in_agenda) -- para armar los días
+  // anteriores a "ayer" a partir de sus reservas.
+  const [todasLasClases, setTodasLasClases] = useState([])
   // Inscriptos y cancelaciones se guardan JUNTO con el día al que pertenecen.
   // En pantalla solo se usan si ese día es el elegido ahora (ver `bookings` /
   // `cancelaciones` más abajo): mientras no llega la respuesta del día
@@ -47,7 +54,13 @@ function Clases() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [errorInscriptos, setErrorInscriptos] = useState(null)
-  const [fechaSeleccionada, setFechaSeleccionada] = useState(HOY)
+  // Fail-open como siempre (la grilla se ve igual), pero ahora VISIBLE: día
+  // cuyas cancelaciones no se pudieron cargar, o null.
+  const [errorCancelacionesFecha, setErrorCancelacionesFecha] = useState(null)
+  // Día elegido, como texto YYYY-MM-DD (puede estar fuera de la tira si se
+  // eligió desde el calendario).
+  const [fechaSeleccionadaStr, setFechaSeleccionadaStr] = useState(hoy)
+  const [calendarioAbierto, setCalendarioAbierto] = useState(false)
   // Número del último pedido de cada tipo: solo la respuesta del ÚLTIMO
   // pedido puede escribir en pantalla; las que llegan tarde se descartan.
   const pedidoInscriptos = useRef(0)
@@ -56,8 +69,32 @@ function Clases() {
   const [modalNuevaClaseAbierto, setModalNuevaClaseAbierto] = useState(false)
   const [claseEnEdicion, setClaseEnEdicion] = useState(null)
 
-  const fechaSeleccionadaStr = useMemo(() => formatDateOnly(fechaSeleccionada), [fechaSeleccionada])
-  const esHoy = fechaSeleccionadaStr === formatDateOnly(new Date())
+  const esHoy = fechaSeleccionadaStr === hoy
+  const diaSemanaSeleccionado = diaSemanaISO(fechaSeleccionadaStr)
+  // Días anteriores a "ayer": solo lectura (cancelar reservas pasadas mueve
+  // créditos). "Ayer", hoy y los días futuros quedan exactamente como antes.
+  const soloLectura = esSoloLectura(fechaSeleccionadaStr, hoy)
+  const diasVisibles = useMemo(() => diasDeLaTira(hoy), [hoy])
+
+  // Medianoche con el panel abierto: se revisa cada minuto y al volver al
+  // panel (la PC pudo estar suspendida). El día elegido NO salta solo.
+  useEffect(() => {
+    const actualizarHoy = () => setHoy(ahoraEnArgentina().fecha)
+    const intervalo = setInterval(actualizarHoy, REVISAR_HOY_MS)
+    window.addEventListener('focus', actualizarHoy)
+    document.addEventListener('visibilitychange', actualizarHoy)
+    return () => {
+      clearInterval(intervalo)
+      window.removeEventListener('focus', actualizarHoy)
+      document.removeEventListener('visibilitychange', actualizarHoy)
+    }
+  }, [])
+
+  // Al abrir, la tira (14 días) se desplaza hasta "Hoy".
+  const botonHoyRef = useRef(null)
+  useEffect(() => {
+    botonHoyRef.current?.scrollIntoView?.({ block: 'nearest', inline: 'center' })
+  }, [])
 
   const fetchClasesBase = useCallback(async () => {
     // Embed de `disciplines(show_in_agenda)` -- mismo flag que ya usa
@@ -77,9 +114,11 @@ function Clases() {
       console.error('Error al cargar clases desde Supabase:', fetchError.message)
       setError('No se pudieron cargar las clases. Verificá la conexión con Supabase.')
       setClasesBase([])
+      setTodasLasClases([])
       return
     }
     setError(null)
+    setTodasLasClases(data ?? [])
     const reservables = (data ?? []).filter((row) => {
       const disciplina = Array.isArray(row.disciplines) ? row.disciplines[0] : row.disciplines
       return disciplina?.show_in_agenda !== false
@@ -127,6 +166,8 @@ function Clases() {
     }
     // Fail-open también con error: se marca el día como "resuelto" sin
     // cancelaciones, así la grilla de ESE día se muestra igual (sin el badge).
+    // Pero ya no en silencio: se avisa arriba de la grilla, con Reintentar.
+    setErrorCancelacionesFecha(fetchError ? fecha : null)
     setCancelacionesDia({ fecha, filas: fetchError ? [] : data ?? [] })
   }, [])
 
@@ -177,13 +218,27 @@ function Clases() {
   // Orden estrictamente cronológico (de la más temprana a la más tardía) --
   // la query base ya viene ordenada por start_time, pero lo reafirmamos acá
   // porque es la garantía que le importa a esta pantalla en particular.
-  const clasesDelDia = useMemo(
-    () =>
-      clases
-        .filter((clase) => clase.diasSemana.includes(fechaSeleccionada.getDay()))
-        .sort((a, b) => a.horaInicio.localeCompare(b.horaInicio)),
-    [clases, fechaSeleccionada],
-  )
+  //
+  // "Ayer", hoy y los días futuros: la plantilla actual, igual que siempre.
+  // Días anteriores a "ayer": se arma desde lo que pasó ESE día (reservas y
+  // cancelaciones), ver clasesDeUnDiaPasado() -- así aparecen también las
+  // clases que ese día de la semana ya no se dictan, y no aparecen las
+  // creadas después. Si hay indicios de que la clase era distinta, aviso.
+  const clasesDelDia = useMemo(() => {
+    const delDia = soloLectura
+      ? mapearClasesDesdeBookings(
+          clasesDeUnDiaPasado({
+            fecha: fechaSeleccionadaStr,
+            plantillas: clasesBase,
+            todasLasClases,
+            classIdsConReserva: new Set(bookings.map((b) => b.class_id)),
+            classIdsCanceladas: canceladasIds,
+          }),
+          bookings,
+        ).map((clase) => ({ ...clase, aviso: avisoDiaPasado(clase, fechaSeleccionadaStr) }))
+      : clases.filter((clase) => clase.diasSemana.includes(diaSemanaSeleccionado))
+    return delDia.sort((a, b) => a.horaInicio.localeCompare(b.horaInicio))
+  }, [soloLectura, clases, clasesBase, todasLasClases, bookings, canceladasIds, fechaSeleccionadaStr, diaSemanaSeleccionado])
 
   // Jerarquía visual: solo tiene sentido "en curso" / "próxima" mirando el
   // día de HOY -- en cualquier otro día todas las clases son simplemente
@@ -232,6 +287,8 @@ function Clases() {
     //   2) en la consulta: el UPDATE exige además booking_date = día elegido y
     //      class_id = esa clase, así que aunque llegara un id de otro día el
     //      servidor no toca ninguna fila.
+    // Segunda barrera del solo lectura (la UI ya no muestra los botones).
+    if (soloLectura) return
     const fechaVista = fechaSeleccionadaStr
     const esDelDiaVisto = bookings.some((b) => b.id === inscriptoId && b.class_id === claseId)
     if (!esDelDiaVisto) {
@@ -268,8 +325,14 @@ function Clases() {
   // Cambiar de día cierra "Ver inscriptos": el modal nunca queda abierto
   // sobre la lista de otro día.
   const handleElegirDia = (fecha) => {
-    if (formatDateOnly(fecha) !== fechaSeleccionadaStr) setClaseInscriptosId(null)
-    setFechaSeleccionada(fecha)
+    if (fecha !== fechaSeleccionadaStr) setClaseInscriptosId(null)
+    setFechaSeleccionadaStr(fecha)
+  }
+
+  // Calendario: tocar un día lo abre en el panel de siempre.
+  const handleElegirDiaCalendario = (fecha) => {
+    setCalendarioAbierto(false)
+    handleElegirDia(fecha)
   }
 
   // Buscador de "Ver inscriptos": la lista de socios (role='socio') y sus
@@ -324,6 +387,7 @@ function Clases() {
   // lógica que usa la PWA cuando el socio se anota solo). Los dos caminos
   // (DNI exacto / socio elegido de la lista) terminan acá.
   const anotarSocio = async (clase, userId, nombre) => {
+    if (soloLectura) return
     const { error: rpcError } = await supabase.rpc('admin_book_class', {
       p_user_id: userId,
       p_class_id: clase.id,
@@ -340,6 +404,7 @@ function Clases() {
 
   // Camino de siempre: DNI tipeado -> se busca el perfil por DNI exacto.
   const handleAgregarSocio = async (clase, dniBuscado) => {
+    if (soloLectura) return
     const { data: candidatos, error: buscarError } = await supabase
       .from('profiles')
       .select('id, full_name, dni')
@@ -368,6 +433,7 @@ function Clases() {
   }
 
   const handleQuitarInscripto = async (clase, inscripto) => {
+    if (soloLectura) return
     const confirmado = window.confirm(`¿Quitar a ${inscripto.nombre} de esta clase?`)
     if (!confirmado) return
 
@@ -400,6 +466,7 @@ function Clases() {
   }
 
   const handleEditar = (clase) => {
+    if (soloLectura) return
     setClaseEnEdicion(clase)
     setModalNuevaClaseAbierto(true)
   }
@@ -414,6 +481,7 @@ function Clases() {
   // anotado (mismo criterio incondicional que "Quitar de la clase") y les
   // deja una notificación in-app; acá solo falta el push real.
   const handleCancelarClase = async (clase) => {
+    if (soloLectura) return
     const confirmado = window.confirm(
       `¿Cancelar la clase de ${clase.disciplina} de las ${clase.horaInicio} del ${formatFecha(fechaSeleccionadaStr)}? Se reintegra el crédito a todos los anotados de ese día y se les avisa. El resto de la semana no se toca.`,
     )
@@ -471,13 +539,33 @@ function Clases() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {DIAS_VISIBLES.map((fecha) => {
-            const fechaStr = formatDateOnly(fecha)
-            const seleccionado = fechaStr === fechaSeleccionadaStr
+        <div className="flex min-w-0 gap-2 overflow-x-auto pb-1">
+          {/* Día elegido desde el calendario que no está en la tira. */}
+          {!diasVisibles.includes(fechaSeleccionadaStr) && (
+            <>
+              <button
+                type="button"
+                aria-current="date"
+                className="flex min-h-[52px] shrink-0 flex-col items-center justify-center rounded-lg bg-greenfit-primary px-3 py-2 text-sm font-medium text-greenfit-dark"
+              >
+                <span className="text-xs">Elegido</span>
+                <span className="text-base font-semibold">{fechaCortaISO(fechaSeleccionadaStr)}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleElegirDia(hoy)}
+                className="flex min-h-[52px] shrink-0 items-center justify-center rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-gray-300 hover:text-white"
+              >
+                Volver a hoy
+              </button>
+            </>
+          )}
+          {diasVisibles.map((fecha) => {
+            const seleccionado = fecha === fechaSeleccionadaStr
             return (
               <button
-                key={fechaStr}
+                key={fecha}
+                ref={fecha === hoy ? botonHoyRef : undefined}
                 type="button"
                 onClick={() => handleElegirDia(fecha)}
                 className={`flex min-h-[52px] w-16 shrink-0 flex-col items-center justify-center rounded-lg px-2 py-2 text-sm font-medium transition-colors ${
@@ -486,22 +574,52 @@ function Clases() {
                     : 'bg-greenfit-card text-gray-300 hover:text-white'
                 }`}
               >
-                <span className="text-xs capitalize">{etiquetaDia(fecha)}</span>
-                <span className="text-base font-semibold">{fecha.getDate()}</span>
+                <span className="text-xs capitalize">{etiquetaDiaISO(fecha, hoy)}</span>
+                <span className="text-base font-semibold">{numeroDiaISO(fecha)}</span>
               </button>
             )
           })}
         </div>
 
-        <button
-          type="button"
-          onClick={handleAbrirNuevaClase}
-          className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90"
-        >
-          <Plus className="h-4 w-4" />
-          Nueva Clase
-        </button>
+        <div className="flex shrink-0 gap-2">
+          <button
+            type="button"
+            onClick={() => setCalendarioAbierto(true)}
+            className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-white/10 px-4 py-2 text-sm font-semibold text-gray-200 transition-colors hover:bg-white/5"
+          >
+            <CalendarDays className="h-4 w-4" />
+            Ver calendario
+          </button>
+          <button
+            type="button"
+            onClick={handleAbrirNuevaClase}
+            className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90"
+          >
+            <Plus className="h-4 w-4" />
+            Nueva Clase
+          </button>
+        </div>
       </div>
+
+      {soloLectura && (
+        <p className="rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-gray-300">
+          {formatFecha(fechaSeleccionadaStr)} -- día pasado, solo lectura. Las clases se muestran con su título,
+          horario y cupo actuales.
+        </p>
+      )}
+
+      {errorCancelacionesFecha === fechaSeleccionadaStr && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-300">
+          <span>No se pudieron cargar las cancelaciones de este día: puede haber clases canceladas que no se marcan.</span>
+          <button
+            type="button"
+            onClick={() => fetchCancelaciones(fechaSeleccionadaStr)}
+            className="rounded-lg border border-amber-400/40 px-3 py-1 text-xs font-medium hover:bg-amber-500/10"
+          >
+            Reintentar
+          </button>
+        </div>
+      )}
 
       {/* "Cargando" mientras no esté la respuesta del día ELEGIDO: nunca se
           dibuja la grilla con inscriptos de otro día. */}
@@ -527,6 +645,7 @@ function Clases() {
           enCursoIds={enCursoIds}
           proximaClaseId={proximaClaseId}
           canceladasIds={canceladasIds}
+          soloLectura={soloLectura}
           onVerInscriptos={handleVerInscriptos}
           onEditar={handleEditar}
           onCancelar={handleCancelarClase}
@@ -546,7 +665,17 @@ function Clases() {
         creditosPorSocio={creditosPorSocio}
         onQuitarInscripto={handleQuitarInscripto}
         onAbrirFicha={handleAbrirFichaSocio}
+        soloLectura={soloLectura}
       />
+
+      {calendarioAbierto && (
+        <CalendarioClases
+          hoy={hoy}
+          fechaSeleccionada={fechaSeleccionadaStr}
+          onElegirDia={handleElegirDiaCalendario}
+          onCerrar={() => setCalendarioAbierto(false)}
+        />
+      )}
 
       {modalNuevaClaseAbierto && (
         <NuevaClaseModal
@@ -555,7 +684,7 @@ function Clases() {
           // El picker de días de NuevaClaseModal solo cubre Lunes-Sábado (el
           // gimnasio no abre los domingos) -- si se está viendo un domingo,
           // el prefill cae en Lunes en vez de un día que no existe ahí.
-          diaPorDefecto={fechaSeleccionada.getDay() === 0 ? 1 : fechaSeleccionada.getDay()}
+          diaPorDefecto={diaSemanaSeleccionado === 0 ? 1 : diaSemanaSeleccionado}
           onClose={() => {
             setModalNuevaClaseAbierto(false)
             setClaseEnEdicion(null)

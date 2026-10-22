@@ -74,3 +74,40 @@ describe('InscriptosModal -- nombre clickeable a la ficha del socio (PARTE A)', 
     expect(screen.queryByRole('button', { name: 'Socio Sin Dni' })).not.toBeInTheDocument()
   })
 })
+
+// Días anteriores a "ayer": solo lectura -- sin buscador para anotar ni
+// botones de asistencia/quitar; la asistencia se sigue viendo como texto.
+describe('InscriptosModal -- soloLectura', () => {
+  const INSCRIPTO = { id: 'b1', userId: 'u1', nombre: 'Martina Ríos', dni: '30111222', asistio: true }
+  const renderCon = (props) =>
+    render(
+      <InscriptosModal
+        open
+        clase={{ ...CLASE_BASE, inscriptos: [INSCRIPTO] }}
+        onClose={vi.fn()}
+        onMarcarAsistencia={vi.fn()}
+        onAgregarSocio={vi.fn()}
+        onQuitarInscripto={vi.fn()}
+        onAbrirFicha={vi.fn()}
+        {...props}
+      />,
+    )
+
+  it('sin soloLectura (por defecto): buscador y botones como siempre', () => {
+    renderCon({})
+    expect(screen.getByLabelText('Buscar socio para anotar')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Marcar Asistió' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Quitar de la clase' })).toBeInTheDocument()
+  })
+
+  it('con soloLectura: sin buscador ni botones, con el aviso y la asistencia como texto', () => {
+    renderCon({ soloLectura: true })
+    expect(screen.getByText(/Día pasado: solo lectura/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('Buscar socio para anotar')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Marcar Asistió' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Marcar Ausente' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Quitar de la clase' })).toBeNull()
+    expect(screen.getByText('Asistió')).toBeInTheDocument()
+    expect(screen.getByText('Martina Ríos')).toBeInTheDocument()
+  })
+})

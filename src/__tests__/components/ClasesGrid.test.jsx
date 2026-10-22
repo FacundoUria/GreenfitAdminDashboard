@@ -61,3 +61,25 @@ describe('ClasesGrid -- "Cancelada este día" (cancelación puntual, no borra la
     expect(botones[1]).not.toBeDisabled() // Boxeo (clase-2) -- intacta
   })
 })
+
+// Días anteriores a "ayer": solo lectura -- sin Editar ni Cancelar, con
+// "Ver Inscriptos" y el aviso de la tarjeta si hay indicios de cambios.
+describe('ClasesGrid -- soloLectura y aviso por tarjeta', () => {
+  it('sin soloLectura (por defecto) siguen Editar y Cancelar', () => {
+    render(<ClasesGrid clases={[CLASE_BASE]} {...HANDLERS} />)
+    expect(screen.getByRole('button', { name: 'Editar' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cancelar clase' })).toBeInTheDocument()
+  })
+
+  it('con soloLectura: sin Editar ni Cancelar, pero sí "Ver Inscriptos"', () => {
+    render(<ClasesGrid clases={[CLASE_BASE]} soloLectura {...HANDLERS} />)
+    expect(screen.queryByRole('button', { name: 'Editar' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Cancelar clase' })).toBeNull()
+    expect(screen.getByRole('button', { name: /Ver Inscriptos/ })).toBeInTheDocument()
+  })
+
+  it('muestra el aviso de la tarjeta si viene, y nada si no', () => {
+    render(<ClasesGrid clases={[{ ...CLASE_BASE, aviso: 'Hubo más inscriptos que el cupo actual: el cupo cambió.' }]} {...HANDLERS} />)
+    expect(screen.getByText('Hubo más inscriptos que el cupo actual: el cupo cambió.')).toBeInTheDocument()
+  })
+})

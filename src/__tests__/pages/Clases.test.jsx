@@ -107,14 +107,14 @@ vi.mock('../../utils/anotarSocios', () => ({
 import Clases from '../../pages/Clases'
 
 const conteo = () => screen.queryByText(/\d+ \/ 20 inscriptos/)?.textContent ?? null
-// Botones del selector de días, en orden: Ayer, Hoy, Mañana, +2, ...
+// Botones del selector de días, en orden: hoy-7 ... hoy-2, Ayer, Hoy, Mañana, +2, ...
 const botonesDia = () =>
   screen.getAllByRole('button').filter((b) => /^\D+\d{1,2}$/.test(b.textContent.trim()) && !/inscriptos/i.test(b.textContent))
 const elegirDia = (indice) => fireEvent.click(botonesDia()[indice])
-const AYER = 0
-const IDX_HOY = 1
-const IDX_MANANA = 2
-const IDX_PASADO = 3
+const AYER = 6
+const IDX_HOY = 7
+const IDX_MANANA = 8
+const IDX_PASADO = 9
 const esperar = (ms) => act(() => new Promise((r) => setTimeout(r, ms)))
 
 async function abrir() {

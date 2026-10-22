@@ -1,8 +1,8 @@
-import { Ban, Clock, Eye, Pencil, Users } from 'lucide-react'
+import { AlertTriangle, Ban, Clock, Eye, Pencil, Users } from 'lucide-react'
 import { colorOcupacion } from '../utils/ocupacion'
 import { colorDisciplina } from '../utils/coloresDisciplina'
 
-function ClaseCard({ clase, estado, cancelada, hayDestacada, onVerInscriptos, onEditar, onCancelar }) {
+function ClaseCard({ clase, estado, cancelada, hayDestacada, soloLectura, onVerInscriptos, onEditar, onCancelar }) {
   const inscriptos = clase.inscriptos.length
   const porcentaje = Math.min(100, Math.round((inscriptos / clase.cupoMaximo) * 100))
   const { barra, texto } = colorOcupacion(porcentaje)
@@ -52,6 +52,15 @@ function ClaseCard({ clase, estado, cancelada, hayDestacada, onVerInscriptos, on
         )
       )}
 
+      {/* Días pasados (solo lectura): la clase se arma con su configuración
+          ACTUAL -- si hay indicios de que ese día era distinta, se avisa. */}
+      {clase.aviso && (
+        <div className="flex items-start gap-1.5 bg-amber-500/10 px-5 py-2 text-[11px] text-amber-300">
+          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+          <span>{clase.aviso}</span>
+        </div>
+      )}
+
       <div className="flex flex-col gap-4 p-5">
         <p className="text-sm text-gray-400">
           Prof. <span className="text-gray-300">{clase.profesor}</span>
@@ -82,6 +91,9 @@ function ClaseCard({ clase, estado, cancelada, hayDestacada, onVerInscriptos, on
             <Eye className="h-3.5 w-3.5" />
             Ver Inscriptos
           </button>
+          {/* Días anteriores a "ayer": solo lectura -- sin Editar ni Cancelar. */}
+          {!soloLectura && (
+          <>
           <button
             type="button"
             onClick={() => onEditar(clase)}
@@ -104,6 +116,8 @@ function ClaseCard({ clase, estado, cancelada, hayDestacada, onVerInscriptos, on
           >
             <Ban className="h-3.5 w-3.5" />
           </button>
+          </>
+          )}
         </div>
       </div>
     </div>
@@ -115,6 +129,7 @@ function ClasesGrid({
   enCursoIds = new Set(),
   proximaClaseId = null,
   canceladasIds = new Set(),
+  soloLectura = false,
   onVerInscriptos,
   onEditar,
   onCancelar,
@@ -140,6 +155,7 @@ function ClasesGrid({
             estado={estado}
             cancelada={canceladasIds.has(clase.id)}
             hayDestacada={hayDestacada}
+            soloLectura={soloLectura}
             onVerInscriptos={onVerInscriptos}
             onEditar={onEditar}
             onCancelar={onCancelar}

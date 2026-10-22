@@ -29,6 +29,9 @@ function etiquetaCreditos(cantidad) {
 // - creditosPorSocio: Map user_id -> créditos vigentes en la disciplina de la clase.
 // - onAgregarSocioPorId(clase, socio): anota con el id que ya tenemos, sin
 //   volver a buscar por DNI.
+// - soloLectura: días anteriores a "ayer" -- sin buscador para anotar ni
+//   botones de asistencia/quitar (cancelar una reserva pasada mueve créditos).
+//   La asistencia se sigue viendo como texto.
 function InscriptosModal({
   open,
   clase,
@@ -42,6 +45,7 @@ function InscriptosModal({
   creditosPorSocio = null,
   onQuitarInscripto,
   onAbrirFicha,
+  soloLectura = false,
 }) {
   const [busqueda, setBusqueda] = useState('')
   const [agregando, setAgregando] = useState(false)
@@ -111,6 +115,11 @@ function InscriptosModal({
           </button>
         </div>
 
+        {soloLectura ? (
+          <p className="mb-4 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-gray-300">
+            Día pasado: solo lectura. No se puede anotar, quitar ni marcar asistencia.
+          </p>
+        ) : (
         <form onSubmit={handleAgregar} className="mb-4 flex gap-2">
           <input
             type="text"
@@ -130,8 +139,9 @@ function InscriptosModal({
             Anotar
           </button>
         </form>
+        )}
 
-        {busqueda.trim() && (
+        {!soloLectura && busqueda.trim() && (
           <div className="mb-4" data-testid="resultados-busqueda">
             {cargandoSocios && !hayLista ? (
               <p className="flex items-center gap-2 py-2 text-sm text-gray-400">
@@ -235,6 +245,7 @@ function InscriptosModal({
                     </div>
                   </div>
 
+                  {!soloLectura && (
                   <div className="flex shrink-0 items-center gap-1.5">
                     <button
                       type="button"
@@ -272,6 +283,7 @@ function InscriptosModal({
                       <UserMinus className="h-4 w-4" />
                     </button>
                   </div>
+                  )}
                 </li>
               ))}
             </ul>
