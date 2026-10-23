@@ -87,7 +87,9 @@ function socioDePrueba(n) {
   }
 }
 
-const SOCIOS = [1, 2, 3].map(socioDePrueba)
+// Cada caso arma sus propios socios, con lotes nuevos: la base simulada les suma
+// créditos al cancelar, y si fueran compartidos un caso le pisaría el saldo al siguiente.
+const nuevosSocios = () => [1, 2, 3].map(socioDePrueba)
 
 // Mock de admin_book_class -- solo lo suficiente para probar el guard
 // nuevo (rechaza si la ocurrencia ya está cancelada); no reimplementa
@@ -124,6 +126,7 @@ function capturarAlertas(page) {
 test('cancelar una clase de hoy con 3 socios anotados -- reintegra el crédito a los 3, notifica, y NO borra la clase', async ({
   page,
 }) => {
+  const SOCIOS = nuevosSocios()
   const tables = {
     ...tablasBase(),
     disciplines: [DISCIPLINA_CROSSFIT],
@@ -194,6 +197,7 @@ test('cancelar una clase de hoy con 3 socios anotados -- reintegra el crédito a
 test('cancelar una clase con un crédito devuelto y dos no devueltos -- resumen para Seba y un push por cada texto', async ({
   page,
 }) => {
+  const SOCIOS = nuevosSocios()
   const [conVigente, deAnulado, sinNada] = SOCIOS
   const loteAnulado = { ...deAnulado.lote, id: 'uc-cancelar-anulado', remaining_credits: 0, expires_at: '2026-01-01T12:00:00.000Z' }
   const loteVencido = { ...sinNada.lote, id: 'uc-cancelar-vencido', remaining_credits: 0, expires_at: '2026-01-01T12:00:00.000Z' }
@@ -267,6 +271,7 @@ test('cancelar una clase con un crédito devuelto y dos no devueltos -- resumen 
 // usa créditos. Sin acceso vigente, el aviso lo dice; en el resumen de Seba va
 // aparte (no es "devuelto" ni "no devuelto").
 test('cancelar una clase de APARATOS con un socio sin acceso vigente -- no se crea nada y el aviso lo dice', async ({ page }) => {
+  const SOCIOS = nuevosSocios()
   const claseAparatos = { ...CLASE_A_CANCELAR, id: 'clase-e2e-aparatos-cancelar', discipline_id: DISCIPLINA_APARATOS.id, title: 'Aparatos' }
   const [socio] = SOCIOS
   const tables = {
