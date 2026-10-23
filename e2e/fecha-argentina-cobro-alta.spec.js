@@ -86,10 +86,12 @@ for (const timezoneId of ['America/Argentina/Mendoza', 'UTC']) {
 
       test(`cobro a las ${hora} de Argentina a un socio sin pagos: arranca el ${inicio} y vence el ${vencimiento}`, async ({ page }) => {
         await page.clock.setFixedTime(new Date(instante))
+        // Copias propias de este caso: la base simulada modifica la fila del socio al
+        // confirmar el cobro, y el objeto de arriba es compartido entre casos del archivo.
         const tables = {
           ...tablasBase(),
-          socios: [...tablasBase().socios, SOCIO_SIN_PAGOS],
-          profiles: [...tablasBase().profiles, PROFILE_SIN_PAGOS],
+          socios: [...tablasBase().socios, structuredClone(SOCIO_SIN_PAGOS)],
+          profiles: [...tablasBase().profiles, structuredClone(PROFILE_SIN_PAGOS)],
           pagos_socio: [],
         }
         const dialogos = seguirDialogos(page)
@@ -130,7 +132,8 @@ for (const timezoneId of ['America/Argentina/Mendoza', 'UTC']) {
 
     test('cobro a las 21:30 de Argentina a un socio que vence HOY (22/10): no está "vencido", arranca desde su vencimiento', async ({ page }) => {
       await page.clock.setFixedTime(new Date(INSTANTES['21:30'][0]))
-      const tables = { ...tablasBase(), socios: [...tablasBase().socios, SOCIO_VENCE_HOY] }
+      // Copia propia de este caso (ver el comentario del caso de arriba).
+      const tables = { ...tablasBase(), socios: [...tablasBase().socios, structuredClone(SOCIO_VENCE_HOY)] }
       const dialogos = seguirDialogos(page)
       await loginComoAdmin(page, { tables })
 
