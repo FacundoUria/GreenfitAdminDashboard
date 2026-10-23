@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test'
 import { loginComoAdmin } from './support/auth.js'
-import { tablasBase, DISCIPLINA_CROSSFIT } from './support/fixtures.js'
+import { tablasBase, DISCIPLINA_CROSSFIT, DISCIPLINA_APARATOS } from './support/fixtures.js'
 import { irAClases } from './support/nav.js'
+import { mockCancelacionGimnasio } from './support/rpcCancelacionGimnasio.js'
 
 // Ticket "cancelar clase puntual" -- ANTES "Cancelar" hacía un DELETE
 // directo sobre `classes` (borraba la plantilla recurrente ENTERA, todos
@@ -88,47 +89,6 @@ function socioDePrueba(n) {
 
 const SOCIOS = [1, 2, 3].map(socioDePrueba)
 
-// Simulación server-side de admin_cancelar_clase_dia() -- mismo criterio
-// que el resto de e2e/support/rpcMocks.js: no reimplementa el SQL entero,
-// solo lo suficiente para que `tables` quede en el estado que produciría el
-// RPC real -- reintegra el lote de origen de cada booking de esa
-// clase+fecha (si sigue vigente), las borra, marca la ocurrencia como
-// cancelada e inserta una notification por socio afectado.
-function mockAdminCancelarClaseDia(tables) {
-  return (request) => {
-    const { p_class_id: classId, p_occurrence_date: fecha } = request.postDataJSON()
-    const afectados = (tables.bookings ?? []).filter((b) => b.class_id === classId && b.booking_date === fecha)
-
-    tables.notifications = tables.notifications ?? []
-    for (const booking of afectados) {
-      const lote = (tables.user_credits ?? []).find((uc) => uc.id === booking.credit_lote_id)
-      if (lote && new Date(lote.expires_at).getTime() > Date.now()) {
-        lote.remaining_credits = (lote.remaining_credits ?? 0) + 1
-      }
-      tables.notifications.push({
-        id: `notif-${booking.user_id}`,
-        sender_id: 'e2e-admin-0000-0000-0000-000000000000',
-        audience_type: 'user',
-        target_user_id: booking.user_id,
-        title: 'Clase cancelada',
-        body: 'CrossFit de las 18:00 del ' + fecha + ' fue cancelada por el gimnasio. Ya te reintegramos el crédito.',
-      })
-    }
-
-    tables.bookings = (tables.bookings ?? []).filter((b) => !(b.class_id === classId && b.booking_date === fecha))
-
-    tables.class_occurrence_cancellations = tables.class_occurrence_cancellations ?? []
-    tables.class_occurrence_cancellations.push({
-      id: `cancel-${classId}-${fecha}`,
-      class_id: classId,
-      occurrence_date: fecha,
-      cancelled_by: 'e2e-admin-0000-0000-0000-000000000000',
-    })
-
-    return afectados.length
-  }
-}
-
 // Mock de admin_book_class -- solo lo suficiente para probar el guard
 // nuevo (rechaza si la ocurrencia ya está cancelada); no reimplementa
 // cupo/créditos/XP, fuera del alcance de este ticket.
@@ -180,7 +140,7 @@ test('cancelar una clase de hoy con 3 socios anotados -- reintegra el crédito a
   let pushBody = null
   await loginComoAdmin(page, {
     tables,
-    rpc: { admin_cancelar_clase_dia: mockAdminCancelarClaseDia(tables) },
+    rpc: { admin_cancelar_clase_dia_v2: mockCancelacionGimnasio(tables).admin_cancelar_clase_dia_v2 },
     functions: {
       'send-push': (request) => {
         pushBody = request.postDataJSON()
@@ -199,7 +159,7 @@ test('cancelar una clase de hoy con 3 socios anotados -- reintegra el crédito a
   await expect(page.getByText('Cancelada este día')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Cancelar clase' })).toBeDisabled()
 
-  await expect.poll(() => mensajes.some((m) => m.includes('se reintegró el crédito a 3 socio'))).toBe(true)
+  await expect.poll(() => mensajes.some((m) => m.includes('Crédito devuelto a 3 de 3.'))).toBe(true)
 
   // `classes` NUNCA se tocó -- sigue existiendo con sus days_of_week de siempre.
   expect(tables.classes).toHaveLength(1)
@@ -222,6 +182,134 @@ test('cancelar una clase de hoy con 3 socios anotados -- reintegra el crédito a
   // Push real -- mismos userIds afectados, audiencia 'users' (no 'class').
   expect(pushBody.audience).toBe('users')
   expect([...pushBody.targetUserIds].sort()).toEqual(SOCIOS.map((s) => s.profile.id).sort())
+
+  // Lo que se le dice al socio es la verdad: se le devolvió, con la fecha del lote.
+  const textoDevuelto = `CrossFit de las 18:00 del ${FECHA_HOY.split('-').reverse().join('/')} fue cancelada por el gimnasio. Te devolvimos el crédito (vence el 01/01/2099).`
+  expect(tables.notifications.every((n) => n.body === textoDevuelto)).toBe(true)
+  expect(pushBody.body).toBe(textoDevuelto)
+})
+
+// Tanda 2 -- cancela el gimnasio: cada socio recibe la verdad sobre SU crédito
+// y Seba ve el resumen (a cuántos sí, a cuántos no y por qué).
+test('cancelar una clase con un crédito devuelto y dos no devueltos -- resumen para Seba y un push por cada texto', async ({
+  page,
+}) => {
+  const [conVigente, deAnulado, sinNada] = SOCIOS
+  const loteAnulado = { ...deAnulado.lote, id: 'uc-cancelar-anulado', remaining_credits: 0, expires_at: '2026-01-01T12:00:00.000Z' }
+  const loteVencido = { ...sinNada.lote, id: 'uc-cancelar-vencido', remaining_credits: 0, expires_at: '2026-01-01T12:00:00.000Z' }
+  const tables = {
+    ...tablasBase(),
+    disciplines: [DISCIPLINA_CROSSFIT],
+    classes: [CLASE_A_CANCELAR],
+    profiles: SOCIOS.map((s) => s.profile),
+    user_credits: [conVigente.lote, loteAnulado, loteVencido],
+    bookings: [
+      conVigente.booking,
+      { ...deAnulado.booking, credit_lote_id: loteAnulado.id },
+      { ...sinNada.booking, credit_lote_id: loteVencido.id },
+    ],
+    pagos_socio: [
+      {
+        id: 'pago-anulado-e2e',
+        user_id: deAnulado.profile.id,
+        estado: 'anulado',
+        created_at: '2026-10-02T15:00:00.000Z',
+        detalle_acreditacion: { reversion: { filas_vencidas: [{ user_credit_id: loteAnulado.id }] } },
+      },
+    ],
+    class_occurrence_cancellations: [],
+    notifications: [],
+  }
+
+  const mensajes = capturarAlertas(page)
+  const pushes = []
+  await loginComoAdmin(page, {
+    tables,
+    rpc: { admin_cancelar_clase_dia_v2: mockCancelacionGimnasio(tables).admin_cancelar_clase_dia_v2 },
+    functions: {
+      'send-push': (request) => {
+        pushes.push(request.postDataJSON())
+        return { destinatarios: 1 }
+      },
+    },
+  })
+  await mockEmbedDisciplinesEnClasses(page, tables)
+
+  await irAClases(page)
+  await page.getByRole('button', { name: 'Cancelar clase' }).click()
+  await expect(page.getByText('Cancelada este día')).toBeVisible()
+
+  await expect.poll(() => mensajes.find((m) => m.startsWith('Clase cancelada para ese día'))).toBeTruthy()
+  const resumen = mensajes.find((m) => m.startsWith('Clase cancelada para ese día'))
+  expect(resumen).toContain('Crédito devuelto a 1 de 3.')
+  expect(resumen).toContain('NO devueltos (2):')
+  expect(resumen).toContain('Socio Prueba 2: NO se devolvió el crédito, era de un pago anulado (del 02/10/2026).')
+  expect(resumen).toContain('Socio Prueba 3: NO se devolvió el crédito, no tiene créditos vigentes de CrossFit.')
+
+  // Créditos: +1 solo al lote vigente; los otros dos, intactos.
+  expect(tables.user_credits.find((f) => f.id === conVigente.lote.id).remaining_credits).toBe(6)
+  expect(tables.user_credits.find((f) => f.id === loteAnulado.id).remaining_credits).toBe(0)
+  expect(tables.user_credits.find((f) => f.id === loteVencido.id).remaining_credits).toBe(0)
+
+  // Un push por cada texto distinto, cada uno a su socio, ninguno miente.
+  const fecha = FECHA_HOY.split('-').reverse().join('/')
+  await expect.poll(() => pushes.length).toBe(3)
+  const porSocio = Object.fromEntries(pushes.map((p) => [p.targetUserIds[0], p.body]))
+  expect(porSocio[conVigente.profile.id]).toContain('Te devolvimos el crédito')
+  expect(porSocio[deAnulado.profile.id]).toBe(
+    `La clase del ${fecha} se canceló. Ese crédito no se reintegró porque pertenecía a un pago anulado. Consultá con el gimnasio.`,
+  )
+  expect(porSocio[sinNada.profile.id]).toContain('no se reintegró porque no tenés créditos vigentes de CrossFit')
+  expect(pushes.every((p) => p.targetUserIds.length === 1 && p.audience === 'users')).toBe(true)
+})
+
+// Tanda 2 (decisión de Facu): una clase de Aparatos (kind = 'membership') no
+// usa créditos. Sin acceso vigente, el aviso lo dice; en el resumen de Seba va
+// aparte (no es "devuelto" ni "no devuelto").
+test('cancelar una clase de APARATOS con un socio sin acceso vigente -- no se crea nada y el aviso lo dice', async ({ page }) => {
+  const claseAparatos = { ...CLASE_A_CANCELAR, id: 'clase-e2e-aparatos-cancelar', discipline_id: DISCIPLINA_APARATOS.id, title: 'Aparatos' }
+  const [socio] = SOCIOS
+  const tables = {
+    ...tablasBase(),
+    disciplines: [DISCIPLINA_CROSSFIT, DISCIPLINA_APARATOS],
+    classes: [claseAparatos],
+    profiles: [socio.profile],
+    user_credits: [socio.lote], // solo CrossFit: ningún acceso a Aparatos
+    bookings: [{ ...socio.booking, class_id: claseAparatos.id, credit_lote_id: null }],
+    class_occurrence_cancellations: [],
+    notifications: [],
+  }
+  const mensajes = capturarAlertas(page)
+  const pushes = []
+  await loginComoAdmin(page, {
+    tables,
+    rpc: { admin_cancelar_clase_dia_v2: mockCancelacionGimnasio(tables).admin_cancelar_clase_dia_v2 },
+    functions: {
+      'send-push': (request) => {
+        pushes.push(request.postDataJSON())
+        return { destinatarios: 1 }
+      },
+    },
+  })
+  await mockEmbedDisciplinesEnClasses(page, tables)
+
+  await irAClases(page)
+  await page.getByRole('button', { name: 'Cancelar clase' }).click()
+  await expect(page.getByText('Cancelada este día')).toBeVisible()
+
+  await expect.poll(() => mensajes.find((m) => m.startsWith('Clase cancelada para ese día'))).toBeTruthy()
+  const resumen = mensajes.find((m) => m.startsWith('Clase cancelada para ese día'))
+  expect(resumen).toContain('Aparatos, no usa créditos (1):')
+  expect(resumen).toContain('Socio Prueba 1: Aparatos no usa créditos, no había nada que devolver; no tiene acceso vigente a Aparatos.')
+  expect(resumen).not.toContain('NO devueltos')
+
+  expect(tables.user_credits).toHaveLength(1)
+  expect(tables.user_credits[0].remaining_credits).toBe(5)
+  const fecha = FECHA_HOY.split('-').reverse().join('/')
+  const texto = `Aparatos de las 18:00 del ${fecha} fue cancelada por el gimnasio. Aparatos no usa créditos y hoy no tenés acceso vigente a Aparatos. Consultá con el gimnasio.`
+  expect(tables.notifications.map((n) => n.body)).toEqual([texto])
+  await expect.poll(() => pushes.length).toBe(1)
+  expect(pushes[0].body).toBe(texto)
 })
 
 test('intentar anotar a alguien nuevo en esa misma clase+fecha después de cancelada -- admin_book_class rechaza con el mensaje claro', async ({

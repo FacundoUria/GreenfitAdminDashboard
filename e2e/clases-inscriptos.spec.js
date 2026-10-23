@@ -1,11 +1,12 @@
 import { test, expect } from '@playwright/test'
 import { loginComoAdmin } from './support/auth.js'
 import { irAClases } from './support/nav.js'
-import { tablasBase, DISCIPLINA_CROSSFIT, SOCIO_MARTINA, PROFILE_MARTINA } from './support/fixtures.js'
+import { mockCancelacionGimnasio } from './support/rpcCancelacionGimnasio.js'
+import { tablasBase, DISCIPLINA_CROSSFIT, DISCIPLINA_APARATOS, SOCIO_MARTINA, PROFILE_MARTINA } from './support/fixtures.js'
 
 // PARTE A -- click en un inscripto (con dni) redirige a su ficha (deep-link
 // ?editar=<dni>, mismo patrón que ?filtro=por_vencer). PARTE B -- "Quitar de
-// la clase" reintegra el crédito SIEMPRE (p_forzar_reintegro), sin importar
+// la clase" reintegra el crédito SIEMPRE (admin_quitar_de_clase), sin importar
 // el tiempo de gracia normal.
 
 // El mock compartido (supabaseMock.js) no resuelve joins reales -- el embed
@@ -142,99 +143,41 @@ const BOOKING_MARTINA_PRONTO = {
   profiles: { full_name: 'Martina Ríos', dni: SOCIO_MARTINA.dni },
 }
 
-// Simulación server-side de admin_cancel_booking() -- mismo criterio que el
-// resto de e2e/support/rpcMocks.js: no reimplementa el SQL entero, solo lo
-// suficiente para que `tables` quede en el estado que produciría el RPC
-// real. Réplica el mismo cálculo de "tiempo de gracia" que la migración
-// (limite_cancelacion_minutos, default 120) Y el override nuevo de
-// p_forzar_reintegro -- así el test ejercita la diferencia real de
-// comportamiento, no un mock que "siempre reintegra" sin condición.
-function mockAdminCancelBooking(tables, ahoraFija) {
-  return (request) => {
-    const {
-      p_user_id: userId,
-      p_class_id: classId,
-      p_booking_date: bookingDate,
-      p_forzar_reintegro: forzarReintegro,
-    } = request.postDataJSON()
-
-    const clase = (tables.classes ?? []).find((c) => c.id === classId)
-    if (!clase) return { __e2eError: { status: 400, body: { message: `No existe la clase ${classId}` } } }
-
-    const limiteMinutos = tables.configuracion?.[0]?.limite_cancelacion_minutos ?? 120
-    const claseInicio = new Date(`${bookingDate}T${clase.start_time}`)
-    const dentroDelLimite = ahoraFija <= new Date(claseInicio.getTime() - limiteMinutos * 60_000)
-
-    const idx = (tables.bookings ?? []).findIndex(
-      (b) => b.user_id === userId && b.class_id === classId && b.booking_date === bookingDate,
-    )
-    if (idx === -1) {
-      return { __e2eError: { status: 400, body: { message: 'Ese socio no tenía una reserva en esta clase' } } }
-    }
-    const loteOrigenId = tables.bookings[idx].credit_lote_id ?? null
-    tables.bookings.splice(idx, 1)
-
-    // Criterio por LOTES de supabase_migration_fix_admin_cancel_booking_lote_
-    // exacto.sql (el mismo de cancel_booking() de la PWA):
-    //  - reserva con credit_lote_id: +1 SOLO en ese lote y SOLO si sigue
-    //    vigente -- si venció no reintegra nada, ni con forzar, ni en otro lote;
-    //  - reserva sin credit_lote_id: el lote vigente que vence más pronto.
-    if (dentroDelLimite || forzarReintegro) {
-      const vigente = (f) => new Date(f.expires_at) > ahoraFija
-      if (loteOrigenId) {
-        const lote = (tables.user_credits ?? []).find((f) => f.id === loteOrigenId)
-        if (lote && vigente(lote)) lote.remaining_credits = (lote.remaining_credits ?? 0) + 1
-      } else {
-        const lote = (tables.user_credits ?? [])
-          .filter((f) => f.user_id === userId && f.discipline_id === clase.discipline_id && vigente(f))
-          .sort((a, b) => new Date(a.expires_at) - new Date(b.expires_at))[0]
-        if (lote) lote.remaining_credits = (lote.remaining_credits ?? 0) + 1
-      }
-    }
-
-    return dentroDelLimite
-  }
-}
+// Tanda 2 -- "Quitar de la clase" usa admin_quitar_de_clase (cancela EL
+// GIMNASIO): el crédito se intenta devolver SIEMPRE, sin importar el tiempo
+// de gracia, con las reglas de supabase_migration_cancelacion_gimnasio_
+// reintegro.sql (simuladas en e2e/support/rpcCancelacionGimnasio.js). Seba ve
+// qué pasó con el crédito y el socio recibe una notificación con la verdad.
 
 test('PARTE B -- "Quitar de la clase" reintegra el crédito SIEMPRE, aunque falten solo 10 minutos (fuera del tiempo de gracia normal)', async ({
   page,
 }) => {
-  const tables = { ...tablasBase(), classes: [CLASE_A_PUNTO_DE_EMPEZAR], bookings: [BOOKING_MARTINA_PRONTO] }
+  const tables = { ...tablasBase(), classes: [CLASE_A_PUNTO_DE_EMPEZAR], bookings: [BOOKING_MARTINA_PRONTO], notifications: [] }
   // Martina arranca con 4 créditos de CrossFit (USER_CREDITS_MARTINA) --
   // punto de partida, para poder confirmar el +1 real después.
   expect(tables.user_credits[0].remaining_credits).toBe(4)
 
-  page.on('dialog', (dialog) => dialog.accept())
+  const { bodies, mensajes } = await quitarInscripto(page, tables)
 
-  let bodyRecibido = null
-  await page.clock.setFixedTime(HORA_CONGELADA)
-  await loginComoAdmin(page, {
-    tables,
-    rpc: {
-      admin_cancel_booking: (request) => {
-        bodyRecibido = request.postDataJSON()
-        return mockAdminCancelBooking(tables, HORA_CONGELADA)(request)
-      },
+  expect(bodies).toEqual([
+    {
+      p_user_id: PROFILE_MARTINA.id,
+      p_class_id: CLASE_A_PUNTO_DE_EMPEZAR.id,
+      p_booking_date: BOOKING_MARTINA_PRONTO.booking_date,
+      p_reason: 'Quitado por el admin desde el panel',
     },
-  })
-  await mockEmbedDisciplinesEnClasses(page, tables)
-
-  await irAClases(page)
-  await page.getByRole('button', { name: 'Ver Inscriptos' }).click()
-  await expect(page.getByRole('heading', { name: 'CrossFit 18hs' })).toBeVisible()
-
-  await page.getByRole('button', { name: 'Quitar de la clase' }).click()
-  await expect(page.getByText('Todavía no hay socios inscriptos en esta clase.')).toBeVisible()
-
-  expect(bodyRecibido.p_forzar_reintegro).toBe(true)
-  // Con solo 10 minutos de anticipación (contra un tiempo de gracia
-  // configurado en 120), cancel_booking()/admin_cancel_booking() de ANTES
-  // de este ticket NO hubieran reintegrado nada -- acá sí, porque Seba lo
-  // sacó desde el Admin (p_forzar_reintegro:true), no el socio por su cuenta.
+  ])
+  // Con solo 10 minutos de anticipación (contra un tiempo de gracia de 120),
+  // cuando cancela el socio no se reintegra -- acá sí, lo sacó el gimnasio.
   expect(tables.user_credits[0].remaining_credits).toBe(5)
+  expect(mensajes.some((m) => m.startsWith('Socio quitado de la clase.') && m.includes('Martina Ríos: crédito devuelto'))).toBe(true)
+  // Ahora también se le avisa al socio, con la verdad.
+  expect(tables.notifications).toHaveLength(1)
+  expect(tables.notifications[0]).toMatchObject({ target_user_id: PROFILE_MARTINA.id, title: 'Cambio en tu reserva' })
+  expect(tables.notifications[0].body).toContain('El gimnasio te quitó de CrossFit 18hs de las 18:00 del 10/08/2026. Te devolvimos el crédito')
 })
 
-// ---- Reintegro por LOTE (fix de la regresión de admin_cancel_booking) ----
+// ---- Reintegro por LOTE ----
 
 function loteCrossfit(id, remaining, expiresAt, createdAt) {
   return {
@@ -249,27 +192,34 @@ function loteCrossfit(id, remaining, expiresAt, createdAt) {
 }
 
 // Corre el flujo real de UI ("Quitar de la clase") y devuelve los bodies que
-// llegaron al RPC, para poder confirmar que SIEMPRE viaja p_forzar_reintegro.
-async function quitarInscripto(page, tables) {
-  const bodies = []
-  page.on('dialog', (dialog) => dialog.accept())
+// llegaron al RPC, los mensajes que vio Seba y los push enviados.
+async function quitarInscripto(page, tables, titulo = 'CrossFit 18hs') {
+  const mensajes = []
+  const pushes = []
+  page.on('dialog', async (dialog) => {
+    if (dialog.type() !== 'confirm') mensajes.push(dialog.message())
+    await dialog.accept()
+  })
+  const mock = mockCancelacionGimnasio(tables, { ahora: () => HORA_CONGELADA })
   await page.clock.setFixedTime(HORA_CONGELADA)
   await loginComoAdmin(page, {
     tables,
-    rpc: {
-      admin_cancel_booking: (request) => {
-        bodies.push(request.postDataJSON())
-        return mockAdminCancelBooking(tables, HORA_CONGELADA)(request)
+    rpc: { admin_quitar_de_clase: mock.admin_quitar_de_clase },
+    functions: {
+      'send-push': (request) => {
+        pushes.push(request.postDataJSON())
+        return { destinatarios: 1 }
       },
     },
   })
   await mockEmbedDisciplinesEnClasses(page, tables)
   await irAClases(page)
   await page.getByRole('button', { name: 'Ver Inscriptos' }).click()
-  await expect(page.getByRole('heading', { name: 'CrossFit 18hs' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: titulo })).toBeVisible()
   await page.getByRole('button', { name: 'Quitar de la clase' }).click()
   await expect(page.getByText('Todavía no hay socios inscriptos en esta clase.')).toBeVisible()
-  return bodies
+  await expect.poll(() => mensajes.length).toBeGreaterThan(0)
+  return { bodies: mock.llamadas.map((l) => l.body), mensajes, pushes }
 }
 
 const VIGENTE = '2026-12-01T12:00:00.000Z'
@@ -291,7 +241,10 @@ test('lote de origen VIGENTE -- reintegra ahí exacto, no en otro lote (aunque e
   expect(tables.user_credits.find((f) => f.id === 'lote-mas-reciente').remaining_credits).toBe(5)
 })
 
-test('lote de origen VENCIDO -- NO reintegra nada (ni en otro lote vigente), ni con p_forzar_reintegro=true', async ({ page }) => {
+// Tanda 2, decisión D1 = O1: ANTES un lote de origen vencido no devolvía nada.
+// Ahora, cuando cancela el gimnasio, el crédito se suma al lote VIGENTE de esa
+// disciplina que vence antes (con su fecha).
+test('lote de origen VENCIDO -- el crédito se suma al lote vigente que vence antes, y Seba lo ve', async ({ page }) => {
   const tables = {
     ...tablasBase(),
     classes: [CLASE_A_PUNTO_DE_EMPEZAR],
@@ -301,11 +254,14 @@ test('lote de origen VENCIDO -- NO reintegra nada (ni en otro lote vigente), ni 
       loteCrossfit('lote-vigente', 5, VIGENTE, '2026-08-05T00:00:00.000Z'),
     ],
   }
-  const bodies = await quitarInscripto(page, tables)
+  const { mensajes, pushes } = await quitarInscripto(page, tables)
 
-  expect(bodies[0].p_forzar_reintegro).toBe(true) // el flujo real SIEMPRE fuerza -- y aun así no revive un lote muerto
   expect(tables.user_credits.find((f) => f.id === 'lote-vencido').remaining_credits).toBe(3)
-  expect(tables.user_credits.find((f) => f.id === 'lote-vigente').remaining_credits).toBe(5)
+  expect(tables.user_credits.find((f) => f.id === 'lote-vigente').remaining_credits).toBe(6)
+  expect(mensajes.some((m) => m.includes('su lote original ya estaba vencido o lo reemplazó un pago posterior'))).toBe(true)
+  await expect.poll(() => pushes.length).toBe(1)
+  expect(pushes[0]).toMatchObject({ title: 'Cambio en tu reserva', audience: 'users', targetUserIds: [PROFILE_MARTINA.id] })
+  expect(pushes[0].body).toContain('Te devolvimos el crédito (vence el 01/12/2026)')
 })
 
 test('reserva vieja SIN credit_lote_id -- reintegra al lote vigente que VENCE antes, no al más reciente por creación', async ({
@@ -326,4 +282,79 @@ test('reserva vieja SIN credit_lote_id -- reintegra al lote vigente que VENCE an
   expect(tables.user_credits.find((f) => f.id === 'lote-vence-antes').remaining_credits).toBe(3)
   expect(tables.user_credits.find((f) => f.id === 'lote-mas-reciente').remaining_credits).toBe(6)
   expect(tables.user_credits.find((f) => f.id === 'lote-vencido').remaining_credits).toBe(1)
+})
+
+// Tanda 2: un lote de un pago ANULADO no se devuelve, aunque siga vigente
+// (reversión anterior a la regla F, detectada por creditos[].lote_id). Ni
+// siquiera sirve de destino para otro reintegro.
+test('lote de un PAGO ANULADO -- no se devuelve, Seba ve el motivo y el socio recibe la verdad', async ({ page }) => {
+  const tables = {
+    ...tablasBase(),
+    classes: [CLASE_A_PUNTO_DE_EMPEZAR],
+    bookings: [{ ...BOOKING_MARTINA_PRONTO, credit_lote_id: 'lote-de-pago-anulado' }],
+    user_credits: [
+      loteCrossfit('lote-de-pago-anulado', 2, VIGENTE, '2026-07-01T00:00:00.000Z'),
+      loteCrossfit('lote-bueno', 5, '2026-12-20T12:00:00.000Z', '2026-08-05T00:00:00.000Z'),
+    ],
+    pagos_socio: [
+      {
+        id: 'pago-anulado-pre-f',
+        user_id: PROFILE_MARTINA.id,
+        estado: 'anulado',
+        created_at: '2026-07-01T15:00:00.000Z',
+        detalle_acreditacion: {
+          creditos: [{ discipline_id: DISCIPLINA_CROSSFIT.id, credits_otorgados: 8, lote_id: 'lote-de-pago-anulado' }],
+        },
+      },
+    ],
+    notifications: [],
+  }
+  const { mensajes, pushes } = await quitarInscripto(page, tables)
+
+  expect(tables.user_credits.find((f) => f.id === 'lote-de-pago-anulado').remaining_credits).toBe(2)
+  expect(tables.user_credits.find((f) => f.id === 'lote-bueno').remaining_credits).toBe(5)
+  expect(mensajes.some((m) => m.includes('Martina Ríos: NO se devolvió el crédito, era de un pago anulado (del 01/07/2026).'))).toBe(true)
+  const texto =
+    'El gimnasio te quitó de la clase del 10/08/2026. Ese crédito no se reintegró porque pertenecía a un pago anulado. Consultá con el gimnasio.'
+  expect(tables.notifications[0].body).toBe(texto)
+  await expect.poll(() => pushes.length).toBe(1)
+  expect(pushes[0].body).toBe(texto)
+})
+
+// Tanda 2 (decisión de Facu): Aparatos (kind = 'membership') no usa créditos.
+// Si el gimnasio quita al socio, NO se suma nada a remaining_credits; el aviso
+// dice hasta cuándo sigue su acceso.
+test('clase de APARATOS -- no se suma ningún crédito y el aviso dice hasta cuándo sigue el acceso', async ({ page }) => {
+  const claseAparatos = { ...CLASE_A_PUNTO_DE_EMPEZAR, id: 'clase-e2e-aparatos', discipline_id: DISCIPLINA_APARATOS.id, title: 'Aparatos 18hs' }
+  const accesoAparatos = {
+    id: 'acceso-aparatos',
+    user_id: PROFILE_MARTINA.id,
+    discipline_id: DISCIPLINA_APARATOS.id,
+    remaining_credits: null,
+    expires_at: '2026-12-15T12:00:00.000Z',
+    created_at: '2026-08-01T00:00:00.000Z',
+    discipline: DISCIPLINA_APARATOS,
+  }
+  const tables = {
+    ...tablasBase(),
+    classes: [claseAparatos],
+    bookings: [{ ...BOOKING_MARTINA_PRONTO, class_id: claseAparatos.id, credit_lote_id: null }],
+    user_credits: [...tablasBase().user_credits, accesoAparatos],
+    notifications: [],
+  }
+  // La fila de CrossFit de la fixture es un objeto compartido entre tests del
+  // archivo (otro test ya pudo sumarle): se compara contra su valor inicial.
+  const crossfitAntes = tables.user_credits.find((f) => f.discipline_id === DISCIPLINA_CROSSFIT.id).remaining_credits
+  const { mensajes, pushes } = await quitarInscripto(page, tables, 'Aparatos 18hs')
+
+  expect(tables.user_credits.find((f) => f.id === 'acceso-aparatos')).toMatchObject({ remaining_credits: null, expires_at: '2026-12-15T12:00:00.000Z' })
+  expect(tables.user_credits.find((f) => f.discipline_id === DISCIPLINA_CROSSFIT.id).remaining_credits).toBe(crossfitAntes) // CrossFit tampoco se toca
+  const texto = 'El gimnasio te quitó de Aparatos 18hs de las 18:00 del 10/08/2026. Aparatos no usa créditos: tu acceso sigue igual hasta el 15/12/2026.'
+  expect(tables.notifications).toHaveLength(1)
+  expect(tables.notifications[0].body).toBe(texto)
+  await expect.poll(() => pushes.length).toBe(1)
+  expect(pushes[0].body).toBe(texto)
+  expect(
+    mensajes.some((m) => m.includes('Martina Ríos: Aparatos no usa créditos, no había nada que devolver; su acceso sigue igual hasta el 15/12/2026.')),
+  ).toBe(true)
 })

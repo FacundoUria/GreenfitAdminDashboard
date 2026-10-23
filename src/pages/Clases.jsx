@@ -17,6 +17,7 @@ import {
 } from '../utils/calendarioClases'
 import { fetchCreditosVigentesPorSocio, fetchSociosParaAnotar } from '../utils/anotarSocios'
 import { mensajeErrorAnotar } from '../utils/buscarSocios'
+import { mensajeQuitar, pushesPorMensaje, resumenCancelacionClase } from '../utils/cancelacionGimnasio'
 import ClasesGrid from '../components/ClasesGrid'
 import InscriptosModal from '../components/InscriptosModal'
 import NuevaClaseModal from '../components/NuevaClaseModal'
@@ -437,24 +438,27 @@ function Clases() {
     const confirmado = window.confirm(`¿Quitar a ${inscripto.nombre} de esta clase?`)
     if (!confirmado) return
 
-    // p_forzar_reintegro: true SIEMPRE -- a diferencia de cuando el socio se
-    // cancela solo desde la PWA (cancel_booking, con tiempo de gracia), acá
-    // es Seba sacando a alguien desde el Admin por cualquier motivo (no
-    // necesariamente una cancelación tardía del socio) -- el crédito se
-    // reintegra incondicional, sin depender de cuánto falte para la clase.
-    // Sin checkbox ni opción: es automático cada vez que se usa este botón.
-    const { error: rpcError } = await supabase.rpc('admin_cancel_booking', {
+    // Cancela el GIMNASIO: el crédito se intenta devolver SIEMPRE, sin importar
+    // cuánto falte para la clase (a diferencia de cancel_booking, cuando
+    // cancela el socio desde la PWA). admin_quitar_de_clase decide qué pasa
+    // con el crédito (lote vigente, de un pago anulado, vencido, Aparatos...),
+    // le deja al socio la notificación in-app con la verdad (UNA vez, en la
+    // base -- acá no se inserta en notifications) y devuelve el texto para Seba.
+    const { data: resultado, error: rpcError } = await supabase.rpc('admin_quitar_de_clase', {
       p_user_id: inscripto.userId,
       p_class_id: clase.id,
       p_booking_date: fechaSeleccionadaStr,
       p_reason: 'Quitado por el admin desde el panel',
-      p_forzar_reintegro: true,
     })
 
     if (rpcError) {
       window.alert(`No se pudo quitar al socio: ${rpcError.message}`)
       return
     }
+
+    // Best-effort: solo el push real (la notificación in-app ya quedó).
+    await enviarPushes('Cambio en tu reserva', pushesPorMensaje([resultado]))
+    window.alert(mensajeQuitar(resultado))
 
     // El reintegro cambia los créditos que muestra el buscador.
     await Promise.all([fetchBookings(fechaSeleccionadaStr), refrescarCreditosBusqueda()])
@@ -477,29 +481,18 @@ function Clases() {
   // cualquier reserva asociada (foreign key de `bookings`, sin cascade --
   // ver investigacion_cancelar_clase_prueba_fk.sql). Lo que hace falta es
   // cancelar la OCURRENCIA de este día puntual nada más -- `classes` no se
-  // toca acá nunca. admin_cancelar_clase_dia() reintegra el crédito a cada
-  // anotado (mismo criterio incondicional que "Quitar de la clase") y les
-  // deja una notificación in-app; acá solo falta el push real.
+  // toca acá nunca. admin_cancelar_clase_dia_v2() intenta devolver el crédito
+  // a cada anotado (mismas reglas que "Quitar de la clase"), le deja a cada
+  // uno una notificación in-app con SU caso (en la base, una vez) y devuelve
+  // el resumen para Seba.
   const handleCancelarClase = async (clase) => {
     if (soloLectura) return
     const confirmado = window.confirm(
-      `¿Cancelar la clase de ${clase.disciplina} de las ${clase.horaInicio} del ${formatFecha(fechaSeleccionadaStr)}? Se reintegra el crédito a todos los anotados de ese día y se les avisa. El resto de la semana no se toca.`,
+      `¿Cancelar la clase de ${clase.disciplina} de las ${clase.horaInicio} del ${formatFecha(fechaSeleccionadaStr)}? Se intenta devolver el crédito a cada anotado de ese día y se les avisa; al terminar vas a ver a quién sí y a quién no. El resto de la semana no se toca.`,
     )
     if (!confirmado) return
 
-    // Resuelto ANTES de cancelar -- el RPC de abajo borra las reservas, así
-    // que después no quedaría de dónde sacar a quién avisarle por push.
-    const { data: inscriptos, error: inscriptosError } = await supabase
-      .from('bookings')
-      .select('user_id')
-      .eq('class_id', clase.id)
-      .eq('booking_date', fechaSeleccionadaStr)
-    if (inscriptosError) {
-      console.error('Error al resolver los inscriptos antes de cancelar la clase:', inscriptosError.message)
-    }
-    const userIdsAfectados = [...new Set((inscriptos ?? []).map((b) => b.user_id))]
-
-    const { data: cantidadCancelados, error: rpcError } = await supabase.rpc('admin_cancelar_clase_dia', {
+    const { data: resultado, error: rpcError } = await supabase.rpc('admin_cancelar_clase_dia_v2', {
       p_class_id: clase.id,
       p_occurrence_date: fechaSeleccionadaStr,
     })
@@ -510,24 +503,26 @@ function Clases() {
     }
 
     // Best-effort -- el reintegro y la notificación in-app YA se aplicaron
-    // (RPC de arriba, en la misma transacción); si el push real falla, no
-    // hay nada crítico que revertir, solo se loguea.
-    if (userIdsAfectados.length > 0) {
+    // (RPC de arriba, en la misma transacción); un push por cada texto
+    // distinto, para que cada socio lea lo que pasó con SU crédito.
+    await enviarPushes('Clase cancelada', pushesPorMensaje(resultado?.detalle))
+
+    window.alert(resumenCancelacionClase(resultado))
+    await Promise.all([fetchBookings(fechaSeleccionadaStr), fetchCancelaciones(fechaSeleccionadaStr)])
+  }
+
+  // Push real, nada más (audience 'users': send-push NO inserta en
+  // notifications, la notificación in-app ya la dejó la RPC). Si falla no hay
+  // nada que revertir: solo se loguea.
+  const enviarPushes = async (title, grupos) => {
+    for (const { body, targetUserIds } of grupos) {
       const { error: pushError } = await supabase.functions.invoke('send-push', {
-        body: {
-          title: 'Clase cancelada',
-          body: `${clase.disciplina} de las ${clase.horaInicio} del ${formatFecha(fechaSeleccionadaStr)} fue cancelada por el gimnasio. Ya te reintegramos el crédito.`,
-          audience: 'users',
-          targetUserIds: userIdsAfectados,
-        },
+        body: { title, body, audience: 'users', targetUserIds },
       })
       if (pushError) {
-        console.error('No se pudo enviar el push de la cancelación (la cancelación en sí ya se aplicó):', pushError.message)
+        console.error('No se pudo enviar el push (la cancelación en sí ya se aplicó):', pushError.message)
       }
     }
-
-    window.alert(`Clase cancelada para ese día -- se reintegró el crédito a ${cantidadCancelados ?? 0} socio(s).`)
-    await Promise.all([fetchBookings(fechaSeleccionadaStr), fetchCancelaciones(fechaSeleccionadaStr)])
   }
 
   const handleClaseGuardada = () => {
