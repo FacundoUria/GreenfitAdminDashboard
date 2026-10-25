@@ -3,18 +3,35 @@
 // (antes `toLocaleDateString('es-AR')` a secas -- en la práctica solía dar
 // "5/9/2026", sin cero a la izquierda, en vez del "05/09/2026" que se
 // espera en todo el sistema).
-export function formatFecha(valor) {
-  if (!valor) return '-'
+//
+// T2 -- un valor en texto (timestamp o "solo fecha") se muestra con el día y
+// la hora de ARGENTINA, no con el huso de la PC (antes sin `timeZone`: en una
+// PC fuera de hora Argentina, un vencimiento a fin del día -- 23:59:59 en
+// Argentina -- se veía un día corrido). Un objeto Date se sigue mostrando con
+// sus campos locales: en el Admin son fechas de calendario armadas a mano
+// (new Date(año, mes, día), sumarDias(), proximoVencimiento()).
+const ZONA_ARGENTINA = 'America/Argentina/Mendoza'
 
+function aDate(valor) {
+  if (valor instanceof Date) return valor
   // Un valor "solo fecha" (YYYY-MM-DD, como devuelven las columnas `date` de
   // Postgres) se interpreta como medianoche UTC si se lo pasa tal cual a
   // `Date`; en husos horarios detrás de UTC (ej. Argentina) eso muestra el
-  // día anterior. Forzamos que se interprete en el huso horario local.
+  // día anterior. Se ancla a la medianoche de Argentina (UTC-3 fijo, sin
+  // horario de verano).
   const esSoloFecha = typeof valor === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(valor)
-  const fecha = valor instanceof Date ? valor : new Date(esSoloFecha ? `${valor}T00:00:00` : valor)
+  return new Date(esSoloFecha ? `${valor}T00:00:00-03:00` : valor)
+}
+
+const zonaPara = (valor) => (valor instanceof Date ? {} : { timeZone: ZONA_ARGENTINA })
+
+export function formatFecha(valor) {
+  if (!valor) return '-'
+
+  const fecha = aDate(valor)
 
   if (Number.isNaN(fecha.getTime())) return '-'
-  return fecha.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  return fecha.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', ...zonaPara(valor) })
 }
 
 // Fecha + hora -- reusa formatFecha() para la parte de fecha (misma
@@ -27,11 +44,19 @@ export function formatFechaHora(valor) {
   const fechaTexto = formatFecha(valor)
   if (fechaTexto === '-') return '-'
 
-  const esSoloFecha = typeof valor === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(valor)
-  const fecha = valor instanceof Date ? valor : new Date(esSoloFecha ? `${valor}T00:00:00` : valor)
-  const horaTexto = fecha.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false })
+  const horaTexto = aDate(valor).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, ...zonaPara(valor) })
 
   return `${fechaTexto} ${horaTexto}`
+}
+
+// "YYYY-MM-DD" + 1 año, mismo criterio que `(fecha + interval '1 year')::date`
+// de Postgres: el 29/02 pasa al 28/02 del año siguiente. Tope del editor de
+// "Vencimiento del plan" (admin_editar_fecha_vencimiento_socio rechaza más de
+// 1 año desde hoy).
+export function fechaMasUnAnio(fechaISO) {
+  const [anio, mes, dia] = fechaISO.split('-').map(Number)
+  const ultimoDiaDelMes = new Date(Date.UTC(anio + 1, mes, 0)).getUTCDate()
+  return `${anio + 1}-${String(mes).padStart(2, '0')}-${String(Math.min(dia, ultimoDiaDelMes)).padStart(2, '0')}`
 }
 
 export function hoyISO() {

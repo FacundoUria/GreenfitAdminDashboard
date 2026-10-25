@@ -395,6 +395,25 @@ describe('VencimientoCell -- fecha_vencimiento solo se muestra si el socio tiene
     expect(screen.getAllByText('Aparatos vence el 10/11/2026 · CrossFit vence el 23/09/2026').length).toBeGreaterThan(0)
   })
 
+  it('T2: con fila real de Aparatos, la fecha sale de ESA fila y no del espejo viejo (después de ACORTAR la fecha del plan)', () => {
+    // Fin del 27/10 en Argentina (corte de la regla D) para Aparatos y CrossFit;
+    // el espejo socios.fecha_vencimiento todavía dice la fecha de antes (31/10).
+    const FIN_DEL_27_10_AR = '2026-10-28T02:59:59.999999+00:00'
+    const socio = {
+      ...SOCIO_CON_FOTO,
+      plan: ['CrossFit', 'Aparatos'],
+      fechaVencimiento: '2026-10-31',
+      aparatosVigenteReal: true,
+      membresiasVigentes: [{ disciplineId: 'd-aparatos', disciplineName: 'Aparatos', expiresAt: FIN_DEL_27_10_AR }],
+      creditosPwaPorDisciplina: [
+        { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6, lotes: [{ id: 'l1', remainingCredits: 6, expiresAt: FIN_DEL_27_10_AR }] },
+      ],
+    }
+    render(<SociosTabla socios={[socio]} {...HANDLERS} />)
+    expect(screen.getAllByText('Ambos vencen el 27/10/2026').length).toBeGreaterThan(0)
+    expect(screen.queryByText(/31\/10\/2026/)).toBeNull()
+  })
+
   it('socio con 2 disciplinas de créditos en fechas distintas y SIN Aparatos: una sola línea, sin fecha_vencimiento residual', () => {
     const socio = {
       ...SOCIO_CON_FOTO,

@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import { loginComoAdmin } from './support/auth.js'
 import { tablasBase } from './support/fixtures.js'
 import { irASocios } from './support/nav.js'
-import { mockAdminAcreditarCreditosManual } from './support/rpcMocks.js'
+import { mockAdminAcreditarCreditosManual, finDelDiaArgentinaISO } from './support/rpcMocks.js'
 
 // Bug real: el "hoy" del cobro (RegistrarPagoModal + Socios.jsx) y del alta
 // (NuevoSocioModal) salía de hoyISO() (UTC) -- de 21:00 a 23:59 de Argentina
@@ -120,9 +120,9 @@ for (const timezoneId of ['America/Argentina/Mendoza', 'UTC']) {
         expect(socio.fecha_vencimiento).toBe(vencimiento)
 
         // p_fecha_inicio + p_dias_vigencia -> la fecha que la RPC (simulada)
-        // le pone al plan nuevo.
+        // le pone al plan nuevo. T2 (regla D): el corte es el FIN de ese día en Argentina.
         const aparatos = tables.user_credits.filter((f) => f.user_id === PROFILE_SIN_PAGOS.id)
-        expect(aparatos.map((f) => f.expires_at)).toEqual([`${vencimiento}T12:00:00.000Z`])
+        expect(aparatos.map((f) => f.expires_at)).toEqual([finDelDiaArgentinaISO(vencimiento)])
 
         expect(tables.pagos_socio).toHaveLength(1)
         expect(tables.pagos_socio[0].periodo_desde).toBe(inicio)
@@ -189,7 +189,7 @@ for (const timezoneId of ['America/Argentina/Mendoza', 'UTC']) {
       expect(socio.dia_corte).toBe(22)
       expect(socio.fecha_vencimiento).toBe('2026-11-22')
       const aparatos = tables.user_credits.find((f) => f.user_id === profileAlta.id)
-      expect(aparatos.expires_at).toBe('2026-11-22T12:00:00.000Z')
+      expect(aparatos.expires_at).toBe(finDelDiaArgentinaISO('2026-11-22')) // 23:59:59.999 del 22/11 en Argentina
     })
   })
 }

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Loader2, Minus, Pencil, Plus } from 'lucide-react'
-import { formatFecha } from '../utils/fecha'
-import { resolverUserIdPorDni, fetchCreditosPorDisciplina } from '../utils/fichaSocioPwa'
+import { fechaMasUnAnio, formatFecha } from '../utils/fecha'
+import { diaArgentinaISO } from '../utils/fechaPlan'
+import { ahoraEnArgentina } from '../utils/ahoraArgentina'
+import { resolverUserIdPorDni, fetchCreditosPorDisciplina, fetchMembresiasVigentesPorDni } from '../utils/fichaSocioPwa'
 import {
   fijarCreditosDisciplina,
   ajustarCreditoDisciplina,
@@ -46,9 +48,16 @@ function aparatosActivoReal(socio) {
 // RPC admin_editar_fecha_vencimiento_socio) -- ahí esta sección no se
 // ofrece en absoluto, mismo criterio que "+ Agregar disciplina"/"+ Agregar
 // Aparatos" ya usan para casos sin nada real.
-function fechaPlanActual(socio, filas) {
+//
+// T2 -- la fecha de Aparatos sale de la fila REAL vigente
+// (`fechaAparatosReal`, se vuelve a leer en cada cargar()) y no del espejo
+// `socio.fechaVencimiento`: ese es una foto de cuando se abrió el modal y,
+// al ACORTAR la fecha del plan, seguía ganando como "la más lejana" con la
+// fecha vieja. El espejo queda solo para quien no tiene fila real.
+function fechaPlanActual(socio, filas, fechaAparatosReal) {
   const candidatos = []
-  if (aparatosActivoReal(socio) && socio.fechaVencimiento) candidatos.push(socio.fechaVencimiento)
+  if (fechaAparatosReal) candidatos.push(fechaAparatosReal)
+  else if (aparatosActivoReal(socio) && socio.fechaVencimiento) candidatos.push(socio.fechaVencimiento)
   for (const fila of filas) {
     if (fila.proximoVencimiento) candidatos.push(fila.proximoVencimiento)
   }
@@ -56,19 +65,15 @@ function fechaPlanActual(socio, filas) {
   return candidatos.reduce((masLejana, actual) => (new Date(actual) > new Date(masLejana) ? actual : masLejana))
 }
 
-// "YYYY-MM-DD" para precargar el <input type="date"> -- mismo criterio de
-// "un valor 'solo fecha' se interpreta en el huso horario local" que ya usa
-// formatFecha() (evita el corrimiento de un día que da tratar un
-// "YYYY-MM-DD" como medianoche UTC).
+// "YYYY-MM-DD" para precargar el <input type="date"> -- un valor "solo
+// fecha" se usa tal cual; un timestamp, con su día en hora ARGENTINA (T2:
+// antes getDate() local -- en una PC fuera de hora Argentina, un corte a fin
+// del día precargaba el día siguiente y "Guardar fecha" sin tocar nada le
+// sumaba un día al socio).
 function aFechaInput(valor) {
   if (!valor) return ''
-  const esSoloFecha = typeof valor === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(valor)
-  const fecha = new Date(esSoloFecha ? `${valor}T00:00:00` : valor)
-  if (Number.isNaN(fecha.getTime())) return ''
-  const y = fecha.getFullYear()
-  const m = String(fecha.getMonth() + 1).padStart(2, '0')
-  const d = String(fecha.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
+  if (typeof valor === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(valor)) return valor
+  return diaArgentinaISO(valor) ?? ''
 }
 
 // Reemplaza a los steppers -/+1/+4/+8/+12 que vivían sueltos en cada fila
@@ -157,6 +162,7 @@ function CreditosEditablesSocio({ socio, disciplinasActivas = [], onCreditosActu
   // "Vencimiento del plan" (CAMBIO 3) -- estado del editor inline, mismo
   // patrón que "+ Agregar disciplina" (abrir/cancelar/guardar separado del
   // resto).
+  const [fechaAparatosReal, setFechaAparatosReal] = useState(null)
   const [editandoFecha, setEditandoFecha] = useState(false)
   const [nuevaFechaPlan, setNuevaFechaPlan] = useState('')
   const [guardandoFecha, setGuardandoFecha] = useState(false)
@@ -168,12 +174,20 @@ function CreditosEditablesSocio({ socio, disciplinasActivas = [], onCreditosActu
       setCargando(true)
       setError(null)
       try {
-        const [idResuelto, mapaCreditos] = await Promise.all([
+        const [idResuelto, mapaCreditos, membresias] = await Promise.all([
           resolverUserIdPorDni(socio.dni),
           fetchCreditosPorDisciplina([socio.dni]),
+          fetchMembresiasVigentesPorDni([socio.dni]),
         ])
         if (cancelado) return
         setUserId(idResuelto)
+        // La más lejana entre las membresías vigentes reales (Aparatos).
+        const vencimientosAparatos = (membresias?.disciplinasPorDni?.get(socio.dni) ?? []).map((m) => m.expiresAt)
+        setFechaAparatosReal(
+          vencimientosAparatos.length > 0
+            ? vencimientosAparatos.reduce((max, f) => (new Date(f) > new Date(max) ? f : max))
+            : null,
+        )
 
         // Las filas salen DIRECTO de lo que fetchCreditosPorDisciplina ya
         // trae -- esa función filtra a "tiene al menos un lote activo" (ver
@@ -341,6 +355,18 @@ function CreditosEditablesSocio({ socio, disciplinasActivas = [], onCreditosActu
       window.alert('Elegí una fecha.')
       return
     }
+    // Mismos topes y mismos textos que admin_editar_fecha_vencimiento_socio
+    // (el RPC es la guarda real; esto evita el viaje cuando la fecha se tipeó
+    // a mano, que el min/max del <input> no frena).
+    const hoy = ahoraEnArgentina().fecha
+    if (nuevaFechaPlan < hoy) {
+      window.alert(`No se puede poner un vencimiento anterior a hoy (${formatFecha(hoy)}).`)
+      return
+    }
+    if (nuevaFechaPlan > fechaMasUnAnio(hoy)) {
+      window.alert(`El vencimiento no puede pasar de un año desde hoy (${formatFecha(fechaMasUnAnio(hoy))}). Revisá la fecha.`)
+      return
+    }
 
     const confirmado = window.confirm(
       `¿Confirmás cambiar el vencimiento de TODO el plan de ${socio.nombre} ${socio.apellido} a ${formatFecha(nuevaFechaPlan)}? Esto afecta a todas sus disciplinas activas por igual.`,
@@ -368,8 +394,11 @@ function CreditosEditablesSocio({ socio, disciplinasActivas = [], onCreditosActu
   // CAMBIO 3 -- fecha única del plan (null = sin nada activo). Se calcula
   // acá, no dentro del guard de abajo, porque también decide si mostrar
   // "Vencimiento del plan" en absoluto.
-  const fechaPlan = fechaPlanActual(socio, filas)
+  const fechaPlan = fechaPlanActual(socio, filas, fechaAparatosReal)
   const tienePlanActivo = fechaPlan !== null
+  // Rango que acepta el RPC: de hoy (en Argentina) a hoy + 1 año.
+  const hoyArgentina = ahoraEnArgentina().fecha
+  const topeFechaPlan = fechaMasUnAnio(hoyArgentina)
 
   // Antes esto era un chequeo síncrono sobre socios.plan (se sabía sin
   // esperar ninguna respuesta de red) -- ahora "¿hay algo que mostrar?"
@@ -415,6 +444,8 @@ function CreditosEditablesSocio({ socio, disciplinasActivas = [], onCreditosActu
                 <input
                   type="date"
                   value={nuevaFechaPlan}
+                  min={hoyArgentina}
+                  max={topeFechaPlan}
                   onChange={(e) => setNuevaFechaPlan(e.target.value)}
                   disabled={guardandoFecha}
                   aria-label="Nueva fecha de vencimiento del plan"

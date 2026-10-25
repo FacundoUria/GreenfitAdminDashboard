@@ -1,9 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import process from 'node:process'
 
 vi.mock('../../utils/fichaSocioPwa', () => ({
   resolverUserIdPorDni: vi.fn(),
   fetchCreditosPorDisciplina: vi.fn(),
+  fetchMembresiasVigentesPorDni: vi.fn(),
 }))
 
 vi.mock('../../utils/creditosPwa', () => ({
@@ -13,7 +15,7 @@ vi.mock('../../utils/creditosPwa', () => ({
   editarFechaVencimientoSocio: vi.fn(),
 }))
 
-import { resolverUserIdPorDni, fetchCreditosPorDisciplina } from '../../utils/fichaSocioPwa'
+import { resolverUserIdPorDni, fetchCreditosPorDisciplina, fetchMembresiasVigentesPorDni } from '../../utils/fichaSocioPwa'
 import {
   fijarCreditosDisciplina,
   ajustarCreditoDisciplina,
@@ -30,11 +32,19 @@ import CreditosEditablesSocio from '../../components/CreditosEditablesSocio'
 // acá se mockea directo esa función, simulando su contrato ya filtrado.
 const DNI_FACUNDO = '44537978'
 
-function mockearCarga({ userId = 'user-1', entradas = [] } = {}) {
+// `aparatos`: expires_at de la fila REAL de Aparatos vigente (o null si no hay).
+function membresiasReales(aparatos) {
+  const disciplinasPorDni = new Map()
+  if (aparatos) disciplinasPorDni.set(DNI_FACUNDO, [{ disciplineId: 'd-aparatos', disciplineName: 'Aparatos', expiresAt: aparatos }])
+  return { vigentePorDni: new Map([[DNI_FACUNDO, Boolean(aparatos)]]), disciplinasPorDni }
+}
+
+function mockearCarga({ userId = 'user-1', entradas = [], aparatos = null } = {}) {
   resolverUserIdPorDni.mockResolvedValue(userId)
   const mapa = new Map()
   mapa.set(DNI_FACUNDO, entradas)
   fetchCreditosPorDisciplina.mockResolvedValue(mapa)
+  fetchMembresiasVigentesPorDni.mockResolvedValue(membresiasReales(aparatos))
 }
 
 describe('CreditosEditablesSocio (reemplaza a los steppers sueltos de SociosTabla.jsx -- ver ticket "Editar Socio")', () => {
@@ -565,6 +575,15 @@ describe('CreditosEditablesSocio -- "Vencimiento del plan" (CAMBIO 3)', () => {
     vi.clearAllMocks()
     vi.spyOn(window, 'confirm')
     vi.spyOn(window, 'alert').mockImplementation(() => {})
+    // T2: el editor acepta de hoy a hoy + 1 año -- "hoy" fijo (25/10/2026,
+    // 12:00 en Argentina) para que las fechas de estos tests no se venzan
+    // solas. Solo Date: los timers reales siguen andando para waitFor.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-25T15:00:00Z'))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('socio con créditos vigentes -- muestra "Vencimiento del plan" con la fecha real', async () => {
@@ -749,5 +768,138 @@ describe('CreditosEditablesSocio -- "Vencimiento del plan" (CAMBIO 3)', () => {
     expect(fijarCreditosDisciplina).not.toHaveBeenCalled()
     expect(ajustarCreditoDisciplina).not.toHaveBeenCalled()
     expect(agregarAparatosSocio).not.toHaveBeenCalled()
+  })
+
+  // ── T2 (regla D) ────────────────────────────────────────────────────────
+  // El corte de una fecha elegida es el FIN de ese día en Argentina:
+  // 23:59:59.999999 (UTC-3) = 02:59:59.999999 UTC del día SIGUIENTE.
+  const FIN_DEL_31_10_AR = '2026-11-01T02:59:59.999999+00:00'
+  const conCorteFinDeDia = () =>
+    mockearCarga({
+      entradas: [
+        {
+          disciplineId: 'd-crossfit',
+          disciplineName: 'CrossFit',
+          remainingCredits: 6,
+          lotes: [{ id: 'l1', remainingCredits: 6, expiresAt: FIN_DEL_31_10_AR }],
+        },
+      ],
+    })
+
+  async function abrirEditor() {
+    await screen.findByText('CrossFit')
+    fireEvent.click(screen.getByRole('button', { name: 'Editar vencimiento del plan' }))
+    return screen.getByLabelText('Nueva fecha de vencimiento del plan')
+  }
+
+  describe('con la PC fuera de hora Argentina', () => {
+    const TZ_ORIGINAL = process.env.TZ
+    afterEach(() => {
+      if (TZ_ORIGINAL === undefined) delete process.env.TZ
+      else process.env.TZ = TZ_ORIGINAL
+    })
+
+    it.each(['UTC', 'Asia/Tokyo'])(
+      'corte a fin del día (PC en %s): muestra y precarga el día elegido, no el siguiente -- "Guardar fecha" sin tocar no suma un día',
+      async (tz) => {
+        process.env.TZ = tz
+        conCorteFinDeDia()
+        window.confirm.mockReturnValue(true)
+
+        render(<CreditosEditablesSocio socio={{ id: 's1', dni: DNI_FACUNDO, nombre: 'Facundo', apellido: 'Uria', plan: ['CrossFit'] }} />)
+
+        await screen.findByText('CrossFit')
+        expect(screen.getAllByText('31/10/2026').length).toBeGreaterThan(0) // "Vencimiento del plan" y "Vence el" de la fila
+        const input = await abrirEditor()
+        expect(input.value).toBe('2026-10-31')
+        fireEvent.click(screen.getByText('Guardar fecha'))
+        await waitFor(() => expect(editarFechaVencimientoSocio).toHaveBeenCalledWith('user-1', '2026-10-31'))
+      },
+    )
+  })
+
+  it('el <input> solo ofrece de hoy (en Argentina) a hoy + 1 año', async () => {
+    conCorteFinDeDia()
+    render(<CreditosEditablesSocio socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit'] }} />)
+
+    const input = await abrirEditor()
+    expect(input.getAttribute('min')).toBe('2026-10-25')
+    expect(input.getAttribute('max')).toBe('2027-10-25')
+  })
+
+  it('a las 22:00 de Argentina (ya es mañana en UTC), "hoy" sigue siendo el día argentino', async () => {
+    vi.setSystemTime(new Date('2026-10-26T01:00:00Z')) // 25/10 22:00 en Argentina
+    conCorteFinDeDia()
+    render(<CreditosEditablesSocio socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit'] }} />)
+
+    const input = await abrirEditor()
+    expect(input.getAttribute('min')).toBe('2026-10-25')
+  })
+
+  it('fecha pasada tipeada a mano: avisa con el mismo texto que el RPC y no llama a nada', async () => {
+    conCorteFinDeDia()
+    window.confirm.mockReturnValue(true)
+    render(<CreditosEditablesSocio socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit'] }} />)
+
+    fireEvent.change(await abrirEditor(), { target: { value: '2026-10-24' } })
+    fireEvent.click(screen.getByText('Guardar fecha'))
+
+    expect(window.alert).toHaveBeenCalledWith('No se puede poner un vencimiento anterior a hoy (25/10/2026).')
+    expect(window.confirm).not.toHaveBeenCalled()
+    expect(editarFechaVencimientoSocio).not.toHaveBeenCalled()
+  })
+
+  it('más de 1 año: avisa con el mismo texto que el RPC y no llama a nada', async () => {
+    conCorteFinDeDia()
+    window.confirm.mockReturnValue(true)
+    render(<CreditosEditablesSocio socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit'] }} />)
+
+    fireEvent.change(await abrirEditor(), { target: { value: '2027-10-26' } })
+    fireEvent.click(screen.getByText('Guardar fecha'))
+
+    expect(window.alert).toHaveBeenCalledWith('El vencimiento no puede pasar de un año desde hoy (25/10/2027). Revisá la fecha.')
+    expect(window.confirm).not.toHaveBeenCalled()
+    expect(editarFechaVencimientoSocio).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['hoy', '2026-10-25'],
+    ['hoy + 1 año exacto', '2027-10-25'],
+  ])('%s se acepta y va al RPC', async (_caso, fecha) => {
+    conCorteFinDeDia()
+    window.confirm.mockReturnValue(true)
+    render(<CreditosEditablesSocio socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit'] }} />)
+
+    fireEvent.change(await abrirEditor(), { target: { value: fecha } })
+    fireEvent.click(screen.getByText('Guardar fecha'))
+
+    expect(window.alert).not.toHaveBeenCalled()
+    await waitFor(() => expect(editarFechaVencimientoSocio).toHaveBeenCalledWith('user-1', fecha))
+  })
+
+  it('ACORTAR la fecha: "Vencimiento del plan" muestra la nueva, aunque el espejo de Aparatos del modal siga con la vieja', async () => {
+    const FIN_DEL_27_10_AR = '2026-10-28T02:59:59.999999+00:00'
+    const lote = (expiresAt) => [
+      { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6, lotes: [{ id: 'l1', remainingCredits: 6, expiresAt }] },
+    ]
+    mockearCarga({ entradas: lote(FIN_DEL_31_10_AR), aparatos: FIN_DEL_31_10_AR })
+    window.confirm.mockReturnValue(true)
+    editarFechaVencimientoSocio.mockImplementation(async () => {
+      // Después del RPC, lo real ya está en la fecha nueva (créditos y Aparatos).
+      mockearCarga({ entradas: lote(FIN_DEL_27_10_AR), aparatos: FIN_DEL_27_10_AR })
+      return 2
+    })
+
+    render(
+      <CreditosEditablesSocio
+        socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit', 'Aparatos'], aparatosVigenteReal: true, fechaVencimiento: '2026-10-31' }}
+      />,
+    )
+
+    fireEvent.change(await abrirEditor(), { target: { value: '2026-10-27' } })
+    fireEvent.click(screen.getByText('Guardar fecha'))
+
+    await waitFor(() => expect(screen.getAllByText('27/10/2026').length).toBeGreaterThan(0))
+    expect(screen.queryByText('31/10/2026')).toBeNull()
   })
 })

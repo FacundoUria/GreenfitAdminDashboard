@@ -370,8 +370,19 @@ function VencimientoCell({ socio }) {
   // fecha_vencimiento sincronizada (todos los RPCs que escriben una
   // escriben la otra a la vez), pero si algún día no fuera así, mejor no
   // mostrar nada a reventar tratando de formatear una fecha inexistente.
-  if (mostrarAparatos && socio.fechaVencimiento) {
-    entradasSimples.push({ nombre: etiquetaMembresia, fechaISO: socio.fechaVencimiento })
+  //
+  // T2 -- con fila real vigente, la fecha sale de ESA fila
+  // (`membresiasVigentes`, que Socios.jsx vuelve a leer después de editar la
+  // fecha del plan) y no del espejo: el espejo queda viejo hasta el próximo
+  // fetchSocios() y, al ACORTAR la fecha, la fila mostraba "Aparatos vence
+  // el <fecha vieja>" al lado de los créditos con la nueva.
+  const vencimientosAparatosReales = (socio.membresiasVigentes ?? []).map((m) => m.expiresAt).filter(Boolean)
+  const fechaAparatos =
+    vencimientosAparatosReales.length > 0
+      ? vencimientosAparatosReales.reduce((max, f) => (new Date(f) > new Date(max) ? f : max))
+      : socio.fechaVencimiento
+  if (mostrarAparatos && fechaAparatos) {
+    entradasSimples.push({ nombre: etiquetaMembresia, fechaISO: fechaAparatos })
   }
 
   // FIX (modelo de "plan único", caso real Facundo Uria DNI 44537978) --

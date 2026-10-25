@@ -16,7 +16,7 @@ const ZONA_ARGENTINA = 'America/Argentina/Mendoza'
 
 // Timestamp de user_credits.expires_at -> día calendario de Argentina
 // ("YYYY-MM-DD"), comparable con socios.fecha_vencimiento (columna `date`).
-function diaArgentinaISO(timestamp) {
+export function diaArgentinaISO(timestamp) {
   const fecha = new Date(timestamp)
   if (Number.isNaN(fecha.getTime())) return null
   // 'en-CA' formatea como YYYY-MM-DD.
