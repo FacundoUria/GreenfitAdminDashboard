@@ -78,11 +78,19 @@ export function mockAdminAcreditarCreditosManual(tables) {
     // RESETEO -- créditos a 0 en TODAS las disciplinas de créditos del
     // socio, Aparatos vigente apagado (ayer, no hoy -- mismo fix que el
     // RPC real).
+    //
+    // T1 (R2, supabase_migration_t1_r2_lotes_en_cero.sql): igual que el RPC
+    // real, se resetean los lotes con saldo O con fecha futura (también los
+    // que ya estaban en 0): remaining_credits = 0 y expires_at = el menor
+    // entre su fecha y ahora - 1 día (least() del SQL: los que ya venían
+    // vencidos conservan su fecha real).
+    const ayerISO = new Date(Date.now() - 86_400_000).toISOString()
     for (const fila of tables.user_credits ?? []) {
       if (fila.user_id !== userId) continue
       const disciplina = disciplinaPorId.get(fila.discipline_id)
-      if (disciplina?.kind === 'credits' && (fila.remaining_credits ?? 0) > 0) {
+      if (disciplina?.kind === 'credits' && ((fila.remaining_credits ?? 0) > 0 || (fila.expires_at && fila.expires_at > ahoraISO))) {
         fila.remaining_credits = 0
+        if (fila.expires_at && fila.expires_at > ayerISO) fila.expires_at = ayerISO
       }
       if (aparatosDiscipline && fila.discipline_id === aparatosDiscipline.id && fila.expires_at && fila.expires_at > ahoraISO) {
         fila.expires_at = `${sumarDiasUTC(isoUTC(new Date()), -1)}T12:00:00.000Z`
