@@ -171,18 +171,65 @@ export function mockAdminAcreditarCreditosManual(tables) {
   }
 }
 
-// admin_fijar_creditos_disciplina() (supabase_migration_fix_editor_
-// creditos_plan_unico.sql) -- la usa CreditosEditablesSocio.jsx tanto para
-// "Fijar en" (disciplina ya activa) como para "+ Agregar disciplina"
+// fecha_plan_socio() de T2 (supabase_migration_t2_fecha_plan_editar_fecha.sql):
+// con saldo o Aparatos vigente, la más lejana entre lo usable; todo en 0 pero
+// con lotes vigentes, la del lote de créditos creado más recientemente
+// (empate: la más lejana); nada, null.
+function fechaPlanSocio(tables, userId, ahoraISO) {
+  const kindDe = (fila) => (tables.disciplines ?? []).find((d) => d.id === fila.discipline_id)?.kind
+  const vigentes = (tables.user_credits ?? []).filter(
+    (fila) => fila.user_id === userId && fila.expires_at && fila.expires_at > ahoraISO,
+  )
+  const usables = vigentes.filter(
+    (fila) => kindDe(fila) === 'membership' || (kindDe(fila) === 'credits' && (fila.remaining_credits ?? 0) > 0),
+  )
+  if (usables.length > 0) return usables.map((f) => f.expires_at).sort().at(-1)
+  const enCero = vigentes
+    .filter((fila) => kindDe(fila) === 'credits')
+    .sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '') || b.expires_at.localeCompare(a.expires_at))
+  return enCero[0]?.expires_at ?? null
+}
+
+// Ficha del socio en socios por el DNI de su perfil. T3 (D-T3c), igual que el
+// RPC real: con DNI y sin ficha, error -- acá se chequea antes de tocar nada
+// (el RPC real revierte todo).
+function fichaDelSocio(tables, userId) {
+  const profile = (tables.profiles ?? []).find((p) => p.id === userId)
+  const socio = profile ? (tables.socios ?? []).find((s) => s.dni === profile.dni) : null
+  if (profile?.dni && !socio) {
+    return {
+      error: {
+        __e2eError: {
+          status: 400,
+          body: { message: `El socio tiene DNI ${profile.dni} pero no hay ninguna ficha en Socios con ese DNI -- no se cambió nada.` },
+        },
+      },
+    }
+  }
+  return { socio }
+}
+
+function totalCreditosVigentes(tables, userId, ahoraISO) {
+  return (tables.user_credits ?? [])
+    .filter((f) => {
+      if (f.user_id !== userId || !f.expires_at || f.expires_at <= ahoraISO || (f.remaining_credits ?? 0) <= 0) return false
+      const d = (tables.disciplines ?? []).find((disc) => disc.id === f.discipline_id)
+      return d?.kind === 'credits'
+    })
+    .reduce((suma, f) => suma + f.remaining_credits, 0)
+}
+
+// admin_fijar_creditos_disciplina() -- la usa CreditosEditablesSocio.jsx tanto
+// para "Fijar en" (disciplina ya activa) como para "+ Agregar disciplina"
 // (CAMBIO 2, disciplina sin ningún lote todavía). A diferencia de
-// admin_acreditar_creditos_manual, esta NO resetea el resto del plan --
-// solo pone en 0 los lotes activos de LA disciplina que se está fijando
-// (mismo criterio de siempre, nunca borra filas) y resuelve la fecha del
-// plan actual del socio (resolver_fecha_plan_actual: el expires_at MÁS
-// LEJANO entre sus otras disciplinas de créditos activas + Aparatos
-// vigente, o now()+30 días si no tiene nada) -- así, agregar una
-// disciplina nueva a un socio que ya tiene algo activo la deja con la
-// MISMA fecha que el resto, sin que el frontend tenga que calcular nada.
+// admin_acreditar_creditos_manual, esta NO resetea el resto del plan -- solo
+// pone en 0 los lotes activos de LA disciplina que se está fijando.
+//
+// T3 (supabase_migration_t3_fecha_plan_editor_creditos.sql), igual que el RPC
+// real: la fecha del plan (fecha_plan_socio, o now()+30 días) se calcula ANTES
+// de poner nada en 0; en esa disciplina, los lotes en 0 de OTRO día que el plan
+// se vencen (D-T3a); fijar en 0 no crea un lote (D-T3b); si el plan nace acá,
+// la ficha refleja su fecha.
 export function mockAdminFijarCreditosDisciplina(tables) {
   if (!tables.user_credits) tables.user_credits = []
 
@@ -201,56 +248,174 @@ export function mockAdminFijarCreditosDisciplina(tables) {
       return { __e2eError: { status: 400, body: { message: `La disciplina ${disciplineId} no es de créditos.` } } }
     }
 
-    const ahoraISO = new Date().toISOString()
+    const { socio, error } = fichaDelSocio(tables, userId)
+    if (error) return error
 
-    // Consolidar SOLO esta disciplina -- mismo orden que el RPC real: ANTES
-    // de resolver la fecha del plan, para que el residuo de esta misma
-    // disciplina no "cuente" como fecha activa.
+    const ahoraISO = new Date().toISOString()
+    const fechaExistente = fechaPlanSocio(tables, userId, ahoraISO)
+    const fechaPlan = fechaExistente ?? new Date(Date.now() + 30 * 86_400_000).toISOString()
+    const diaPlan = diaArgentinaISO(fechaPlan)
+    const ayerISO = new Date(Date.now() - 86_400_000).toISOString()
+
     for (const fila of tables.user_credits) {
-      if (fila.user_id === userId && fila.discipline_id === disciplineId && (fila.remaining_credits ?? 0) > 0) {
-        fila.remaining_credits = 0
+      if (fila.user_id !== userId || fila.discipline_id !== disciplineId) continue
+      if ((fila.remaining_credits ?? 0) > 0) fila.remaining_credits = 0
+      if (fila.expires_at && fila.expires_at > ahoraISO && diaArgentinaISO(fila.expires_at) !== diaPlan) {
+        fila.expires_at = ayerISO
       }
     }
 
-    // resolver_fecha_plan_actual -- el expires_at más lejano entre las
-    // OTRAS disciplinas de créditos activas + Aparatos vigente de este
-    // socio, o now()+30 días si no tiene nada.
-    const activas = tables.user_credits.filter((f) => {
-      if (f.user_id !== userId || !f.expires_at || f.expires_at <= ahoraISO) return false
-      const d = (tables.disciplines ?? []).find((disc) => disc.id === f.discipline_id)
-      if (!d) return false
-      if (d.kind === 'credits') return (f.remaining_credits ?? 0) > 0
-      return d.kind === 'membership'
-    })
-    const fechaPlan =
-      activas.length > 0
-        ? activas.reduce((masLejana, f) => (f.expires_at > masLejana ? f.expires_at : masLejana), activas[0].expires_at)
-        : `${sumarDiasUTC(isoUTC(new Date()), 30)}T12:00:00.000Z`
+    if (creditos > 0) {
+      tables.user_credits.push({
+        id: `uc-e2e-fijar-${tables.user_credits.length + 1}`,
+        user_id: userId,
+        discipline_id: disciplineId,
+        remaining_credits: creditos,
+        expires_at: fechaPlan,
+        created_at: new Date().toISOString(),
+        discipline: disciplina,
+      })
+    }
 
+    if (socio) {
+      socio.creditos = totalCreditosVigentes(tables, userId, ahoraISO)
+      if (!fechaExistente && creditos > 0) socio.fecha_vencimiento = diaArgentinaISO(fechaPlan)
+    }
+
+    return null
+  }
+}
+
+// admin_ajustar_credito_disciplina() -- +1/-1 de CreditosEditablesSocio.jsx.
+// T3, igual que el RPC real: al sumar, primero el lote del plan de esa
+// disciplina (mismo día en Argentina, aunque esté en 0; entre varios, el que
+// tiene saldo y después el más nuevo); si no hay, un lote nuevo con la fecha
+// del plan. Al restar, FIFO; si no alcanza, error y no cambia nada (D-T3d).
+export function mockAdminAjustarCreditoDisciplina(tables) {
+  if (!tables.user_credits) tables.user_credits = []
+
+  return (request) => {
+    const { p_user_id: userId, p_discipline_id: disciplineId, p_delta: delta } = request.postDataJSON()
+
+    const disciplina = (tables.disciplines ?? []).find((d) => d.id === disciplineId)
+    if (!disciplina) {
+      return { __e2eError: { status: 400, body: { message: `La disciplina ${disciplineId} no existe.` } } }
+    }
+    if (disciplina.kind !== 'credits') {
+      return { __e2eError: { status: 400, body: { message: `La disciplina ${disciplineId} no es de créditos.` } } }
+    }
+    if (!delta) return null
+
+    const { socio, error } = fichaDelSocio(tables, userId)
+    if (error) return error
+
+    const ahoraISO = new Date().toISOString()
+    const deEstaDisciplina = tables.user_credits.filter(
+      (f) => f.user_id === userId && f.discipline_id === disciplineId && f.expires_at && f.expires_at > ahoraISO,
+    )
+    let planNuevo = false
+    let fechaPlan = null
+
+    if (delta > 0) {
+      const fechaExistente = fechaPlanSocio(tables, userId, ahoraISO)
+      fechaPlan = fechaExistente ?? new Date(Date.now() + 30 * 86_400_000).toISOString()
+      const diaPlan = diaArgentinaISO(fechaPlan)
+      const [lotePlan] = deEstaDisciplina
+        .filter((f) => diaArgentinaISO(f.expires_at) === diaPlan)
+        .sort(
+          (a, b) =>
+            Number((b.remaining_credits ?? 0) > 0) - Number((a.remaining_credits ?? 0) > 0) ||
+            (b.created_at ?? '').localeCompare(a.created_at ?? '') ||
+            b.expires_at.localeCompare(a.expires_at),
+        )
+      if (lotePlan) {
+        lotePlan.remaining_credits = (lotePlan.remaining_credits ?? 0) + delta
+      } else {
+        tables.user_credits.push({
+          id: `uc-e2e-ajustar-${tables.user_credits.length + 1}`,
+          user_id: userId,
+          discipline_id: disciplineId,
+          remaining_credits: delta,
+          expires_at: fechaPlan,
+          created_at: new Date().toISOString(),
+          discipline: disciplina,
+        })
+        planNuevo = !fechaExistente
+      }
+    } else {
+      const conSaldo = deEstaDisciplina
+        .filter((f) => (f.remaining_credits ?? 0) > 0)
+        .sort((a, b) => a.expires_at.localeCompare(b.expires_at))
+      const disponible = conSaldo.reduce((suma, f) => suma + f.remaining_credits, 0)
+      if (disponible < Math.abs(delta)) {
+        return {
+          __e2eError: {
+            status: 400,
+            body: {
+              message: `El socio no tiene ${Math.abs(delta)} crédito(s) vigentes de ${disciplina.name} para descontar -- no se cambió nada.`,
+            },
+          },
+        }
+      }
+      let restante = Math.abs(delta)
+      for (const fila of conSaldo) {
+        if (restante <= 0) break
+        const descuento = Math.min(fila.remaining_credits, restante)
+        fila.remaining_credits -= descuento
+        restante -= descuento
+      }
+    }
+
+    if (socio) {
+      socio.creditos = totalCreditosVigentes(tables, userId, ahoraISO)
+      if (planNuevo) socio.fecha_vencimiento = diaArgentinaISO(fechaPlan)
+    }
+
+    return null
+  }
+}
+
+// admin_agregar_aparatos_socio() -- "+ Agregar Aparatos". T3 (D3), igual que
+// el RPC real: exactamente UNA disciplina de membresía (D-T3e); si ya tiene
+// Aparatos vigente, error; la fecha es fecha_plan_socio() o now()+30 días, y la
+// ficha refleja ese día.
+export function mockAdminAgregarAparatosSocio(tables) {
+  if (!tables.user_credits) tables.user_credits = []
+  const error = (message) => ({ __e2eError: { status: 400, body: { message } } })
+
+  return (request) => {
+    const { p_user_id: userId } = request.postDataJSON()
+
+    const membresias = (tables.disciplines ?? []).filter((d) => d.kind === 'membership')
+    if (membresias.length === 0) return error('No hay ninguna disciplina de tipo membresía (Aparatos) en el catálogo.')
+    if (membresias.length > 1) {
+      return error(
+        `Hay ${membresias.length} disciplinas de tipo membresía en el catálogo y tiene que haber una sola (Aparatos) -- revisalo en Configuración. No se cambió nada.`,
+      )
+    }
+    const [aparatos] = membresias
+
+    const ahoraISO = new Date().toISOString()
+    const yaVigente = tables.user_credits.some(
+      (f) => f.user_id === userId && f.discipline_id === aparatos.id && f.expires_at && f.expires_at > ahoraISO,
+    )
+    if (yaVigente) return error('El socio ya tiene Aparatos vigente -- no hay nada que agregar.')
+
+    const { socio, error: errorFicha } = fichaDelSocio(tables, userId)
+    if (errorFicha) return errorFicha
+
+    const fechaPlan = fechaPlanSocio(tables, userId, ahoraISO) ?? new Date(Date.now() + 30 * 86_400_000).toISOString()
     tables.user_credits.push({
-      id: `uc-e2e-fijar-${tables.user_credits.length + 1}`,
+      id: `uc-e2e-aparatos-${tables.user_credits.length + 1}`,
       user_id: userId,
-      discipline_id: disciplineId,
-      remaining_credits: creditos,
+      discipline_id: aparatos.id,
+      remaining_credits: null,
       expires_at: fechaPlan,
       created_at: new Date().toISOString(),
-      discipline: disciplina,
+      discipline: aparatos,
     })
 
-    // Espejo en socios.creditos -- recalculado desde cero, mismo criterio
-    // que el RPC real.
-    const profile = (tables.profiles ?? []).find((p) => p.id === userId)
-    const socio = profile ? (tables.socios ?? []).find((s) => s.dni === profile.dni) : null
-    if (socio) {
-      const totalCreditos = tables.user_credits
-        .filter((f) => {
-          if (f.user_id !== userId || !f.expires_at || f.expires_at <= ahoraISO || (f.remaining_credits ?? 0) <= 0) return false
-          const d = (tables.disciplines ?? []).find((disc) => disc.id === f.discipline_id)
-          return d?.kind === 'credits'
-        })
-        .reduce((suma, f) => suma + f.remaining_credits, 0)
-      socio.creditos = totalCreditos
-    }
+    if (socio) socio.fecha_vencimiento = diaArgentinaISO(fechaPlan)
 
     return null
   }
