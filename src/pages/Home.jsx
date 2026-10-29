@@ -15,6 +15,7 @@ import {
 import { supabase } from '../lib/supabaseClient'
 import { colorOcupacion } from '../utils/ocupacion'
 import { diaActualPorDefecto, fechaDeEstaSemana, mapearClasesDesdeBookings } from '../utils/clases'
+import { filaSeDictaElDia } from '../utils/claseUnaSolaVez'
 import { getSocioMetrics, estadoOperativoSocio } from '../utils/socioMetrics'
 import { fetchCreditosPorDisciplina, fetchMembresiasVigentesPorDni } from '../utils/fichaSocioPwa'
 import { diasHastaVencimientoPlan } from '../utils/fechaPlan'
@@ -93,7 +94,8 @@ function Home() {
 
     const clasesReservables = (clasesResult.data ?? []).filter((row) => {
       const disciplina = Array.isArray(row.disciplines) ? row.disciplines[0] : row.disciplines
-      return disciplina?.show_in_agenda !== false
+      // Una clase de una sola vez solo es "de hoy" en su fecha.
+      return disciplina?.show_in_agenda !== false && filaSeDictaElDia(row, fechaHoy)
     })
 
     setSocios(sociosResult.data ?? [])

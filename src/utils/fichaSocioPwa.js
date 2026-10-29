@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabaseClient'
 import { ahoraEnArgentina } from './ahoraArgentina'
+import { filaSeDictaElDia } from './claseUnaSolaVez'
 
 // Puente de lectura entre el panel admin (tabla legacy `socios`) y el schema
 // real que usa la PWA de socios (profiles/bookings/xp_events/routines,
@@ -599,18 +600,19 @@ export async function buscarSociosClaseActiva() {
   // Fecha, día y hora del MISMO instante, en hora de Argentina -- antes la
   // fecha salía en UTC (toISOString) y de 21:00 a 23:59 buscaba las
   // reservas de mañana.
-  const { fecha: hoyStr, hora: horaActual, diaSemana } = ahoraEnArgentina()
+  const { fecha: hoyStr, hora: horaActual } = ahoraEnArgentina()
 
   const { data: clases, error: clasesError } = await supabase
     .from('classes')
-    .select('id, title, start_time, end_time, days_of_week, discipline_id, discipline:disciplines(name)')
+    .select('id, title, start_time, end_time, days_of_week, fecha_unica, discipline_id, discipline:disciplines(name)')
   if (clasesError) {
     if (esErrorDeRelacionFaltante(clasesError)) return []
     throw new Error(clasesError.message)
   }
 
   const clasesActivas = (clases ?? []).filter((c) => {
-    if (!(c.days_of_week ?? []).includes(diaSemana)) return false
+    // Día de semana de hoy y, si es de una sola vez, que sea HOY su fecha.
+    if (!filaSeDictaElDia(c, hoyStr)) return false
     if (!c.start_time || !c.end_time) return false
     const inicioConVentana = restarMinutos(c.start_time, VENTANA_PREVIA_MIN)
     return horaActual >= inicioConVentana && horaActual <= c.end_time

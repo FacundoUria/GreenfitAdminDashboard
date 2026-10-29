@@ -3,6 +3,8 @@ import { AlertTriangle, Loader2, Megaphone, Send, X } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { buscarSociosParaCheckin } from '../utils/fichaSocioPwa'
 import { formatFechaHora } from '../utils/fecha'
+import { ahoraEnArgentina } from '../utils/ahoraArgentina'
+import { esUnaSolaVezPasada, fechaUnicaCorta } from '../utils/claseUnaSolaVez'
 
 const AUDIENCIAS = [
   { value: 'all', label: 'Todos los socios' },
@@ -39,9 +41,13 @@ function Anunciar() {
   useEffect(() => {
     supabase
       .from('classes')
-      .select('id, title, start_time')
+      .select('id, title, start_time, fecha_unica')
       .order('start_time', { ascending: true })
-      .then(({ data }) => setClases(data ?? []))
+      // Una clase de una sola vez que ya pasó no tiene a quién avisarle nada.
+      .then(({ data }) => {
+        const hoy = ahoraEnArgentina().fecha
+        setClases((data ?? []).filter((c) => !esUnaSolaVezPasada(c.fecha_unica, hoy)))
+      })
   }, [])
 
   const fetchHistorial = async () => {
@@ -189,6 +195,7 @@ function Anunciar() {
                 {clases.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.title} · {(c.start_time ?? '').slice(0, 5)}
+                    {c.fecha_unica ? ` · solo el ${fechaUnicaCorta(c.fecha_unica)}` : ''}
                   </option>
                 ))}
               </select>

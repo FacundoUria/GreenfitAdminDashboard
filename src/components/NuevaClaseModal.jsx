@@ -2,14 +2,22 @@ import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { DIAS_SEMANA } from '../utils/clases'
+import { ahoraEnArgentina } from '../utils/ahoraArgentina'
+import { diasYFechaParaGuardar, mensajeErrorGuardarClase, textoFechaUnica } from '../utils/claseUnaSolaVez'
 
-function formInicial(clase, diaPorDefecto) {
+// `modo`: 'semanal' (todas las semanas, días de la semana) o 'unica' (una sola
+// vez, una fecha). Se guardan los dos valores aunque se cambie el switch, así
+// ir y volver no pierde lo que ya se había elegido.
+function formInicial(clase, diaPorDefecto, fechaPorDefecto) {
   if (clase) {
     return {
       titulo: clase.disciplina,
       disciplinaId: clase.disciplinaId ?? '',
       profesor: clase.profesor,
+      modo: clase.fechaUnica ? 'unica' : 'semanal',
+      // En una de una sola vez es {día de su fecha}: si se pasa a semanal, arranca ahí.
       diasSemana: clase.diasSemana,
+      fechaUnica: clase.fechaUnica ?? fechaPorDefecto,
       horaInicio: clase.horaInicio,
       horaFin: clase.horaFin,
       cupoMaximo: clase.cupoMaximo,
@@ -20,15 +28,24 @@ function formInicial(clase, diaPorDefecto) {
     titulo: '',
     disciplinaId: '',
     profesor: '',
+    modo: 'semanal',
     diasSemana: [diaPorDefecto],
+    fechaUnica: fechaPorDefecto,
     horaInicio: '09:00',
     horaFin: '10:00',
     cupoMaximo: 20,
   }
 }
 
-function NuevaClaseModal({ clase, diaPorDefecto, onClose, onSaved }) {
-  const [form, setForm] = useState(() => formInicial(clase, diaPorDefecto))
+const MODOS = [
+  { valor: 'semanal', etiqueta: 'Todas las semanas' },
+  { valor: 'unica', etiqueta: 'Una sola vez' },
+]
+
+function NuevaClaseModal({ clase, diaPorDefecto, hoy: hoyProp, fechaPorDefecto, onClose, onSaved }) {
+  // "Hoy" en hora de Argentina: la fecha de una clase de una sola vez no puede ser anterior.
+  const [hoy] = useState(() => hoyProp ?? ahoraEnArgentina().fecha)
+  const [form, setForm] = useState(() => formInicial(clase, diaPorDefecto, fechaPorDefecto ?? hoy))
   const [disciplinas, setDisciplinas] = useState([])
   const [cargandoDisciplinas, setCargandoDisciplinas] = useState(true)
   const [guardando, setGuardando] = useState(false)
@@ -89,8 +106,9 @@ function NuevaClaseModal({ clase, diaPorDefecto, onClose, onSaved }) {
   const handleSubmit = async (event) => {
     event.preventDefault()
 
-    if (form.diasSemana.length === 0) {
-      setError('Seleccioná al menos un día de la semana.')
+    const diasYFecha = diasYFechaParaGuardar(form, hoy)
+    if (diasYFecha.error) {
+      setError(diasYFecha.error)
       return
     }
     if (!form.disciplinaId) {
@@ -105,7 +123,10 @@ function NuevaClaseModal({ clase, diaPorDefecto, onClose, onSaved }) {
       title: form.titulo.trim(),
       discipline_id: form.disciplinaId,
       instructor: form.profesor,
-      days_of_week: form.diasSemana,
+      // Una sola vez: days_of_week = {día de esa fecha} + fecha_unica (la base
+      // lo exige con un CHECK). Todas las semanas: fecha_unica en null.
+      days_of_week: diasYFecha.days_of_week,
+      fecha_unica: diasYFecha.fecha_unica,
       start_time: form.horaInicio,
       end_time: form.horaFin,
       capacity: form.cupoMaximo,
@@ -123,7 +144,9 @@ function NuevaClaseModal({ clase, diaPorDefecto, onClose, onSaved }) {
         'Error al guardar la clase en Supabase:',
         dbError?.message ?? 'no se guardó ninguna fila (revisá las políticas RLS)',
       )
-      setError('No se pudo guardar la clase. Intentá nuevamente.')
+      // Si la base lo frenó por reservas futuras o por una fecha pasada, el
+      // mensaje dice qué fechas y qué hacer -- se muestra tal cual.
+      setError(mensajeErrorGuardarClase(dbError))
       return
     }
 
@@ -201,6 +224,49 @@ function NuevaClaseModal({ clase, diaPorDefecto, onClose, onSaved }) {
           </div>
 
           <div className="flex flex-col gap-1.5 sm:col-span-2">
+            <span id="repeticion" className="text-xs font-medium text-gray-400">
+              Repetición
+            </span>
+            <div role="radiogroup" aria-labelledby="repeticion" className="grid grid-cols-2 gap-1 rounded-lg bg-greenfit-dark p-1">
+              {MODOS.map(({ valor, etiqueta }) => (
+                <button
+                  key={valor}
+                  type="button"
+                  role="radio"
+                  aria-checked={form.modo === valor}
+                  onClick={() => setForm((prev) => ({ ...prev, modo: valor }))}
+                  className={`min-h-[44px] rounded-md px-3 py-2 text-xs font-semibold transition-colors ${
+                    form.modo === valor ? 'bg-greenfit-primary text-greenfit-dark' : 'text-gray-300 hover:text-white'
+                  }`}
+                >
+                  {etiqueta}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {form.modo === 'unica' ? (
+          <div className="flex flex-col gap-1.5 sm:col-span-2">
+            <label htmlFor="fechaUnica" className="text-xs font-medium text-gray-400">
+              Fecha
+            </label>
+            <input
+              id="fechaUnica"
+              type="date"
+              required
+              min={hoy}
+              value={form.fechaUnica}
+              onChange={handleChange('fechaUnica')}
+              className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
+            />
+            {form.fechaUnica && (
+              <p className="text-xs text-gray-400">
+                Solo el {textoFechaUnica(form.fechaUnica)}. No se repite.
+              </p>
+            )}
+          </div>
+          ) : (
+          <div className="flex flex-col gap-1.5 sm:col-span-2">
             <span className="text-xs font-medium text-gray-400">Días de la semana</span>
             <div className="flex flex-wrap gap-2">
               {DIAS_SEMANA.map(({ numero, nombre }) => (
@@ -219,6 +285,7 @@ function NuevaClaseModal({ clase, diaPorDefecto, onClose, onSaved }) {
               ))}
             </div>
           </div>
+          )}
 
           <div className="flex flex-col gap-1.5">
             <label htmlFor="cupoMaximo" className="text-xs font-medium text-gray-400">

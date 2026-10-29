@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabaseClient'
 import { ahoraEnArgentina } from './ahoraArgentina'
 import { fetchTodasLasFilas } from './fichaSocioPwa'
+import { filaSeDictaElDia } from './claseUnaSolaVez'
 
 // Pantalla Clases -- días pasados + calendario del mes. Todas las fechas son
 // textos "YYYY-MM-DD" (día calendario de Argentina, mismo formato que
@@ -169,10 +170,11 @@ function creadaHastaEseDia(fila, fecha) {
 //     se dicte ese día de la semana o su disciplina esté oculta de la agenda);
 //  c) cualquier clase cancelada puntualmente ese día.
 export function clasesDeUnDiaPasado({ fecha, plantillas, todasLasClases, classIdsConReserva, classIdsCanceladas }) {
-  const dia = diaSemanaISO(fecha)
   const porId = new Map()
   for (const fila of plantillas) {
-    if ((fila.days_of_week ?? []).includes(dia) && creadaHastaEseDia(fila, fecha)) porId.set(fila.id, fila)
+    // filaSeDictaElDia: además del día de semana, una clase de una sola vez
+    // solo cuenta en SU fecha (las otras semanas no existió).
+    if (filaSeDictaElDia(fila, fecha) && creadaHastaEseDia(fila, fecha)) porId.set(fila.id, fila)
   }
   for (const fila of todasLasClases) {
     if (classIdsConReserva.has(fila.id) || classIdsCanceladas.has(fila.id)) porId.set(fila.id, fila)
@@ -191,7 +193,15 @@ function listarDias(dias) {
 // `classes`: solo se avisa lo que se puede detectar.
 export function avisoDiaPasado(clase, fecha) {
   const avisos = []
-  if (!clase.diasSemana.includes(diaSemanaISO(fecha))) {
+  if (clase.fechaUnica) {
+    // De una sola vez: en su fecha no hay nada que avisar; en otra fecha (una
+    // reserva que quedó de cuando era semanal) se dice de cuándo es ahora.
+    if (clase.fechaUnica !== fecha) {
+      avisos.push(
+        `Hoy esta clase es de una sola vez (${fechaCortaISO(clase.fechaUnica)}): el título, el horario o el cupo de ese día pueden haber sido otros.`,
+      )
+    }
+  } else if (!clase.diasSemana.includes(diaSemanaISO(fecha))) {
     avisos.push(
       clase.diasSemana.length > 0
         ? `Hoy esta clase se dicta ${listarDias(clase.diasSemana)}: el título, el horario o el cupo de ese día pueden haber sido otros.`

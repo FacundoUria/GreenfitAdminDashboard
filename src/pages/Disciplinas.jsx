@@ -56,6 +56,9 @@ function Disciplinas() {
       .from('classes')
       .select('discipline_id, days_of_week, start_time, end_time')
       .in('discipline_id', idsDisciplinas)
+      // El horario de la disciplina son sus franjas semanales: una clase de
+      // una sola vez no se muestra como "todos los miércoles".
+      .is('fecha_unica', null)
     if (clasesError) {
       console.error('No se pudieron cargar los horarios de las disciplinas:', clasesError.message)
       return

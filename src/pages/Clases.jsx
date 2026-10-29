@@ -18,6 +18,7 @@ import {
 import { fetchCreditosVigentesPorSocio, fetchSociosParaAnotar } from '../utils/anotarSocios'
 import { mensajeErrorAnotar } from '../utils/buscarSocios'
 import { mensajeQuitar, pushesPorMensaje, resumenCancelacionClase } from '../utils/cancelacionGimnasio'
+import { claseSeDictaElDia, esUnaSolaVezPasada } from '../utils/claseUnaSolaVez'
 import ClasesGrid from '../components/ClasesGrid'
 import InscriptosModal from '../components/InscriptosModal'
 import NuevaClaseModal from '../components/NuevaClaseModal'
@@ -237,9 +238,9 @@ function Clases() {
           }),
           bookings,
         ).map((clase) => ({ ...clase, aviso: avisoDiaPasado(clase, fechaSeleccionadaStr) }))
-      : clases.filter((clase) => clase.diasSemana.includes(diaSemanaSeleccionado))
+      : clases.filter((clase) => claseSeDictaElDia(clase, fechaSeleccionadaStr))
     return delDia.sort((a, b) => a.horaInicio.localeCompare(b.horaInicio))
-  }, [soloLectura, clases, clasesBase, todasLasClases, bookings, canceladasIds, fechaSeleccionadaStr, diaSemanaSeleccionado])
+  }, [soloLectura, clases, clasesBase, todasLasClases, bookings, canceladasIds, fechaSeleccionadaStr])
 
   // Jerarquía visual: solo tiene sentido "en curso" / "próxima" mirando el
   // día de HOY -- en cualquier otro día todas las clases son simplemente
@@ -471,6 +472,9 @@ function Clases() {
 
   const handleEditar = (clase) => {
     if (soloLectura) return
+    // Una clase de una sola vez que ya pasó es historial: no se edita (la grilla
+    // tampoco muestra el lápiz; esto es la segunda barrera).
+    if (esUnaSolaVezPasada(clase.fechaUnica, hoy)) return
     setClaseEnEdicion(clase)
     setModalNuevaClaseAbierto(true)
   }
@@ -641,6 +645,7 @@ function Clases() {
           proximaClaseId={proximaClaseId}
           canceladasIds={canceladasIds}
           soloLectura={soloLectura}
+          hoy={hoy}
           onVerInscriptos={handleVerInscriptos}
           onEditar={handleEditar}
           onCancelar={handleCancelarClase}
@@ -680,6 +685,10 @@ function Clases() {
           // gimnasio no abre los domingos) -- si se está viendo un domingo,
           // el prefill cae en Lunes en vez de un día que no existe ahí.
           diaPorDefecto={diaSemanaSeleccionado === 0 ? 1 : diaSemanaSeleccionado}
+          // "Una sola vez": arranca en el día elegido en la tira, o en hoy si
+          // ese día ya pasó (no se puede crear una clase en el pasado).
+          hoy={hoy}
+          fechaPorDefecto={fechaSeleccionadaStr < hoy ? hoy : fechaSeleccionadaStr}
           onClose={() => {
             setModalNuevaClaseAbierto(false)
             setClaseEnEdicion(null)

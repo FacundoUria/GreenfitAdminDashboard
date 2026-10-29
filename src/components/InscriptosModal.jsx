@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Loader2, UserCheck, UserMinus, UserPlus, UserX, X } from 'lucide-react'
 import { DIAS_SEMANA } from '../utils/clases'
 import { filtrarSocios, pareceDni, soloDigitos } from '../utils/buscarSocios'
+import { textoFechaUnica } from '../utils/claseUnaSolaVez'
 
 function iniciales(nombre) {
   const partes = (nombre ?? '').trim().split(/\s+/)
@@ -102,7 +103,8 @@ function InscriptosModal({
           <div className="min-w-0">
             <h2 className="text-lg font-semibold text-white">{clase.disciplina}</h2>
             <p className="text-sm text-gray-400">
-              {nombresDias(clase.diasSemana)} · {clase.horaInicio} - {clase.horaFin} · Prof. {clase.profesor}
+              {clase.fechaUnica ? `Una sola vez · ${textoFechaUnica(clase.fechaUnica)}` : nombresDias(clase.diasSemana)} ·{' '}
+              {clase.horaInicio} - {clase.horaFin} · Prof. {clase.profesor}
             </p>
           </div>
           <button

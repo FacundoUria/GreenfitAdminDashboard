@@ -53,6 +53,10 @@ function DisciplinaModal({ disciplina, onClose, onSaved }) {
       .from('classes')
       .select('id, days_of_week, start_time, end_time')
       .eq('discipline_id', disciplina.id)
+      // Solo las semanales: una clase de una sola vez no es una franja de la
+      // disciplina. Si se cargara acá, guardar la convertiría en semanal o, al
+      // quitarla, intentaría borrarla (y con reservas falla por la FK).
+      .is('fecha_unica', null)
       .order('start_time')
       .then(({ data, error: fetchError }) => {
         if (!activo) return

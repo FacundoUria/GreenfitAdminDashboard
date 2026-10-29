@@ -13,7 +13,7 @@ const mockedFrom = supabase.from
 function makeChain(result) {
   const chain = {}
   const self = () => chain
-  ;['select', 'eq', 'order', 'update', 'insert'].forEach((metodo) => {
+  ;['select', 'eq', 'is', 'order', 'update', 'insert'].forEach((metodo) => {
     chain[metodo] = vi.fn(self)
   })
   chain.then = (resolve, reject) => Promise.resolve(result).then(resolve, reject)

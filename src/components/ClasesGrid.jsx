@@ -1,8 +1,11 @@
-import { AlertTriangle, Ban, Clock, Eye, Pencil, Users } from 'lucide-react'
+import { AlertTriangle, Ban, CalendarCheck, Clock, Eye, Pencil, Users } from 'lucide-react'
 import { colorOcupacion } from '../utils/ocupacion'
 import { colorDisciplina } from '../utils/coloresDisciplina'
+import { esUnaSolaVezPasada, fechaUnicaCorta } from '../utils/claseUnaSolaVez'
 
-function ClaseCard({ clase, estado, cancelada, hayDestacada, soloLectura, onVerInscriptos, onEditar, onCancelar }) {
+function ClaseCard({ clase, estado, cancelada, hayDestacada, soloLectura, hoy, onVerInscriptos, onEditar, onCancelar }) {
+  // Una clase de una sola vez que ya pasó se ve (con sus inscriptos) pero no se edita.
+  const sinEditar = hoy != null && esUnaSolaVezPasada(clase.fechaUnica, hoy)
   const inscriptos = clase.inscriptos.length
   const porcentaje = Math.min(100, Math.round((inscriptos / clase.cupoMaximo) * 100))
   const { barra, texto } = colorOcupacion(porcentaje)
@@ -62,9 +65,17 @@ function ClaseCard({ clase, estado, cancelada, hayDestacada, soloLectura, onVerI
       )}
 
       <div className="flex flex-col gap-4 p-5">
-        <p className="text-sm text-gray-400">
-          Prof. <span className="text-gray-300">{clase.profesor}</span>
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-gray-400">
+            Prof. <span className="text-gray-300">{clase.profesor}</span>
+          </p>
+          {clase.fechaUnica && (
+            <span className="flex items-center gap-1 rounded-full bg-sky-500/15 px-2.5 py-0.5 text-[11px] font-semibold text-sky-300">
+              <CalendarCheck className="h-3 w-3" />
+              Una sola vez · {fechaUnicaCorta(clase.fechaUnica)}
+            </span>
+          )}
+        </div>
 
         <div>
           <div className="mb-1.5 flex items-center justify-between text-xs">
@@ -94,6 +105,7 @@ function ClaseCard({ clase, estado, cancelada, hayDestacada, soloLectura, onVerI
           {/* Días anteriores a "ayer": solo lectura -- sin Editar ni Cancelar. */}
           {!soloLectura && (
           <>
+          {!sinEditar && (
           <button
             type="button"
             onClick={() => onEditar(clase)}
@@ -102,6 +114,7 @@ function ClaseCard({ clase, estado, cancelada, hayDestacada, soloLectura, onVerI
           >
             <Pencil className="h-3.5 w-3.5" />
           </button>
+          )}
           <button
             type="button"
             onClick={() => onCancelar(clase)}
@@ -130,6 +143,7 @@ function ClasesGrid({
   proximaClaseId = null,
   canceladasIds = new Set(),
   soloLectura = false,
+  hoy = null,
   onVerInscriptos,
   onEditar,
   onCancelar,
@@ -156,6 +170,7 @@ function ClasesGrid({
             cancelada={canceladasIds.has(clase.id)}
             hayDestacada={hayDestacada}
             soloLectura={soloLectura}
+            hoy={hoy}
             onVerInscriptos={onVerInscriptos}
             onEditar={onEditar}
             onCancelar={onCancelar}

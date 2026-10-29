@@ -115,6 +115,8 @@ export function mapearClasesDesdeBookings(clasesRows, bookingsRows) {
     horaFin: (row.end_time ?? '').slice(0, 5),
     cupoMaximo: row.capacity,
     diasSemana: row.days_of_week ?? [],
+    // null = semanal. Con valor, la clase existe solo ese día (classes.fecha_unica).
+    fechaUnica: row.fecha_unica ?? null,
     inscriptos: inscriptosPorClase.get(row.id) ?? [],
   }))
 }
