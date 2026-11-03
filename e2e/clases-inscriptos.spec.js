@@ -244,7 +244,8 @@ test('lote de origen VIGENTE -- reintegra ahí exacto, no en otro lote (aunque e
 // Tanda 2, decisión D1 = O1: ANTES un lote de origen vencido no devolvía nada.
 // Ahora, cuando cancela el gimnasio, el crédito se suma al lote VIGENTE de esa
 // disciplina que vence antes (con su fecha).
-test('lote de origen VENCIDO -- el crédito se suma al lote vigente que vence antes, y Seba lo ve', async ({ page }) => {
+// T4 (O1): ahora va al lote del PLAN de esa disciplina (acá es el único vigente).
+test('lote de origen VENCIDO -- el crédito se suma al lote del plan, y Seba lo ve', async ({ page }) => {
   const tables = {
     ...tablasBase(),
     classes: [CLASE_A_PUNTO_DE_EMPEZAR],
@@ -258,13 +259,39 @@ test('lote de origen VENCIDO -- el crédito se suma al lote vigente que vence an
 
   expect(tables.user_credits.find((f) => f.id === 'lote-vencido').remaining_credits).toBe(3)
   expect(tables.user_credits.find((f) => f.id === 'lote-vigente').remaining_credits).toBe(6)
-  expect(mensajes.some((m) => m.includes('su lote original ya estaba vencido o lo reemplazó un pago posterior'))).toBe(true)
+  // T4: el texto para Seba ahora dice que va al lote del PLAN (antes: "su lote vigente").
+  expect(mensajes.some((m) => m.includes('su lote original no era el del plan vigente'))).toBe(true)
   await expect.poll(() => pushes.length).toBe(1)
   expect(pushes[0]).toMatchObject({ title: 'Cambio en tu reserva', audience: 'users', targetUserIds: [PROFILE_MARTINA.id] })
   expect(pushes[0].body).toContain('Te devolvimos el crédito (vence el 01/12/2026)')
 })
 
-test('reserva vieja SIN credit_lote_id -- reintegra al lote vigente que VENCE antes, no al más reciente por creación', async ({
+// T4 (O1): el lote de la reserva está VIGENTE pero es de OTRA fecha que el plan
+// (datos viejos, más de una fecha). Antes: +1 a ese mismo lote. Ahora: +1 al lote del
+// PLAN de esa disciplina; el de la reserva no se toca.
+test('lote de origen VIGENTE pero de OTRA fecha que el plan -- el crédito va al lote del plan', async ({ page }) => {
+  const tables = {
+    ...tablasBase(),
+    classes: [CLASE_A_PUNTO_DE_EMPEZAR],
+    bookings: [{ ...BOOKING_MARTINA_PRONTO, credit_lote_id: 'lote-otra-fecha' }],
+    user_credits: [
+      loteCrossfit('lote-otra-fecha', 3, '2026-09-15T12:00:00.000Z', '2026-07-01T00:00:00.000Z'),
+      loteCrossfit('lote-del-plan', 5, VIGENTE, '2026-08-05T00:00:00.000Z'),
+    ],
+  }
+  const { mensajes, pushes } = await quitarInscripto(page, tables)
+
+  expect(tables.user_credits.find((f) => f.id === 'lote-otra-fecha').remaining_credits).toBe(3)
+  expect(tables.user_credits.find((f) => f.id === 'lote-del-plan').remaining_credits).toBe(6)
+  expect(mensajes.some((m) => m.includes('el crédito se sumó al lote de su plan de CrossFit (vence el 01/12/2026)'))).toBe(true)
+  await expect.poll(() => pushes.length).toBe(1)
+  expect(pushes[0].body).toContain('Te devolvimos el crédito (vence el 01/12/2026)')
+})
+
+// T4 (O1): ANTES iba al lote vigente que VENCE antes (cualquier fecha). Ahora va al
+// lote del PLAN de esa disciplina (el mismo día que la fecha del plan, acá la más
+// lejana con saldo: 01/12): el de 15/09 es de otra fecha y no recibe nada.
+test('reserva vieja SIN credit_lote_id -- reintegra al lote del PLAN, no al que vence antes', async ({
   page,
 }) => {
   const tables = {
@@ -279,8 +306,8 @@ test('reserva vieja SIN credit_lote_id -- reintegra al lote vigente que VENCE an
   }
   await quitarInscripto(page, tables)
 
-  expect(tables.user_credits.find((f) => f.id === 'lote-vence-antes').remaining_credits).toBe(3)
-  expect(tables.user_credits.find((f) => f.id === 'lote-mas-reciente').remaining_credits).toBe(6)
+  expect(tables.user_credits.find((f) => f.id === 'lote-vence-antes').remaining_credits).toBe(2)
+  expect(tables.user_credits.find((f) => f.id === 'lote-mas-reciente').remaining_credits).toBe(7)
   expect(tables.user_credits.find((f) => f.id === 'lote-vencido').remaining_credits).toBe(1)
 })
 

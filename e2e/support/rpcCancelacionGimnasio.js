@@ -6,9 +6,12 @@
 //   0) (antes que todo) clase de Aparatos (kind 'membership') -> no se toca nada;
 //      el aviso dice hasta cuándo sigue el acceso o que no tiene acceso vigente.
 //   1) lote de un pago ANULADO (reversion.filas_vencidas o creditos[].lote_id) -> no se devuelve;
-//   2) lote vigente -> +1 a ese lote;
-//   3) lote vencido/reseteado -> +1 al vigente de esa disciplina que vence antes
-//      (sin contar lotes de pagos anulados); si no hay, no se devuelve;
+//   T4 (O1, supabase_migration_t4_cancel_booking_detalle.sql):
+//   2) lote de la reserva DEL PLAN (vigente y el mismo día en Argentina que la fecha
+//      del plan, fecha_plan_socio) -> +1 a ese lote;
+//   3) si no (vencido, reemplazado por un pago o de otra fecha) -> +1 al lote del plan
+//      de esa disciplina (aunque esté en 0, sin lotes de pagos anulados); si el plan
+//      no tiene esa disciplina, no se devuelve;
 //   4) sin lote -> igual que 3.
 // `ahora`: Node y el browser son procesos separados -- con el reloj del browser
 // congelado, el test pasa acá la misma hora.
@@ -33,6 +36,21 @@ function pagoAnuladoDelLote(tables, userId, loteId) {
     const creditos = p.detalle_acreditacion?.creditos ?? []
     return vencidas.some((f) => f.user_credit_id === loteId) || creditos.some((c) => c.lote_id === loteId)
   })
+}
+
+// Misma regla que fecha_plan_socio (T2): con saldo o Aparatos vigente, la más lejana; si
+// todo está en 0, la fila de créditos vigente más reciente (empate: la más lejana).
+function fechaPlanSocio(tables, userId, ahora) {
+  const kindDe = (f) => (tables.disciplines ?? []).find((d) => d.id === f.discipline_id)?.kind
+  const vigentes = (tables.user_credits ?? []).filter((f) => f.user_id === userId && new Date(f.expires_at) > ahora())
+  const usables = vigentes.filter((f) => (kindDe(f) === 'credits' && (f.remaining_credits ?? 0) > 0) || kindDe(f) === 'membership')
+  if (usables.length > 0) {
+    return usables.map((f) => f.expires_at).sort((a, b) => new Date(b) - new Date(a))[0]
+  }
+  const enCero = vigentes
+    .filter((f) => kindDe(f) === 'credits')
+    .sort((a, b) => new Date(b.created_at ?? 0) - new Date(a.created_at ?? 0) || new Date(b.expires_at) - new Date(a.expires_at))
+  return enCero[0]?.expires_at ?? null
 }
 
 export function mockCancelacionGimnasio(tables, { ahora = () => new Date() } = {}) {
@@ -68,16 +86,24 @@ export function mockCancelacionGimnasio(tables, { ahora = () => new Date() } = {
     } else if (pago) {
       motivo = 'pago_anulado'
     } else {
-      const propio = loteId ? lotes.find((f) => f.id === loteId && vigente(f)) : null
+      const plan = fechaPlanSocio(tables, userId, ahora)
+      const diaPlan = plan ? diaArgentina(plan) : null
+      const delPlan = (f) => vigente(f) && diaPlan !== null && diaArgentina(f.expires_at) === diaPlan
+      const propio = loteId ? lotes.find((f) => f.id === loteId && delPlan(f)) : null
       if (propio) {
         destino = propio
         motivo = 'reintegrado'
       } else {
         destino =
           lotes
-            .filter((f) => f.user_id === userId && f.discipline_id === clase.discipline_id && vigente(f))
+            .filter((f) => f.user_id === userId && f.discipline_id === clase.discipline_id && delPlan(f))
             .filter((f) => !pagoAnuladoDelLote(tables, userId, f.id))
-            .sort((a, b) => new Date(a.expires_at) - new Date(b.expires_at))[0] ?? null
+            .sort(
+              (a, b) =>
+                Number((b.remaining_credits ?? 0) > 0) - Number((a.remaining_credits ?? 0) > 0) ||
+                new Date(b.created_at ?? 0) - new Date(a.created_at ?? 0) ||
+                new Date(b.expires_at) - new Date(a.expires_at),
+            )[0] ?? null
         motivo = destino ? (loteId ? 'reintegrado_otro_lote' : 'reintegrado_fifo') : 'sin_lote_vigente'
       }
     }
@@ -102,16 +128,16 @@ export function mockCancelacionGimnasio(tables, { ahora = () => new Date() } = {
           ? contexto === 'quitar'
             ? `El gimnasio te quitó de la clase del ${fechaTxt}. Ese crédito no se reintegró porque pertenecía a un pago anulado. Consultá con el gimnasio.`
             : `La clase del ${fechaTxt} se canceló. Ese crédito no se reintegró porque pertenecía a un pago anulado. Consultá con el gimnasio.`
-          : `${inicio} Ese crédito no se reintegró porque no tenés créditos vigentes de ${disciplina}. Consultá con el gimnasio.`
+          : `${inicio} Ese crédito no se reintegró porque tu plan actual no incluye créditos de ${disciplina}. Consultá con el gimnasio.`
     const mensajeAdmin = {
       aparatos_sin_creditos: accesoAparatos
         ? `${nombre}: ${disciplina} no usa créditos, no había nada que devolver; su acceso sigue igual hasta el ${vence}.`
         : `${nombre}: ${disciplina} no usa créditos, no había nada que devolver; no tiene acceso vigente a ${disciplina}.`,
       reintegrado: `${nombre}: crédito devuelto (vence el ${vence}).`,
-      reintegrado_otro_lote: `${nombre}: su lote original ya estaba vencido o lo reemplazó un pago posterior; el crédito se sumó a su lote vigente de ${disciplina} (vence el ${vence}).`,
-      reintegrado_fifo: `${nombre}: crédito devuelto a su lote vigente de ${disciplina} (vence el ${vence}).`,
+      reintegrado_otro_lote: `${nombre}: su lote original no era el del plan vigente (vencido, reemplazado por un pago o de otra fecha); el crédito se sumó al lote de su plan de ${disciplina} (vence el ${vence}).`,
+      reintegrado_fifo: `${nombre}: crédito devuelto al lote de su plan de ${disciplina} (vence el ${vence}).`,
       pago_anulado: `${nombre}: NO se devolvió el crédito, era de un pago anulado (del ${pago ? ddmmaaaa(diaArgentina(pago.created_at)) : ''}). Si querés, cargáselo a mano con los créditos manuales.`,
-      sin_lote_vigente: `${nombre}: NO se devolvió el crédito, no tiene créditos vigentes de ${disciplina}. Si querés, cargáselo a mano con los créditos manuales.`,
+      sin_lote_vigente: `${nombre}: NO se devolvió el crédito, su plan actual no incluye créditos de ${disciplina}. Si querés, cargáselo a mano con los créditos manuales.`,
     }[motivo]
 
     tables.booking_cancellations = tables.booking_cancellations ?? []

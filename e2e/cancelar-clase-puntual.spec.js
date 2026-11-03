@@ -248,7 +248,8 @@ test('cancelar una clase con un crédito devuelto y dos no devueltos -- resumen 
   expect(resumen).toContain('Crédito devuelto a 1 de 3.')
   expect(resumen).toContain('NO devueltos (2):')
   expect(resumen).toContain('Socio Prueba 2: NO se devolvió el crédito, era de un pago anulado (del 02/10/2026).')
-  expect(resumen).toContain('Socio Prueba 3: NO se devolvió el crédito, no tiene créditos vigentes de CrossFit.')
+  // T4: el texto dice que su plan actual no incluye esa disciplina.
+  expect(resumen).toContain('Socio Prueba 3: NO se devolvió el crédito, su plan actual no incluye créditos de CrossFit.')
 
   // Créditos: +1 solo al lote vigente; los otros dos, intactos.
   expect(tables.user_credits.find((f) => f.id === conVigente.lote.id).remaining_credits).toBe(6)
@@ -263,7 +264,7 @@ test('cancelar una clase con un crédito devuelto y dos no devueltos -- resumen 
   expect(porSocio[deAnulado.profile.id]).toBe(
     `La clase del ${fecha} se canceló. Ese crédito no se reintegró porque pertenecía a un pago anulado. Consultá con el gimnasio.`,
   )
-  expect(porSocio[sinNada.profile.id]).toContain('no se reintegró porque no tenés créditos vigentes de CrossFit')
+  expect(porSocio[sinNada.profile.id]).toContain('no se reintegró porque tu plan actual no incluye créditos de CrossFit')
   expect(pushes.every((p) => p.targetUserIds.length === 1 && p.audience === 'users')).toBe(true)
 })
 
