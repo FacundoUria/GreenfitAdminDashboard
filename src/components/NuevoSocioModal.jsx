@@ -5,7 +5,8 @@ import { diferenciaEnDias, proximoVencimiento, toISODate } from '../utils/fecha'
 import { ahoraEnArgentina } from '../utils/ahoraArgentina'
 import { PLANES_DISPONIBLES, normalizarPlanes, planesDeCreditos, tienePlanDeVencimiento } from '../utils/planes'
 import { resolverDisciplinaId } from '../utils/creditosPwa'
-import { resolverUserIdPorDni } from '../utils/fichaSocioPwa'
+import { resolverUserIdPorDni, esperarCuentaPwa } from '../utils/fichaSocioPwa'
+import { avisoSinCuenta, detalleDelCobro } from '../utils/avisoSinCuenta'
 import { normalizarTexto } from '../utils/coincidenciaSocios'
 import FichaSocioHistorial from './FichaSocioHistorial'
 import CreditosEditablesSocio from './CreditosEditablesSocio'
@@ -57,28 +58,9 @@ function formInicial(socio) {
   }
 }
 
-// El alta de socio dispara el trigger `on_socio_dni_upsert`, que crea la
-// cuenta de Auth de la PWA de forma ASÍNCRONA (llamada HTTP vía pg_net, sin
-// vuelta síncrona a este cliente) -- si se intenta acreditar créditos o
-// vencimiento apenas el INSERT de `socios` devuelve éxito, lo más probable
-// es que la cuenta todavía no exista. Esperamos a que `profiles` la tenga
-// lista (hasta ~5s) antes de sincronizar.
-//
-// FIX (Fase 2, ver admin_acreditar_creditos_manual): esta condición de
-// carrera SIGUE vigente después de reemplazar sincronizarCreditosPwa/
-// sincronizarVencimientoPwa por ese RPC -- también necesita un user_id ya
-// resuelto (lo recibe como parámetro, no resuelve nada por DNI del lado
-// del servidor), así que el problema que esta función resuelve no cambió
-// en nada. Se devuelve el user_id resuelto directo (antes solo un
-// booleano) -- ahorra una segunda consulta idéntica en el caller.
-async function esperarCuentaPwa(dni, intentos = 6, esperaMs = 800) {
-  for (let i = 0; i < intentos; i += 1) {
-    const userId = await resolverUserIdPorDni(dni)
-    if (userId) return userId
-    if (i < intentos - 1) await new Promise((resolve) => setTimeout(resolve, esperaMs))
-  }
-  return null
-}
+// esperarCuentaPwa (espera unos segundos a que el trigger on_socio_dni_upsert
+// cree la cuenta de la app) vive ahora en utils/fichaSocioPwa.js: T5 también
+// la usa al cobrar.
 
 // FIX (checkboxes "reflejan la realidad", caso real Valentina Ramon) --
 // Aparatos vigente sin depender de socio.plan -- mismo criterio que
@@ -121,6 +103,10 @@ function NuevoSocioModal({
   onEditarSocioExistente,
   onBuscarSocioPorNombre,
   onCreditosActualizados,
+  // T5 -- alta de un socio cuya cuenta de la app todavía no existe: se le
+  // pasa el aviso al padre (Socios.jsx lo muestra con "Entendido" una vez
+  // cerrado este modal). Sin esta prop, cae a window.alert con el mismo texto.
+  onAvisoSinCuenta,
 }) {
   const esEdicion = Boolean(socio)
   const [form, setForm] = useState(() => formInicial(socio))
@@ -486,6 +472,7 @@ function NuevoSocioModal({
       const disciplinasCredito = planesDeCreditos(form.planes)
       const necesitaVencimiento = tienePlanDeVencimiento(form.planes)
       const avisos = []
+      let aviso = null
 
       // Filtrado ACÁ (antes de decidir si hace falta esperar la cuenta) --
       // si Seba tildó una disciplina de créditos pero dejó la cantidad en
@@ -498,9 +485,20 @@ function NuevoSocioModal({
       if (entradasCredito.length > 0 || necesitaVencimiento) {
         const userId = await esperarCuentaPwa(form.dni)
         if (!userId) {
-          avisos.push(
-            'La cuenta de la app todavía se está generando: cargá los créditos/vencimiento en unos segundos desde "Registrar Pago".',
-          )
+          // T5 -- antes: "cargá ... desde Registrar Pago" (eso registraba un
+          // SEGUNDO cobro). Ahora el mismo aviso que el cobro sin cuenta: la
+          // ficha quedó guardada y los créditos se cargan desde Editar Socio
+          // → Créditos cuando tenga cuenta. El alta no guarda los créditos en
+          // la ficha: el detalle del aviso es lo único que los deja anotados.
+          aviso = avisoSinCuenta({
+            titulo: 'Socio guardado en la ficha',
+            dni: form.dni,
+            detalle: detalleDelCobro({
+              creditosPorDisciplina: entradasCredito,
+              plan: form.planes,
+              fechaVencimiento: fechaVencimientoNueva,
+            }),
+          })
         } else {
           const pCreditos = []
           for (const { disciplina, cantidad } of entradasCredito) {
@@ -530,6 +528,10 @@ function NuevoSocioModal({
       }
 
       if (avisos.length > 0) window.alert(avisos.join('\n'))
+      if (aviso) {
+        if (onAvisoSinCuenta) onAvisoSinCuenta(aviso)
+        else window.alert([aviso.titulo, aviso.mensaje, aviso.detalle].filter(Boolean).join('\n'))
+      }
     }
 
     setGuardando(false)

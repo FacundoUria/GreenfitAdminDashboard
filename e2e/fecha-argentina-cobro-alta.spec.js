@@ -148,7 +148,12 @@ for (const timezoneId of ['America/Argentina/Mendoza', 'UTC']) {
       await expect(page.getByLabel('Fecha de vencimiento', { exact: true })).toHaveValue('2026-11-22')
 
       await page.getByRole('button', { name: 'Confirmar' }).click()
-      await expect(page.getByText('Pago registrado correctamente')).toBeVisible({ timeout: 10_000 })
+      // T5 -- Vera no tiene cuenta en la app: sale el aviso de cobro sin
+      // cuenta (modal propio, no un diálogo del navegador) en vez del toast.
+      const aviso = page.getByRole('alertdialog', { name: 'Pago guardado en la ficha' })
+      await expect(aviso).toBeVisible({ timeout: 10_000 })
+      await expect(aviso).toContainText('Este socio no tiene cuenta en la app.')
+      await aviso.getByRole('button', { name: 'Entendido' }).click()
       expect(dialogos).toEqual([])
 
       const socio = tables.socios.find((s) => s.id === SOCIO_VENCE_HOY.id)

@@ -428,7 +428,13 @@ test('Registrar Pago: una disciplina nueva (por vencimiento, con días configura
 
   await page.getByRole('button', { name: 'Confirmar' }).click()
 
-  await expect(page.getByText('Pago registrado correctamente')).toBeVisible({ timeout: 10_000 })
+  // T5 -- Nadia no tiene cuenta en la app (no hay profile con su DNI): en vez
+  // de "Pago registrado correctamente" sale el aviso de cobro sin cuenta (un
+  // modal propio, no un window.alert: huboAlerta sigue en false).
+  const aviso = page.getByRole('alertdialog', { name: 'Pago guardado en la ficha' })
+  await expect(aviso).toBeVisible({ timeout: 10_000 })
+  await expect(aviso).toContainText('Este socio no tiene cuenta en la app.')
+  await aviso.getByRole('button', { name: 'Entendido' }).click()
   expect(huboAlerta).toBe(false)
 
   // Impactó de verdad en la ficha del socio.

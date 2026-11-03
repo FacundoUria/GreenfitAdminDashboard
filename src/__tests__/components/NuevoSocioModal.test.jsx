@@ -451,3 +451,47 @@ describe('NuevoSocioModal -- "hoy" del alta en hora de Argentina (franja 21:00 a
     expect(socioInsertado).toEqual(expect.objectContaining({ ultimo_pago: '2026-10-22', dia_corte: 22, fecha_vencimiento: '2026-11-22' }))
   })
 })
+
+// T5 -- alta de un socio cuya cuenta de la app no aparece (el trigger que la
+// crea es asíncrono, o falló): antes el aviso decía "cargá ... desde Registrar
+// Pago" (eso registraba un SEGUNDO cobro). Ahora: el mismo aviso que el cobro
+// sin cuenta, con lo cargado en el alta anotado (el alta no guarda los
+// créditos en la ficha), y se lo pasa a Socios.jsx para mostrarlo con
+// "Entendido". No llama a ningún RPC que acredite.
+describe('NuevoSocioModal -- alta sin cuenta en la app (T5)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('avisa "no tiene cuenta... Editar Socio → Créditos" con lo cargado, sin acreditar nada', async () => {
+    supabase.from.mockImplementation((tabla) => {
+      if (tabla === 'socios') {
+        return { insert: () => ({ select: () => Promise.resolve({ data: [{ id: 'nuevo-t5' }], error: null }) }) }
+      }
+      // profiles: la cuenta nunca aparece.
+      return { select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }) }
+    })
+    const onAvisoSinCuenta = vi.fn()
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {})
+
+    const { container } = render(<NuevoSocioModal onClose={vi.fn()} onSaved={vi.fn()} onAvisoSinCuenta={onAvisoSinCuenta} />)
+    fireEvent.change(screen.getByLabelText('Nombre'), { target: { value: 'Lucía' } })
+    fireEvent.change(screen.getByLabelText('Apellido'), { target: { value: 'Paz' } })
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'lucia@test.com' } })
+    fireEvent.change(screen.getByLabelText('DNI'), { target: { value: '30222333' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: 'CrossFit' }))
+    fireEvent.change(container.querySelector('#credito-CrossFit'), { target: { value: '8' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    await waitFor(() => expect(onAvisoSinCuenta).toHaveBeenCalledTimes(1), { timeout: 9000 })
+    const aviso = onAvisoSinCuenta.mock.calls[0][0]
+    expect(aviso.titulo).toBe('Socio guardado en la ficha')
+    expect(aviso.mensaje).toBe('Este socio no tiene cuenta en la app. Cuando se registre, cargale los créditos desde Editar Socio → Créditos.')
+    expect(aviso.detalle).toMatch(/^Anotá lo cobrado: CrossFit 8 créditos — vence el \d{2}\/\d{2}\/\d{4}\.$/)
+    expect(supabase.rpc).not.toHaveBeenCalledWith('admin_acreditar_creditos_manual', expect.anything())
+    // El aviso viejo ("cargá ... desde Registrar Pago") ya no aparece.
+    expect(alertSpy).not.toHaveBeenCalled()
+    alertSpy.mockRestore()
+  }, 12000)
+})

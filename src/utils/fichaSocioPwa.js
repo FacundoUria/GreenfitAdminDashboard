@@ -108,6 +108,52 @@ export async function resolverUserIdPorDni(dni) {
   return data?.id ?? null
 }
 
+// T5 (R5) -- igual que resolverUserIdPorDni, pero un error de red/RLS (o dos
+// perfiles con el mismo DNI) NO se confunde con "no tiene cuenta": lanza. Lo
+// usa el cobro, donde "no tiene cuenta" cambia lo que se le dice a Seba.
+export async function buscarCuentaPwaPorDni(dni) {
+  if (!dni) return null
+  const { data, error } = await supabase.from('profiles').select('id').eq('dni', dni).maybeSingle()
+  if (error) throw new Error(error.message || 'error desconocido al buscar la cuenta')
+  return data?.id ?? null
+}
+
+// El alta de socio dispara el trigger `on_socio_dni_upsert`, que crea la
+// cuenta de la app de forma ASÍNCRONA (pg_net) -- apenas guardada la ficha,
+// lo más probable es que la cuenta todavía no exista. Se reintenta unos
+// segundos antes de concluir que no tiene cuenta. (Antes vivía solo en
+// NuevoSocioModal.jsx; T5 también la usa al cobrar, D-T5d.)
+// `buscar` permite elegir la búsqueda estricta (buscarCuentaPwaPorDni, lanza
+// si falla) o la de siempre (resolverUserIdPorDni).
+export async function esperarCuentaPwa(dni, { intentos = 6, esperaMs = 800, buscar = resolverUserIdPorDni } = {}) {
+  for (let i = 0; i < intentos; i += 1) {
+    const userId = await buscar(dni)
+    if (userId) return userId
+    if (i < intentos - 1) await new Promise((resolve) => setTimeout(resolve, esperaMs))
+  }
+  return null
+}
+
+// T5 -- lista "Pendientes de cargar": socios con cuenta en la app, ficha con
+// fecha vigente y cobro reciente (últimos 35 días) y NADA vigente en
+// user_credits (ver admin_socios_pendientes_de_cargar() en
+// supabase_migration_t5_copiador_sin_filas.sql). R5: si falla, LANZA -- el
+// llamador lo muestra en rojo; nunca se devuelve una lista vacía en silencio.
+export async function fetchPendientesDeCargar() {
+  const { data, error } = await supabase.rpc('admin_socios_pendientes_de_cargar')
+  if (error) throw new Error(error.message || 'error desconocido')
+  return (data ?? []).map((fila) => ({
+    socioId: fila.socio_id,
+    nombre: fila.nombre ?? '',
+    apellido: fila.apellido ?? '',
+    dni: fila.dni ?? null,
+    plan: fila.plan ?? [],
+    creditosFicha: fila.creditos_ficha ?? 0,
+    fechaVencimientoFicha: fila.fecha_vencimiento_ficha ?? null,
+    ultimoPago: fila.ultimo_pago ?? null,
+  }))
+}
+
 // ============================================================
 // Tabla principal: avatar + nivel de TODOS los socios listados, en 2
 // queries batch (no 1 por fila) -- clave para que la tabla siga andando

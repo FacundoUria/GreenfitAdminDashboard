@@ -60,7 +60,14 @@ test('Registrar Pago permite un rango de fechas 100% custom (ej. 10 días) y per
   await page.getByLabel('Monto cobrado (opcional)').fill('8000')
   await page.getByRole('button', { name: 'Confirmar' }).click()
 
-  await expect(page.getByText('Pago registrado correctamente')).toBeVisible({ timeout: 10_000 })
+  // T5 -- Lucía no tiene cuenta en la app (no hay profile con su DNI): en vez
+  // de "Pago registrado correctamente" sale el aviso de cobro sin cuenta, que
+  // se cierra con "Entendido". El pago en la ficha se guarda igual (abajo).
+  const aviso = page.getByRole('alertdialog', { name: 'Pago guardado en la ficha' })
+  await expect(aviso).toBeVisible({ timeout: 10_000 })
+  await expect(aviso).toContainText('Este socio no tiene cuenta en la app.')
+  await aviso.getByRole('button', { name: 'Entendido' }).click()
+  await expect(aviso).toBeHidden()
 
   // 1) Lo que quedó persistido en `socios` (mock en memoria, mutado por el
   //    PATCH real que dispara la UI) coincide EXACTO con lo elegido a mano

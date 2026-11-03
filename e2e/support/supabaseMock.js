@@ -106,6 +106,11 @@ export async function mockSupabase(page, { user, tables = {}, rpc = {}, function
   const yaEstaba = (tables.profiles ?? []).some((p) => p.id === user.id)
   tables.profiles = yaEstaba ? tables.profiles : [mockProfileRow(user), ...(tables.profiles ?? [])]
 
+  // T5 -- Socios.jsx consulta "Pendientes de cargar" en cada carga. Por defecto
+  // no hay ninguno (si no, todo spec que entra a Socios vería el cartel rojo de
+  // "no se pudo calcular"); un spec que lo quiera probar pone su propia fixture.
+  if (!('admin_socios_pendientes_de_cargar' in rpc)) rpc.admin_socios_pendientes_de_cargar = []
+
   await page.route(
     (url) => url.hostname === SUPABASE_HOST,
     async (route) => {

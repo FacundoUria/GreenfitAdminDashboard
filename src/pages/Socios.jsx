@@ -21,13 +21,18 @@ import {
   fetchAvataresYNiveles,
   fetchMembresiasVigentesPorDni,
   fetchCreditosPorDisciplina,
-  resolverUserIdPorDni,
+  buscarCuentaPwaPorDni,
+  esperarCuentaPwa,
+  fetchPendientesDeCargar,
   registrarPago,
 } from '../utils/fichaSocioPwa'
+import { avisoSinCuenta, detalleDelCobro, tieneDniValido } from '../utils/avisoSinCuenta'
 import SociosTabla from '../components/SociosTabla'
 import NuevoSocioModal from '../components/NuevoSocioModal'
 import RegistrarPagoModal from '../components/RegistrarPagoModal'
 import WhatsAppModal from '../components/WhatsAppModal'
+import AvisoSinCuentaModal from '../components/AvisoSinCuentaModal'
+import PendientesDeCargarAviso from '../components/PendientesDeCargarAviso'
 import { useAuth } from '../context/useAuth'
 
 function Toast({ message }) {
@@ -55,6 +60,9 @@ const filtroOptions = [
   { value: 'por_vencer', label: `Por Vencer (${DIAS_POR_VENCER} días)` },
   { value: 'inactivo', label: 'Inactivo' },
   { value: 'nuevo', label: 'Nuevos del Mes' },
+  // T5 -- pagaron sin cuenta, ya tienen cuenta y en la app no tienen nada
+  // vigente (ver PendientesDeCargarAviso.jsx).
+  { value: 'pendientes', label: 'Pendientes de cargar' },
   { value: 'todos', label: 'Todos' },
 ]
 
@@ -175,6 +183,21 @@ function Socios() {
   // como "días de vigencia" para las de vencimiento, ver DisciplinaModal.jsx)
   // para poder sugerir la fecha de vencimiento sola al tildar una actividad.
   const [disciplinasActivas, setDisciplinasActivas] = useState([])
+  // T5 -- "Pendientes de cargar" (admin_socios_pendientes_de_cargar). R5: el
+  // error se guarda y se muestra en rojo, nunca se convierte en lista vacía.
+  const [pendientes, setPendientes] = useState({ cargando: true, error: null, lista: [] })
+  // T5 -- aviso de cobro/alta sin cuenta en la app (se cierra con "Entendido").
+  const [avisoCuenta, setAvisoCuenta] = useState(null)
+
+  const cargarPendientes = async () => {
+    try {
+      const lista = await fetchPendientesDeCargar()
+      setPendientes({ cargando: false, error: null, lista })
+    } catch (err) {
+      console.error('No se pudo calcular "Pendientes de cargar":', err)
+      setPendientes({ cargando: false, error: err.message || 'error desconocido', lista: [] })
+    }
+  }
 
   const fetchSocios = async () => {
     setLoading(true)
@@ -191,6 +214,7 @@ function Socios() {
       setSocios([])
     } else {
       setSocios((data ?? []).map(mapearSocio))
+      cargarPendientes()
     }
 
     setLoading(false)
@@ -201,6 +225,9 @@ function Socios() {
     // experimental set-state-in-effect no distingue este caso del anti-patrón que persigue.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchSocios()
+    // Solo al montar: fetchSocios se recrea en cada render (T5 le sumó
+    // cargarPendientes) y no tiene que re-disparar este efecto.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Best-effort, aparte del fetch principal de socios -- si falla, el modal
@@ -304,6 +331,10 @@ function Socios() {
     { key: 'nuevo', testId: 'kpi-nuevos', label: 'Nuevos del Mes', value: counts.nuevo, icon: UserPlus },
   ]
 
+  // T5 -- ids de la ficha (como texto: el RPC los devuelve bigint) de los
+  // "Pendientes de cargar", para el filtro.
+  const idsPendientes = useMemo(() => new Set(pendientes.lista.map((p) => String(p.socioId))), [pendientes])
+
   const sociosFiltrados = useMemo(() => {
     const termino = busqueda.trim().toLowerCase()
 
@@ -332,6 +363,8 @@ function Socios() {
       const coincideEstado =
         filtroEstado === 'todos'
           ? true
+          : filtroEstado === 'pendientes'
+            ? idsPendientes.has(String(socio.id))
           : filtroEstado === 'inactivo'
             ? socio.estado === 'inactivo' || socio.estado === 'vencido'
             : socio.activo === false
@@ -346,7 +379,7 @@ function Socios() {
 
       return coincideBusqueda && coincideEstado && coincidePlan
     })
-  }, [sociosConEstado, busqueda, filtroEstado, filtroPlan])
+  }, [sociosConEstado, busqueda, filtroEstado, filtroPlan, idsPendientes])
 
   const handleKpiClick = (key) => {
     setFiltroEstado((prev) => (prev === key ? 'todos' : key))
@@ -409,6 +442,8 @@ function Socios() {
     // callback -- sin este refresh, aparatosVigenteReal quedaría
     // desactualizado hasta el próximo fetchSocios() completo.
     fetchMembresiasVigentesPorDni(socios.map((s) => s.dni)).then(aplicarMembresias)
+    // T5 -- cargarle créditos a un pendiente lo saca de la lista.
+    cargarPendientes()
   }
 
   const handleCambiarBaja = async (socio) => {
@@ -567,7 +602,28 @@ function Socios() {
       // admin_acreditar_creditos_manual (abajo) como para el historial de
       // pagos más abajo (antes se resolvía dos veces, con dos consultas
       // idénticas a `profiles`).
-      const userId = await resolverUserIdPorDni(socio.dni)
+      //
+      // T5 -- desde que el copiador de la app (sync_my_membership) ya no
+      // copia la ficha a user_credits, un socio SIN cuenta queda solo con la
+      // ficha y Seba le tiene que cargar los créditos cuando tenga cuenta:
+      // se le avisa (AvisoSinCuentaModal) en vez de "Pago registrado
+      // correctamente". Por eso acá:
+      //   - R5: un error al buscar la cuenta NO se toma como "sin cuenta"
+      //     (buscarCuentaPwaPorDni lanza) -- se avisa el error.
+      //   - D-T5d: con DNI válido se reintenta unos segundos (la cuenta la
+      //     crea el trigger on_socio_dni_upsert de forma asíncrona: un socio
+      //     recién dado de alta puede no tenerla todavía).
+      //   - Sin DNI válido no puede haber cuenta: no se busca.
+      let userId = null
+      let errorCuenta = null
+      if (tieneDniValido(socio.dni)) {
+        try {
+          userId = await esperarCuentaPwa(socio.dni, { buscar: buscarCuentaPwaPorDni })
+        } catch (err) {
+          console.error('ERROR al buscar la cuenta de la app del socio (profiles):', err)
+          errorCuenta = err.message || 'error desconocido'
+        }
+      }
 
       // FIX (Fase 2, modelo de "plan único") -- ANTES esto era
       // sincronizarCreditosPwa() por disciplina (sumaba un delta sobre el
@@ -623,8 +679,8 @@ function Socios() {
         }
       }
       // userId null -- socio sin cuenta PWA todavía: el pago YA quedó
-      // registrado en `socios` arriba, mismo criterio "fail open" de
-      // siempre, solo no hay nada que sincronizar del lado de la app.
+      // registrado en `socios` arriba, solo no hay nada que cargar del lado
+      // de la app. Más abajo se le avisa a Seba (T5).
 
       // Historial de pagos (Ficha 360°) -- best-effort: si el socio todavía no
       // tiene cuenta PWA, o pagos_socio no está desplegada, el pago YA se
@@ -670,8 +726,27 @@ function Socios() {
       }
 
       setSocioParaPago(null)
-      setToastMessage(mensaje)
-      setTimeout(() => setToastMessage(null), 2500)
+      if (userId) {
+        setToastMessage(mensaje)
+        setTimeout(() => setToastMessage(null), 2500)
+      } else {
+        // T5 -- sin cuenta (o no se pudo verificar): aviso fijo con lo cobrado
+        // (la ficha guarda solo el total de créditos, D-T5c). Si el cobro
+        // trajo otro aviso (ej. la fecha de inicio que no se guardó), va
+        // abajo, no se pierde.
+        setAvisoCuenta(
+          avisoSinCuenta({
+            dni: socio.dni,
+            errorVerificacion: errorCuenta,
+            detalle: detalleDelCobro({
+              creditosPorDisciplina: payload.creditosPorDisciplina,
+              plan: payload.plan ?? socio.plan,
+              fechaVencimiento: payload.vencimiento?.fechaVencimiento,
+            }),
+            extra: mensaje !== 'Pago registrado correctamente' ? mensaje : null,
+          }),
+        )
+      }
       fetchSocios()
     } catch (err) {
       // Cualquier excepción inesperada del resto del flujo (créditos,
@@ -822,6 +897,19 @@ function Socios() {
         </div>
       </div>
 
+      <PendientesDeCargarAviso
+        estado={pendientes}
+        mostrarLista={filtroEstado === 'pendientes'}
+        onVer={() => setFiltroEstado('pendientes')}
+        onOcultar={() => setFiltroEstado('todos')}
+        onCargar={(pendiente) => {
+          const socio = sociosConEstado.find((s) => String(s.id) === String(pendiente.socioId))
+          if (socio) handleEditar(socio)
+          else window.alert('No se encontró la ficha de este socio en la lista. Recargá la página.')
+        }}
+        onReintentar={cargarPendientes}
+      />
+
       {loading ? (
         <div className="flex items-center justify-center gap-2 rounded-xl bg-greenfit-card p-10 text-sm text-gray-400">
           <Loader2 className="h-4 w-4 animate-spin" />
@@ -873,6 +961,7 @@ function Socios() {
             buscarCoincidenciaPorNombre(sociosConEstado, nombre, apellido, { excluirId: socioEnEdicion?.id })
           }
           onCreditosActualizados={refrescarCreditosPwa}
+          onAvisoSinCuenta={setAvisoCuenta}
         />
       )}
 
@@ -893,6 +982,8 @@ function Socios() {
           onClose={() => setWhatsappDestinatarios(null)}
         />
       )}
+
+      <AvisoSinCuentaModal aviso={avisoCuenta} onCerrar={() => setAvisoCuenta(null)} />
 
       {toastMessage && <Toast message={toastMessage} />}
     </div>
