@@ -14,7 +14,7 @@ import { AlertCircle, Download, Loader2, UserPlus } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
 import { esDelMesActual } from '../utils/fecha'
 import { estadoOperativoSocio, getSocioMetrics } from '../utils/socioMetrics'
-import { fetchCreditosPorDisciplina, fetchMembresiasVigentesPorDni, fetchTodosLosSocios } from '../utils/fichaSocioPwa'
+import { cargarSociosConDatosPwa, combinarSocioConPwa } from '../utils/sociosConDatosPwa'
 import { desglosePorDisciplina } from '../utils/reporteDisciplinas'
 import { COLOR_NEUTRO, colorDisciplina } from '../utils/coloresDisciplina'
 
@@ -355,18 +355,14 @@ function Reportes() {
     setError(null)
 
     try {
-      const { data: filasSocios, error: sociosError } = await fetchTodosLosSocios()
-      if (sociosError) throw new Error(`No se pudieron cargar los socios: ${sociosError.message}`)
-
-      const dnis = (filasSocios ?? []).map((s) => s.dni)
-      const [creditos, membresiasVigentes, catalogo] = await Promise.all([
-        fetchCreditosPorDisciplina(dnis, { lanzarSiFalla: true }),
-        fetchMembresiasVigentesPorDni(dnis, { lanzarSiFalla: true }),
+      // Tanda A -- la MISMA carga que Home y Socios (utils/sociosConDatosPwa.js).
+      const [{ filas: filasSocios, creditosPorDni: creditos, membresias: membresiasVigentes }, catalogo] = await Promise.all([
+        cargarSociosConDatosPwa(),
         supabase.from('disciplines').select('id, name, kind, is_active').order('name', { ascending: true }),
       ])
       if (catalogo.error) throw new Error(`No se pudo cargar el catálogo de disciplinas: ${catalogo.error.message}`)
 
-      setSocios(filasSocios ?? [])
+      setSocios(filasSocios)
       setCreditosPorDni(creditos)
       setMembresias(membresiasVigentes)
       setDisciplinas(catalogo.data ?? [])
@@ -386,19 +382,10 @@ function Reportes() {
     fetchDatos()
   }, [])
 
+  // Mismo armado que Home y Socios (combinarSocioConPwa): Aparatos
+  // tri-estado crudo, nunca coercionado.
   const sociosConCreditos = useMemo(
-    () =>
-      socios.map((s) => ({
-        ...s,
-        creditosPwaPorDisciplina: creditosPorDni.get(s.dni) ?? [],
-        // TRI-ESTADO -- NUNCA coercionar a booleano acá (`=== true`
-        // perdería la diferencia entre `false` -- tiene cuenta PWA
-        // confirmada sin nada real -- y `undefined` -- sin cuenta PWA, cae
-        // a fecha_vencimiento directa, ver fetchAparatosVigentePorDni en
-        // fichaSocioPwa.js). Se pasa el valor CRUDO tal cual.
-        aparatosVigenteReal: membresias.vigentePorDni.get(s.dni),
-        membresiasVigentes: membresias.disciplinasPorDni.get(s.dni) ?? [],
-      })),
+    () => socios.map((s) => combinarSocioConPwa(s, { creditosPorDni, membresias })),
     [socios, creditosPorDni, membresias],
   )
 

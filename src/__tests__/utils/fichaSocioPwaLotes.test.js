@@ -31,6 +31,8 @@ vi.mock('../../lib/supabaseClient', () => ({
 
 import {
   TAMANO_LOTE_IDS,
+  calcularNivel,
+  fetchAvataresYNiveles,
   fetchAparatosVigentePorDni,
   fetchCreditosPorDisciplina,
   fetchMembresiasVigentesPorDni,
@@ -149,6 +151,63 @@ describe('si una consulta falla: avisar en vez de fallar en silencio', () => {
     // Tienen cuenta confirmada pero no se pudo confirmar nada vigente.
     expect(aparatos.get('30000000')).toBe(false)
     expect(console.error).toHaveBeenCalled()
+  })
+})
+
+// Tanda A -- en producción hay 1596 xp_events: antes salían en UN solo pedido
+// sin .range(), Supabase cortaba en 1000 y los niveles quedaban más bajos.
+describe('fetchAvataresYNiveles -- en lotes y paginado (1596 xp_events reales)', () => {
+  const SOCIO_PESADO = 'profile-30000007'
+  // 1596 eventos de 10 XP, TODOS del mismo socio (cae en el primer lote de ids).
+  const EVENTOS = Array.from({ length: 1596 }, (_, k) => ({ id: `xp-${String(k).padStart(4, '0')}`, user_id: SOCIO_PESADO, xp_amount: 10 }))
+  const conXp = (q, desde, hasta) => {
+    if (q.tabla === 'xp_events') {
+      const ids = new Set(q.in.valores)
+      return { data: EVENTOS.filter((e) => ids.has(e.user_id)).slice(desde, hasta + 1), error: null }
+    }
+    return baseNormal(q)
+  }
+
+  it('con 250 socios y 1596 eventos: suma los 1596 (nivel 32, no 21), ningún .in() pasa de 100 y todo va ordenado por id', async () => {
+    responder = conXp
+    const mapa = await fetchAvataresYNiveles(dnis(250))
+
+    expect(consultas.every((c) => c.in.valores.length <= TAMANO_LOTE_IDS)).toBe(true)
+    expect(consultas.every((c) => c.order?.col === 'id')).toBe(true)
+    expect(consultas.filter((c) => c.tabla === 'profiles').map((c) => c.in.valores.length)).toEqual([100, 100, 50])
+    // El lote con el socio pesado pide 2 páginas; los otros 2 lotes, 1 cada uno.
+    const deXp = consultas.filter((c) => c.tabla === 'xp_events')
+    expect(deXp.filter((c) => c.in.valores.includes(SOCIO_PESADO)).map((c) => c.rango)).toEqual([
+      [0, 999],
+      [1000, 1999],
+    ])
+
+    expect(mapa.size).toBe(250)
+    expect(mapa.get('30000007')).toEqual({ userId: SOCIO_PESADO, avatarUrl: null, totalXp: 15960, nivel: 32 })
+    // Con el corte viejo (1000 eventos) hubiera dado otro nivel.
+    expect(calcularNivel(10000)).toBe(21)
+    expect(mapa.get('30000008')).toEqual({ userId: 'profile-30000008', avatarUrl: null, totalXp: 0, nivel: 1 })
+  })
+
+  it('con { lanzarSiFalla: true }, un error de perfiles o de XP se LANZA (Socios avisa en rojo)', async () => {
+    responder = (q, d, h) => (q.tabla === 'xp_events' ? { data: null, error: { message: 'timeout xp' } } : conXp(q, d, h))
+    await expect(fetchAvataresYNiveles(dnis(5), { lanzarSiFalla: true })).rejects.toThrow('timeout xp')
+
+    responder = (q, d, h) => (q.tabla === 'profiles' ? { data: null, error: { message: 'sin red' } } : conXp(q, d, h))
+    await expect(fetchAvataresYNiveles(dnis(5), { lanzarSiFalla: true })).rejects.toThrow('sin red')
+  })
+
+  it('sin la opción, un XP que no se pudo leer deja el nivel en null (nunca un "nivel 1" inventado)', async () => {
+    responder = (q, d, h) => (q.tabla === 'xp_events' ? { data: null, error: { message: 'timeout xp' } } : conXp(q, d, h))
+    const mapa = await fetchAvataresYNiveles(['30000007'])
+    expect(mapa.get('30000007')).toEqual({ userId: SOCIO_PESADO, avatarUrl: null, totalXp: null, nivel: null })
+    expect(console.error).toHaveBeenCalled()
+  })
+
+  it('si la tabla xp_events todavía no existe (42P01), nivel 1 como siempre', async () => {
+    responder = (q, d, h) => (q.tabla === 'xp_events' ? { data: null, error: { code: '42P01', message: 'relation does not exist' } } : conXp(q, d, h))
+    const mapa = await fetchAvataresYNiveles(['30000007'])
+    expect(mapa.get('30000007')).toEqual({ userId: SOCIO_PESADO, avatarUrl: null, totalXp: 0, nivel: 1 })
   })
 })
 

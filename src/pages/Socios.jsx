@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   CheckCircle2,
@@ -18,9 +18,12 @@ import { formatearPlanes, planesDeVencimiento, PLANES_DISPONIBLES } from '../uti
 import { buscarCoincidenciaPorNombre } from '../utils/coincidenciaSocios'
 import { sincronizarEstadoCuentaPwa, resolverDisciplinaId } from '../utils/creditosPwa'
 import {
-  fetchAvataresYNiveles,
-  fetchMembresiasVigentesPorDni,
-  fetchCreditosPorDisciplina,
+  cargarDatosPwaDeSocios,
+  cargarSociosConDatosPwa,
+  combinarSocioConPwa,
+  ErrorCargaSocios,
+} from '../utils/sociosConDatosPwa'
+import {
   buscarCuentaPwaPorDni,
   esperarCuentaPwa,
   fetchPendientesDeCargar,
@@ -121,6 +124,23 @@ function mapearSocio(row) {
   }
 }
 
+// Mismo orden que antes daba `.order('nombre')` en la base (los sin nombre
+// al final). Ahora se ordena acá porque la carga pagina por id (orden fijo:
+// paginar por nombre, con nombres repetidos, puede repetir o saltear filas).
+function ordenarPorNombre(lista) {
+  return [...lista].sort((a, b) => {
+    if (!a.nombre && !b.nombre) return 0
+    if (!a.nombre) return 1
+    if (!b.nombre) return -1
+    return a.nombre.localeCompare(b.nombre, 'es')
+  })
+}
+
+function mensajeErrorCarga(err) {
+  if (err instanceof ErrorCargaSocios) return 'No se pudieron cargar los socios. Verificá la conexión con Supabase.'
+  return 'No se pudieron cargar los créditos, Aparatos o niveles de la app. No se muestran la tabla ni los números para no dar datos incompletos. Verificá la conexión con Supabase.'
+}
+
 function Socios() {
   const { usuario } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -199,25 +219,37 @@ function Socios() {
     }
   }
 
+  // Tanda A -- TODO junto o nada: socios (paginados, antes se cortaban en
+  // 1000) + créditos + Aparatos + niveles. Recién cuando llegó todo se
+  // dibujan tabla y KPIs (antes "Socios activos" mostraba 71 y a los
+  // segundos 102, y los socios figuraban "Inactivo" mientras tanto). Si algo
+  // falla: aviso en rojo con "Reintentar", nunca un número parcial (R5).
+  // `cargaActual` descarta la respuesta de una carga vieja si se pidió otra
+  // después (ej. guardar dos veces seguidas).
+  const cargaActual = useRef(0)
   const fetchSocios = async () => {
+    const estaCarga = ++cargaActual.current
     setLoading(true)
     setError(null)
 
-    const { data, error: fetchError } = await supabase
-      .from('socios')
-      .select('*')
-      .order('nombre', { ascending: true })
-
-    if (fetchError) {
-      console.error('Error al cargar socios desde Supabase:', fetchError.message)
-      setError('No se pudieron cargar los socios. Verificá la conexión con Supabase.')
-      setSocios([])
-    } else {
-      setSocios((data ?? []).map(mapearSocio))
+    try {
+      const { filas, creditosPorDni: creditos, membresias, gamificacionPorDni: gamificacion } = await cargarSociosConDatosPwa({
+        conNiveles: true,
+      })
+      if (estaCarga !== cargaActual.current) return
+      setSocios(ordenarPorNombre(filas.map(mapearSocio)))
+      setCreditosPorDni(creditos)
+      aplicarMembresias(membresias)
+      setGamificacionPorDni(gamificacion)
       cargarPendientes()
+    } catch (err) {
+      if (estaCarga !== cargaActual.current) return
+      console.error('Error al cargar Socios:', err.message)
+      setError(mensajeErrorCarga(err))
+      setSocios([])
+    } finally {
+      if (estaCarga === cargaActual.current) setLoading(false)
     }
-
-    setLoading(false)
   }
 
   useEffect(() => {
@@ -248,16 +280,6 @@ function Socios() {
       })
   }, [])
 
-  // Aparte del fetch de `socios` -- si falla o tarda no debe bloquear la
-  // tabla principal, es un dato "de más" (avatar + badge de nivel), no
-  // crítico para la gestión de cuotas/créditos.
-  useEffect(() => {
-    if (socios.length === 0) return
-    fetchAvataresYNiveles(socios.map((s) => s.dni)).then(setGamificacionPorDni)
-    fetchCreditosPorDisciplina(socios.map((s) => s.dni)).then(setCreditosPorDni)
-    fetchMembresiasVigentesPorDni(socios.map((s) => s.dni)).then(aplicarMembresias)
-  }, [socios])
-
   // estadoOperativoSocio() es la MISMA función que usa Home.jsx -- antes
   // acá un socio sin fecha_vencimiento (planes de créditos) caía a
   // `socio.estadoDb` (texto legacy, potencialmente desactualizado), mientras
@@ -285,25 +307,20 @@ function Socios() {
         // (esta función) podían divergir por este motivo solo en
         // Socios.jsx -- Home.jsx/Reportes.jsx ya armaban el objeto completo
         // de una sola vez y no tenían este problema.
-        const creditosPwaPorDisciplina = creditosPorDni.get(socio.dni) ?? []
-        // TRI-ESTADO -- NUNCA coercionar a booleano acá (`=== true`
-        // perdería la diferencia entre `false` -- tiene cuenta PWA
-        // confirmada sin nada real -- y `undefined` -- sin cuenta PWA, cae
-        // a fecha_vencimiento directa, ver el comentario en
-        // fetchAparatosVigentePorDni). Se pasa el valor CRUDO tal cual.
-        const aparatosVigenteReal = aparatosVigentePorDni.get(socio.dni)
+        // Tanda A -- el MISMO armado que Home y Reportes (combinarSocioConPwa,
+        // utils/sociosConDatosPwa.js): créditos reales, Aparatos tri-estado
+        // (crudo, nunca coercionado) y membresías vigentes. `aparatosVigenteReal`
+        // lo leen directo aparatosActivoReal() de SociosTabla/NuevoSocioModal/
+        // CreditosEditablesSocio (caso Arianna Isgro).
+        const combinado = combinarSocioConPwa(socio, {
+          creditosPorDni,
+          membresias: { vigentePorDni: aparatosVigentePorDni, disciplinasPorDni: membresiasPorDni },
+        })
         return {
-          ...socio,
-          estado: estadoOperativoSocio({ ...socio, creditosPwaPorDisciplina, aparatosVigenteReal }),
+          ...combinado,
+          estado: estadoOperativoSocio(combinado),
           avatarUrl: gamificacion?.avatarUrl ?? null,
           nivelXp: gamificacion?.nivel ?? null,
-          creditosPwaPorDisciplina,
-          // Caso Arianna Isgro -- ver aparatosActivoReal() en
-          // SociosTabla.jsx/NuevoSocioModal.jsx/CreditosEditablesSocio.jsx:
-          // esas tres funciones ya no calculan esto desde fecha_vencimiento,
-          // leen este campo directo.
-          aparatosVigenteReal,
-          membresiasVigentes: membresiasPorDni.get(socio.dni) ?? [],
         }
       }),
     [socios, gamificacionPorDni, creditosPorDni, aparatosVigentePorDni, membresiasPorDni],
@@ -435,15 +452,27 @@ function Socios() {
   // refresca lo que la tabla ya tenía: el mismo fetch batch que corre al
   // cargar la lista, para que el total que se ve en CreditosCell quede al
   // día apenas se cierra el modal después de un cambio.
-  const refrescarCreditosPwa = () => {
-    if (socios.length === 0) return
-    fetchCreditosPorDisciplina(socios.map((s) => s.dni)).then(setCreditosPorDni)
-    // "+ Agregar Aparatos" (CreditosEditablesSocio.jsx) dispara este mismo
-    // callback -- sin este refresh, aparatosVigenteReal quedaría
-    // desactualizado hasta el próximo fetchSocios() completo.
-    fetchMembresiasVigentesPorDni(socios.map((s) => s.dni)).then(aplicarMembresias)
+  //
+  // Tanda A -- la tabla que ya se ve (completa) sigue en pantalla mientras
+  // se refresca; créditos y Aparatos se reemplazan JUNTOS cuando llegaron los
+  // dos. Si falla, aviso en rojo (R5) en vez de dejar números viejos sin decir
+  // nada. "+ Agregar Aparatos" (CreditosEditablesSocio.jsx) también dispara
+  // esto -- sin el refresh de membresías, aparatosVigenteReal quedaría viejo.
+  const refrescarCreditosPwa = async () => {
     // T5 -- cargarle créditos a un pendiente lo saca de la lista.
     cargarPendientes()
+    if (socios.length === 0) return
+    const estaCarga = cargaActual.current
+    try {
+      const { creditosPorDni: creditos, membresias } = await cargarDatosPwaDeSocios(socios.map((s) => s.dni))
+      if (estaCarga !== cargaActual.current) return
+      setCreditosPorDni(creditos)
+      aplicarMembresias(membresias)
+    } catch (err) {
+      if (estaCarga !== cargaActual.current) return
+      console.error('Error al refrescar créditos/Aparatos en Socios:', err.message)
+      setError(mensajeErrorCarga(err))
+    }
   }
 
   const handleCambiarBaja = async (socio) => {
@@ -822,7 +851,16 @@ function Socios() {
                 {label}
                 {subtitulo && <span className="block text-xs text-gray-500">({subtitulo})</span>}
               </p>
-              <p className="text-2xl font-semibold text-white">{value}</p>
+              {/* Tanda A -- nunca un número parcial: "Cargando…" hasta que
+                  llegó todo, "—" si la carga falló (el aviso en rojo está
+                  abajo, donde va la tabla). */}
+              {loading ? (
+                <p className="text-sm text-gray-400">Cargando…</p>
+              ) : error ? (
+                <p className="text-2xl font-semibold text-gray-500">—</p>
+              ) : (
+                <p className="text-2xl font-semibold text-white">{value}</p>
+              )}
             </div>
           </button>
         ))}

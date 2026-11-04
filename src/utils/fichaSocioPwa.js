@@ -160,28 +160,35 @@ export async function fetchPendientesDeCargar() {
 // bien con cientos de socios.
 // ============================================================
 
-export async function fetchAvataresYNiveles(dnis) {
+// Tanda A -- perfiles y XP en lotes de TAMANO_LOTE_IDS y paginados (antes:
+// un solo `.in()` con TODOS los DNIs y TODOS los ids, sin `.range()`; con
+// 1016 socios y 1596 xp_events en producción, la respuesta de XP se cortaba
+// en 1000 en silencio y los niveles salían más bajos de lo real).
+// `{ lanzarSiFalla: true }` (Socios.jsx): un error se LANZA en vez de
+// devolver un Map vacío o niveles calculados con XP incompleto.
+export async function fetchAvataresYNiveles(dnis, opciones) {
   const dnisValidos = Array.from(new Set((dnis ?? []).filter(Boolean)))
   if (dnisValidos.length === 0) return new Map()
 
-  const { data: perfiles, error: perfilesError } = await supabase
-    .from('profiles')
-    .select('id, dni, avatar_url')
-    .in('dni', dnisValidos)
+  const { data: perfiles, error: perfilesError } = await fetchPorLotesDeIds(dnisValidos, (lote) =>
+    supabase.from('profiles').select('id, dni, avatar_url').in('dni', lote).order('id', { ascending: true }),
+  )
   if (perfilesError) {
-    console.error('No se pudieron traer los perfiles PWA para la tabla de socios:', perfilesError.message)
-    return new Map()
+    return fallar(opciones, 'No se pudieron traer los perfiles PWA para la tabla de socios:', perfilesError, new Map())
   }
 
   const userIds = (perfiles ?? []).map((p) => p.id)
   const xpPorUsuario = new Map()
+  // Sin XP confiable, el nivel queda en null (badge oculto) -- nunca un
+  // "nivel 1" inventado a partir de un XP que no se pudo leer.
+  let xpConfiable = true
   if (userIds.length > 0) {
-    const { data: eventos, error: xpError } = await supabase.from('xp_events').select('user_id, xp_amount').in('user_id', userIds)
+    const { data: eventos, error: xpError } = await fetchPorLotesDeIds(userIds, (lote) =>
+      supabase.from('xp_events').select('id, user_id, xp_amount').in('user_id', lote).order('id', { ascending: true }),
+    )
     if (xpError && !esErrorDeRelacionFaltante(xpError)) {
-      // No es "tabla ausente" (esperable antes de la migración) -- puede ser
-      // que la policy admin todavía no se haya actualizado. No rompe la
-      // tabla, el badge de nivel simplemente no aparece.
-      console.error('No se pudo traer XP para la tabla de socios:', xpError.message)
+      fallar(opciones, 'No se pudo traer XP para la tabla de socios:', xpError, null)
+      xpConfiable = false
     } else {
       for (const evento of eventos ?? []) {
         xpPorUsuario.set(evento.user_id, (xpPorUsuario.get(evento.user_id) ?? 0) + (evento.xp_amount ?? 0))
@@ -191,11 +198,11 @@ export async function fetchAvataresYNiveles(dnis) {
 
   const resultado = new Map()
   for (const perfil of perfiles ?? []) {
-    const totalXp = xpPorUsuario.get(perfil.id) ?? 0
+    const totalXp = xpConfiable ? (xpPorUsuario.get(perfil.id) ?? 0) : null
     resultado.set(perfil.dni, {
       userId: perfil.id,
       avatarUrl: perfil.avatar_url ?? null,
-      nivel: calcularNivel(totalXp),
+      nivel: xpConfiable ? calcularNivel(totalXp) : null,
       totalXp,
     })
   }

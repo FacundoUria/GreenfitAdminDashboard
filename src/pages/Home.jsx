@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   AlertCircle,
@@ -17,7 +17,7 @@ import { colorOcupacion } from '../utils/ocupacion'
 import { diaActualPorDefecto, fechaDeEstaSemana, mapearClasesDesdeBookings } from '../utils/clases'
 import { filaSeDictaElDia } from '../utils/claseUnaSolaVez'
 import { getSocioMetrics, estadoOperativoSocio } from '../utils/socioMetrics'
-import { fetchCreditosPorDisciplina, fetchMembresiasVigentesPorDni } from '../utils/fichaSocioPwa'
+import { cargarSociosConDatosPwa, combinarSocioConPwa, ErrorCargaSocios } from '../utils/sociosConDatosPwa'
 import { diasHastaVencimientoPlan } from '../utils/fechaPlan'
 import ActividadReciente from '../components/ActividadReciente'
 
@@ -40,67 +40,69 @@ function Home() {
   const [clasesHoy, setClasesHoy] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  // Créditos REALES de la PWA por disciplina (user_credits), en batch --
-  // mismo dato/mismo criterio que Socios.jsx (fetchCreditosPorDisciplina).
-  // CAMBIO 3 (bug real: "Activo" sin nada real): estadoOperativoSocio()
-  // necesita esto para decidir bien un socio 100% créditos, sin
-  // fecha_vencimiento -- sin este merge, Home volvería a mostrar más
-  // "Socios Activos" de los que realmente hay, igual que el bug original.
-  const [creditosPorDni, setCreditosPorDni] = useState(new Map())
-  // Aparatos REALMENTE vigente por DNI -- mismo dato que Socios.jsx
-  // (fetchAparatosVigentePorDni). BUG REAL #2 (caso Agustina Aguero, ver
-  // socioMetrics.js): estadoOperativoSocio() ya no confía en
-  // fecha_vencimiento sola para 'activo' -- exige esta fila real. Sin este
-  // merge, CUALQUIER socio con Aparatos genuinamente vigente (la inmensa
-  // mayoría) contaría "Inactivo" acá, mismo bug pero en la otra dirección.
-  const [aparatosVigentePorDni, setAparatosVigentePorDni] = useState(new Map())
-  // Membresías vigentes CON su fecha real -- para fechaPlanSocio() ("Por
-  // vencer" sale de user_credits, no de socios.fecha_vencimiento).
-  const [membresiasPorDni, setMembresiasPorDni] = useState(new Map())
+  // Créditos reales por disciplina + Aparatos tri-estado + membresías
+  // vigentes con su fecha (ver combinarSocioConPwa): lo que necesita
+  // estadoOperativoSocio() para decidir (CAMBIO 3, caso Agustina Aguero) y
+  // fechaPlanSocio() para "Por vencer". Llegan JUNTO con los socios.
+  const [datosPwa, setDatosPwa] = useState({
+    creditosPorDni: new Map(),
+    membresias: { vigentePorDni: new Map(), disciplinasPorDni: new Map() },
+  })
 
+  // Tanda A -- TODO junto o nada (mismo criterio que Socios y Reportes, ver
+  // utils/sociosConDatosPwa.js): socios paginados (antes se cortaban en 1000)
+  // + créditos + Aparatos, y recién ahí se muestran los KPIs. Si algo falla,
+  // aviso en rojo con "Reintentar" -- nunca un número parcial.
+  const cargaActual = useRef(0)
   const fetchDatos = async () => {
+    const estaCarga = ++cargaActual.current
     setLoading(true)
     setError(null)
 
     const diaHoy = diaActualPorDefecto()
     const fechaHoy = fechaDeEstaSemana(diaHoy)
 
-    const [sociosResult, clasesResult, bookingsResult] = await Promise.all([
-      supabase.from('socios').select('*'),
-      // disciplines(show_in_agenda) -- mismo criterio que Clases.jsx: excluye
-      // horarios meramente informativos (ej. Aparatos/Pase Libre, sin cupo
-      // que reservar) de este widget de "Próximas Clases de Hoy".
-      supabase
-        .from('classes')
-        .select('*, disciplines(show_in_agenda)')
-        .contains('days_of_week', [diaHoy])
-        .order('start_time', { ascending: true }),
-      supabase.from('bookings').select('id, user_id, class_id, attended, profiles(full_name, dni)').eq('booking_date', fechaHoy),
-    ])
+    try {
+      const [datosSocios, clasesResult, bookingsResult] = await Promise.all([
+        cargarSociosConDatosPwa(),
+        // disciplines(show_in_agenda) -- mismo criterio que Clases.jsx: excluye
+        // horarios meramente informativos (ej. Aparatos/Pase Libre, sin cupo
+        // que reservar) de este widget de "Próximas Clases de Hoy".
+        supabase
+          .from('classes')
+          .select('*, disciplines(show_in_agenda)')
+          .contains('days_of_week', [diaHoy])
+          .order('start_time', { ascending: true }),
+        supabase.from('bookings').select('id, user_id, class_id, attended, profiles(full_name, dni)').eq('booking_date', fechaHoy),
+      ])
+      if (clasesResult.error) throw new Error(`No se pudieron cargar las clases de hoy: ${clasesResult.error.message}`)
+      if (estaCarga !== cargaActual.current) return
 
-    if (sociosResult.error || clasesResult.error) {
-      console.error(
-        'Error al cargar métricas desde Supabase:',
-        sociosResult.error?.message ?? clasesResult.error?.message,
+      if (bookingsResult.error) {
+        console.error('Error al cargar inscriptos en Home:', bookingsResult.error.message)
+      }
+
+      const clasesReservables = (clasesResult.data ?? []).filter((row) => {
+        const disciplina = Array.isArray(row.disciplines) ? row.disciplines[0] : row.disciplines
+        // Una clase de una sola vez solo es "de hoy" en su fecha.
+        return disciplina?.show_in_agenda !== false && filaSeDictaElDia(row, fechaHoy)
+      })
+
+      setSocios(datosSocios.filas)
+      setDatosPwa({ creditosPorDni: datosSocios.creditosPorDni, membresias: datosSocios.membresias })
+      setClasesHoy(mapearClasesDesdeBookings(clasesReservables, bookingsResult.data ?? []))
+    } catch (err) {
+      if (estaCarga !== cargaActual.current) return
+      console.error('Error al cargar métricas desde Supabase:', err.message)
+      setError(
+        err instanceof ErrorCargaSocios
+          ? 'No se pudieron cargar las métricas. Verificá la conexión con Supabase.'
+          : 'No se pudieron cargar todas las métricas (socios, créditos, Aparatos o clases de hoy). No se muestran números para no dar un total incompleto. Verificá la conexión con Supabase.',
       )
-      setError('No se pudieron cargar las métricas. Verificá la conexión con Supabase.')
-      setLoading(false)
-      return
+      setSocios([])
+    } finally {
+      if (estaCarga === cargaActual.current) setLoading(false)
     }
-
-    if (bookingsResult.error) {
-      console.error('Error al cargar inscriptos en Home:', bookingsResult.error.message)
-    }
-
-    const clasesReservables = (clasesResult.data ?? []).filter((row) => {
-      const disciplina = Array.isArray(row.disciplines) ? row.disciplines[0] : row.disciplines
-      // Una clase de una sola vez solo es "de hoy" en su fecha.
-      return disciplina?.show_in_agenda !== false && filaSeDictaElDia(row, fechaHoy)
-    })
-
-    setSocios(sociosResult.data ?? [])
-    setClasesHoy(mapearClasesDesdeBookings(clasesReservables, bookingsResult.data ?? []))
-    setLoading(false)
   }
 
   useEffect(() => {
@@ -108,32 +110,7 @@ function Home() {
     fetchDatos()
   }, [])
 
-  // Aparte del fetch principal -- si falla o tarda no debe bloquear el
-  // resto del Dashboard, mismo criterio que Socios.jsx.
-  useEffect(() => {
-    if (socios.length === 0) return
-    fetchCreditosPorDisciplina(socios.map((s) => s.dni)).then(setCreditosPorDni)
-    fetchMembresiasVigentesPorDni(socios.map((s) => s.dni)).then(({ vigentePorDni, disciplinasPorDni }) => {
-      setAparatosVigentePorDni(vigentePorDni)
-      setMembresiasPorDni(disciplinasPorDni)
-    })
-  }, [socios])
-
-  const sociosConCreditos = useMemo(
-    () =>
-      socios.map((s) => ({
-        ...s,
-        creditosPwaPorDisciplina: creditosPorDni.get(s.dni) ?? [],
-        // TRI-ESTADO -- NUNCA coercionar a booleano acá (`=== true`
-        // perdería la diferencia entre `false` -- tiene cuenta PWA
-        // confirmada sin nada real -- y `undefined` -- sin cuenta PWA, cae
-        // a fecha_vencimiento directa, ver fetchAparatosVigentePorDni en
-        // fichaSocioPwa.js). Se pasa el valor CRUDO tal cual.
-        aparatosVigenteReal: aparatosVigentePorDni.get(s.dni),
-        membresiasVigentes: membresiasPorDni.get(s.dni) ?? [],
-      })),
-    [socios, creditosPorDni, aparatosVigentePorDni, membresiasPorDni],
-  )
+  const sociosConCreditos = useMemo(() => socios.map((s) => combinarSocioConPwa(s, datosPwa)), [socios, datosPwa])
 
   // getSocioMetrics() es la MISMA función que usa Socios.jsx para sus
   // tarjetas de KPI -- fuente única de verdad, así los números de acá y los

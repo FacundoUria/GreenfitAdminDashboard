@@ -297,7 +297,7 @@ describe('fetchCreditosPorDisciplina / fetchAparatosVigentePorDni -- paginación
       id: 'uc-fernanda-crossfit',
       user_id: FERNANDA.userId,
       remaining_credits: 12,
-      expires_at: '2026-10-14T12:00:00.000Z',
+      expires_at: '2099-10-14T12:00:00.000Z',
       discipline: CROSSFIT,
     }
     const todasLasFilas = filasUserCreditsConFernandaAlFinal(CROSSFIT, filaFernanda)
@@ -331,14 +331,14 @@ describe('fetchCreditosPorDisciplina / fetchAparatosVigentePorDni -- paginación
     // este fix, con un fetch sin paginar, mapa.get(FERNANDA.dni) hubiera
     // sido `undefined` (su única fila jamás llegaba desde Supabase).
     expect(mapa.get(FERNANDA.dni)).toEqual([
-      { disciplineId: CROSSFIT.id, disciplineName: 'CrossFit', remainingCredits: 12, lotes: [{ id: 'uc-fernanda-crossfit', remainingCredits: 12, expiresAt: '2026-10-14T12:00:00.000Z' }] },
+      { disciplineId: CROSSFIT.id, disciplineName: 'CrossFit', remainingCredits: 12, lotes: [{ id: 'uc-fernanda-crossfit', remainingCredits: 12, expiresAt: '2099-10-14T12:00:00.000Z' }] },
     ])
   })
 
   it('fetchAparatosVigentePorDni también pagina -- una fila de Aparatos vigente en la posición 1219 se confirma igual', async () => {
     const filaFernanda = {
       user_id: FERNANDA.userId,
-      expires_at: '2026-10-14T12:00:00.000Z',
+      expires_at: '2099-10-14T12:00:00.000Z',
       discipline: APARATOS,
     }
     const todasLasFilas = filasUserCreditsConFernandaAlFinal(APARATOS, filaFernanda)
@@ -378,7 +378,7 @@ describe('fetchCreditosPorDisciplina / fetchAparatosVigentePorDni -- paginación
       id: 'uc-fernanda-crossfit',
       user_id: FERNANDA.userId,
       remaining_credits: 12,
-      expires_at: '2026-10-14T12:00:00.000Z',
+      expires_at: '2099-10-14T12:00:00.000Z',
       discipline: CROSSFIT,
     }
     const todasLasFilas = filasUserCreditsConFernandaAlFinal(CROSSFIT, filaFernanda)
