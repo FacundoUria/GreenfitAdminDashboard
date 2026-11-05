@@ -29,7 +29,7 @@
 --   0) HORARIO: frena SOLO si el día UTC y el de Argentina son distintos (21:00 a 23:59 de
 --      Argentina). Fuera de esa franja se puede correr.
 --   0bis) HUELLA EXACTA (sin espacios) de las 4 funciones = la de producción (consulta A).
---      Hay que PEGARLAS abajo (PEGAR_HUELLA_...): sin pegar, la migración frena.
+--      Son las que se pegaron al aplicarla en producción (05/11/2026).
 --   1) Tanda B no aplicada todavía (no existe el esquema respaldo).
 --   2) Los 4 defaults son EXACTAMENTE 'CURRENT_DATE'.
 --   3) Cada función existe con esa firma exacta y es la única con ese nombre.
@@ -76,15 +76,15 @@ declare
   v_txt text;
 begin
   -- 0bis) HUELLA EXACTA de producción (sin espacios, la columna huella_sin_espacios de la
-  --       consulta A). PEGAR los 4 valores: si queda alguno sin pegar, o no coincide, frena.
+  --       consulta A), las que se pegaron al aplicarla en producción. Si no coincide, frena.
   select string_agg(x.firma || ' (esperada ' || x.esperada || ', hay '
                     || coalesce(md5(regexp_replace(pg_get_functiondef(to_regprocedure(x.firma)), '\s+', '', 'g')), 'no existe') || ')', ', ')
     into v_txt
   from (values
-    ('public.registrar_hoy_entrene()', 'PEGAR_HUELLA_registrar_hoy_entrene'),
-    ('public.mp_process_payment(uuid, uuid, jsonb, boolean, integer, uuid, numeric, text, text, text)', 'PEGAR_HUELLA_mp_process_payment'),
-    ('public.admin_resetear_ranking()', 'PEGAR_HUELLA_admin_resetear_ranking'),
-    ('public.community_ranking_mes(uuid)', 'PEGAR_HUELLA_community_ranking_mes')
+    ('public.registrar_hoy_entrene()', '356e925289191e0453b3424843814495'),
+    ('public.mp_process_payment(uuid, uuid, jsonb, boolean, integer, uuid, numeric, text, text, text)', 'b8b8e7f51dead44f127532689b996c59'),
+    ('public.admin_resetear_ranking()', 'e8bbeb71e9b0ec6b1ccbfd59ef58e9fa'),
+    ('public.community_ranking_mes(uuid)', 'f989930e04a96937aeed7dad7f10f352')
   ) as x(firma, esperada)
   where to_regprocedure(x.firma) is null
      or md5(regexp_replace(pg_get_functiondef(to_regprocedure(x.firma)), '\s+', '', 'g')) <> x.esperada;
