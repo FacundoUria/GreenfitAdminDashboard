@@ -7,6 +7,8 @@
 --
 -- Cómo corre:
 --   * DESPUÉS de la migración. Antes, (0) a (4) fallan y los casos de "noche" dan el día UTC.
+--   * Con la tanda MP aplicada (respaldo.tanda_mp_funciones), (0) acepta para
+--     mp_process_payment la huella de MP, si MP partió exactamente de la versión Tanda B.
 --   * Guarda de horario: igual que la migración, frena SOLO si el día UTC y el de Argentina
 --     son distintos (21:00 a 23:59 de Argentina).
 --   * LA NOCHE SIMULADA: a partir del caso (5), la sesión pasa a una zona horaria en la que
@@ -43,6 +45,9 @@ declare
   v_r record;
   v_huella_antes text;
   v_huella_despues text;
+  v_mp_funcion text;
+  v_mp_huella text;
+  v_mp_antes text;
   ok int := 0;
   total int := 0;
   informe text := '';
@@ -85,14 +90,28 @@ begin
       if to_regclass('respaldo.tanda_b_funciones') is null or to_regclass('respaldo.tanda_b_defaults') is null then
         informe := informe || E'\nFALLA  (0) no existe el respaldo: la migración Tanda B no está aplicada';
       else
+        -- Si después se aplicó la tanda MP, mp_process_payment tiene a propósito la huella de
+        -- MP (on conflict con where). Se acepta esa, siempre que la tanda MP haya partido
+        -- exactamente de la versión Tanda B (huella_antes_sin_espacios de MP = la nueva de B).
+        -- Se lee con execute porque respaldo.tanda_mp_funciones puede no existir.
+        v_mp_funcion := null; v_mp_huella := null; v_mp_antes := null;
+        if to_regclass('respaldo.tanda_mp_funciones') is not null then
+          execute 'select funcion, huella_nueva_sin_espacios, huella_antes_sin_espacios from respaldo.tanda_mp_funciones'
+            into v_mp_funcion, v_mp_huella, v_mp_antes;
+        end if;
+
         select string_agg(b.funcion, ', ') into v_txt
         from respaldo.tanda_b_funciones b
         where to_regprocedure(b.funcion) is null
-           or md5(regexp_replace(pg_get_functiondef(to_regprocedure(b.funcion)), '\s+', '', 'g')) <> b.huella_nueva_sin_espacios
+           or md5(regexp_replace(pg_get_functiondef(to_regprocedure(b.funcion)), '\s+', '', 'g'))
+              <> case when to_regprocedure(b.funcion) = to_regprocedure(v_mp_funcion) and v_mp_antes = b.huella_nueva_sin_espacios
+                      then v_mp_huella
+                      else b.huella_nueva_sin_espacios end
            or md5(regexp_replace(regexp_replace(b.definicion_antes, '\mcurrent_date\M', '(now() at time zone ''America/Argentina/Mendoza'')::date', 'gi'), '\s+', '', 'g'))
               <> b.huella_nueva_sin_espacios;
         if v_txt is null and (select count(*) from respaldo.tanda_b_funciones) = 4 and (select count(*) from respaldo.tanda_b_defaults) = 4 then
-          ok := ok + 1; informe := informe || E'\nOK     (0) migración aplicada: las 4 funciones son la versión de producción con SOLO la fecha cambiada';
+          ok := ok + 1; informe := informe || E'\nOK     (0) migración aplicada: las 4 funciones son la versión de producción con SOLO la fecha cambiada'
+                                           || case when v_mp_huella is not null then ' (mp_process_payment: además la tanda MP, partiendo de Tanda B)' else '' end;
         else
           informe := informe || E'\nFALLA  (0) funciones que no son la versión Tanda B: ' || coalesce(v_txt, '(faltan filas en el respaldo)');
         end if;
