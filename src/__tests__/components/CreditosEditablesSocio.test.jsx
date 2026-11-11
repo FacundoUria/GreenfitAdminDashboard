@@ -903,3 +903,73 @@ describe('CreditosEditablesSocio -- "Vencimiento del plan" (CAMBIO 3)', () => {
     expect(screen.queryByText('31/10/2026')).toBeNull()
   })
 })
+
+// Cuenta en creación: Seba guarda el DNI y enseguida abre Créditos; la cuenta
+// la crea on_socio_dni_upsert en segundo plano. Antes se buscaba UNA vez al
+// abrir y cada botón decía "no tiene cuenta". Ahora se sigue buscando sola,
+// con un cartel claro, y al aparecer se recarga.
+describe('CreditosEditablesSocio -- cuenta de la app en creación', () => {
+  const ESPERA_CORTA = { intentos: 3, esperaMs: 1 }
+  const TEXTO_EN_CREACION =
+    'La cuenta de la app de este socio se está creando (tarda unos segundos). Cuando esté lista vas a poder cargarle los créditos.'
+  const TEXTO_NO_CREADA = 'No se pudo crear la cuenta de la app. Avisale a Facundo.'
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.spyOn(window, 'alert').mockImplementation(() => {})
+  })
+
+  it('DNI válido sin cuenta: muestra que se está creando y, cuando aparece, recarga y el cartel se va', async () => {
+    mockearCarga({ userId: null })
+    resolverUserIdPorDni
+      .mockResolvedValueOnce(null) // carga inicial
+      .mockResolvedValueOnce(null) // 1er reintento
+      .mockResolvedValue('user-1') // aparece
+
+    render(<CreditosEditablesSocio socio={{ id: 's1', dni: DNI_FACUNDO, plan: [] }} esperaCuenta={{ intentos: 3, esperaMs: 30 }} />)
+
+    expect(await screen.findByTestId('cuenta-en-creacion')).toHaveTextContent(TEXTO_EN_CREACION)
+    await waitFor(() => expect(screen.queryByTestId('cuenta-en-creacion')).toBeNull())
+    // Recargó todo con la cuenta nueva (2 cargas completas).
+    expect(fetchCreditosPorDisciplina).toHaveBeenCalledTimes(2)
+  })
+
+  it('si la cuenta no aparece: lo dice en rojo, y "Reintentar" vuelve a buscar', async () => {
+    mockearCarga({ userId: null })
+
+    render(<CreditosEditablesSocio socio={{ id: 's1', dni: DNI_FACUNDO, plan: [] }} esperaCuenta={ESPERA_CORTA} />)
+
+    await waitFor(() => expect(screen.getByTestId('cuenta-en-creacion')).toHaveTextContent(TEXTO_NO_CREADA))
+    const llamadasAntes = resolverUserIdPorDni.mock.calls.length
+    expect(llamadasAntes).toBe(1 + ESPERA_CORTA.intentos)
+
+    resolverUserIdPorDni.mockResolvedValue('user-1')
+    fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }))
+    await waitFor(() => expect(screen.queryByTestId('cuenta-en-creacion')).toBeNull())
+    expect(resolverUserIdPorDni.mock.calls.length).toBeGreaterThan(llamadasAntes)
+  })
+
+  it('sin DNI válido no hay cuenta posible: no muestra el cartel ni reintenta', async () => {
+    mockearCarga({ userId: null, entradas: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6, lotes: [] }] })
+    const dniInvalido = '.'
+    fetchCreditosPorDisciplina.mockResolvedValue(
+      new Map([[dniInvalido, [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6, lotes: [] }]]]),
+    )
+
+    render(<CreditosEditablesSocio socio={{ id: 's1', dni: dniInvalido, plan: ['CrossFit'] }} esperaCuenta={ESPERA_CORTA} />)
+
+    await screen.findByText('CrossFit')
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.queryByTestId('cuenta-en-creacion')).toBeNull()
+    expect(resolverUserIdPorDni).toHaveBeenCalledTimes(1)
+  })
+
+  it('con cuenta: no muestra el cartel', async () => {
+    mockearCarga({ entradas: [{ disciplineId: 'd-crossfit', disciplineName: 'CrossFit', remainingCredits: 6, lotes: [] }] })
+
+    render(<CreditosEditablesSocio socio={{ id: 's1', dni: DNI_FACUNDO, plan: ['CrossFit'] }} esperaCuenta={ESPERA_CORTA} />)
+
+    await screen.findByText('CrossFit')
+    expect(screen.queryByTestId('cuenta-en-creacion')).toBeNull()
+  })
+})

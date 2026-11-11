@@ -65,7 +65,7 @@ const filtroOptions = [
   { value: 'nuevo', label: 'Nuevos del Mes' },
   // T5 -- pagaron sin cuenta, ya tienen cuenta y en la app no tienen nada
   // vigente (ver PendientesDeCargarAviso.jsx).
-  { value: 'pendientes', label: 'Pendientes de cargar' },
+  { value: 'pendientes', label: 'Pagos sin cargar en la app' },
   { value: 'todos', label: 'Todos' },
 ]
 
@@ -214,7 +214,7 @@ function Socios() {
       const lista = await fetchPendientesDeCargar()
       setPendientes({ cargando: false, error: null, lista })
     } catch (err) {
-      console.error('No se pudo calcular "Pendientes de cargar":', err)
+      console.error('No se pudo calcular "Pagos sin cargar en la app":', err)
       setPendientes({ cargando: false, error: err.message || 'error desconocido', lista: [] })
     }
   }

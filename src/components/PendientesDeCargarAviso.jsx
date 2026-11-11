@@ -24,7 +24,7 @@ function PendientesDeCargarAviso({ estado, mostrarLista, onVer, onOcultar, onCar
         data-testid="pendientes-de-cargar-error"
         className="flex flex-col gap-2 rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-sm text-red-300 sm:flex-row sm:items-center sm:justify-between"
       >
-        <p>No se pudo calcular &quot;Pendientes de cargar&quot;: {estado.error}</p>
+        <p>No se pudo calcular &quot;Pagos sin cargar en la app&quot;: {estado.error}</p>
         <button
           type="button"
           onClick={onReintentar}
@@ -40,7 +40,10 @@ function PendientesDeCargarAviso({ estado, mostrarLista, onVer, onOcultar, onCar
   const lista = estado.lista ?? []
   if (lista.length === 0) return null
 
-  const cantidad = lista.length === 1 ? '1 socio pagó' : `${lista.length} socios pagaron`
+  // Texto de "Pagos sin cargar en la app" (antes "Pendientes de cargar: N
+  // socios pagaron sin cuenta y ya tienen cuenta", que no se entendía).
+  const uno = lista.length === 1
+  const quien = uno ? `${`${lista[0].nombre} ${lista[0].apellido}`.trim()} pagó` : `${lista.length} socios pagaron`
 
   return (
     <div data-testid="pendientes-de-cargar" className="rounded-xl border border-amber-400/30 bg-amber-400/5 p-4 text-sm">
@@ -48,8 +51,9 @@ function PendientesDeCargarAviso({ estado, mostrarLista, onVer, onOcultar, onCar
         <div className="flex items-start gap-2 text-amber-200">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
           <p>
-            <span className="font-semibold">Pendientes de cargar:</span> {cantidad} sin cuenta y ya tiene{lista.length === 1 ? '' : 'n'} cuenta
-            en la app. Cargale{lista.length === 1 ? '' : 's'} los créditos desde Editar Socio → Créditos.
+            <span className="font-semibold">Pagos sin cargar en la app:</span> {quien} cuando todavía no
+            tenía{uno ? '' : 'n'} cuenta en la app. Ya se registr{uno ? 'ó' : 'aron'}, pero en la app no le{uno ? '' : 's'} figura
+            lo que pag{uno ? 'ó' : 'aron'}. Tocá «Cargar créditos» en cada uno.
           </p>
         </div>
         <button
@@ -57,12 +61,12 @@ function PendientesDeCargarAviso({ estado, mostrarLista, onVer, onOcultar, onCar
           onClick={mostrarLista ? onOcultar : onVer}
           className="min-h-[44px] shrink-0 rounded-lg border border-amber-400/40 px-3 py-1.5 text-xs font-semibold text-amber-200 hover:bg-amber-400/10"
         >
-          {mostrarLista ? 'Ver todos los socios' : 'Ver pendientes'}
+          {mostrarLista ? 'Ver todos los socios' : 'Ver quiénes'}
         </button>
       </div>
 
       {mostrarLista && (
-        <ul className="mt-3 flex flex-col gap-2" aria-label="Pendientes de cargar">
+        <ul className="mt-3 flex flex-col gap-2" aria-label="Pagos sin cargar en la app">
           {lista.map((p) => (
             <li
               key={p.socioId}
@@ -73,12 +77,12 @@ function PendientesDeCargarAviso({ estado, mostrarLista, onVer, onOcultar, onCar
                   {`${p.nombre} ${p.apellido}`.trim()} <span className="text-xs text-gray-400">DNI {p.dni}</span>
                 </p>
                 <p className="text-xs text-gray-400">
-                  Ficha: {formatearPlanes(p.plan)} · {p.creditosFicha} créditos · cobrado hasta el {formatFecha(p.fechaVencimientoFicha)} ·
-                  último pago {formatFecha(p.ultimoPago)}
+                  Lo que pagó: {formatearPlanes(p.plan)} · {p.creditosFicha} créditos · hasta el {formatFecha(p.fechaVencimientoFicha)} ·
+                  pagó el {formatFecha(p.ultimoPago)}
                 </p>
                 <p className="text-xs text-amber-300">
-                  Al cargar, el plan arranca con fecha de hoy + 30 días: si corresponde, ajustá la fecha al{' '}
-                  {formatFecha(p.fechaVencimientoFicha)}.
+                  Al cargar, la fecha queda en hoy + 30 días. Si pagó hasta el {formatFecha(p.fechaVencimientoFicha)}, cambiala a esa
+                  fecha.
                 </p>
               </div>
               <button

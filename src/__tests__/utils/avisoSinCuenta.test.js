@@ -1,5 +1,25 @@
 import { describe, it, expect } from 'vitest'
-import { avisoSinCuenta, detalleDelCobro, tieneDniValido, TEXTO_SIN_CUENTA, TEXTO_SIN_DNI } from '../../utils/avisoSinCuenta'
+import { readFileSync } from 'node:fs'
+import process from 'node:process'
+import {
+  avisoSinCuenta,
+  detalleDelCobro,
+  tieneDniValido,
+  TEXTO_DNI_CON_CUENTA,
+  TEXTO_SIN_CUENTA,
+  TEXTO_SIN_DNI,
+} from '../../utils/avisoSinCuenta'
+
+// DNI-C -- el Admin reconoce y muestra tal cual el mensaje con el que la base
+// rechaza cambiarle el DNI a un socio con cuenta. Si alguien cambia uno de los
+// dos textos, este test lo frena.
+describe('TEXTO_DNI_CON_CUENTA (DNI-C)', () => {
+  it('es exactamente el texto acordado y el mismo que lanza validar_dni_socio() en la migración', () => {
+    expect(TEXTO_DNI_CON_CUENTA).toBe('Este socio ya tiene cuenta en la app. Para corregir el DNI avisale a Facundo.')
+    const sql = readFileSync(`${process.cwd()}/supabase_migration_dni_bloquear_cambio_con_cuenta.sql`, 'utf8')
+    expect(sql).toContain(`raise exception '${TEXTO_DNI_CON_CUENTA}'`)
+  })
+})
 
 // T5 -- el copiador de la app ya no copia la ficha a user_credits: cobrar a un
 // socio sin cuenta deja el pago SOLO en la ficha y Seba tiene que cargarle los

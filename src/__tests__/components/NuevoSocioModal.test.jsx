@@ -474,7 +474,10 @@ describe('NuevoSocioModal -- alta sin cuenta en la app (T5)', () => {
     const onAvisoSinCuenta = vi.fn()
     const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {})
 
-    const { container } = render(<NuevoSocioModal onClose={vi.fn()} onSaved={vi.fn()} onAvisoSinCuenta={onAvisoSinCuenta} />)
+    // Espera corta: la real (~15 s, ESPERA_CUENTA_MODAL) no es lo que se prueba acá.
+    const { container } = render(
+      <NuevoSocioModal onClose={vi.fn()} onSaved={vi.fn()} onAvisoSinCuenta={onAvisoSinCuenta} esperaCuenta={{ intentos: 3, esperaMs: 1 }} />,
+    )
     fireEvent.change(screen.getByLabelText('Nombre'), { target: { value: 'Lucía' } })
     fireEvent.change(screen.getByLabelText('Apellido'), { target: { value: 'Paz' } })
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'lucia@test.com' } })
@@ -494,4 +497,167 @@ describe('NuevoSocioModal -- alta sin cuenta en la app (T5)', () => {
     expect(alertSpy).not.toHaveBeenCalled()
     alertSpy.mockRestore()
   }, 12000)
+})
+
+// Caso Florencia Carrascosa (socio 473) -- Editar Socio exigía DNI válido
+// SIEMPRE: a ninguno de los ~670 socios históricos sin DNI se le podía editar
+// nada. Ahora: el DNI se exige y se manda solo si cambió (nunca ''), y si el
+// socio ya tiene cuenta no se le puede cambiar (DNI-C, mensaje tal cual).
+describe('NuevoSocioModal -- edición: DNI solo si cambió, cuenta nueva y DNI con cuenta (caso Florencia)', () => {
+  const TEXTO_DNI_CON_CUENTA = 'Este socio ya tiene cuenta en la app. Para corregir el DNI avisale a Facundo.'
+  const ESPERA_CORTA = { intentos: 3, esperaMs: 1 }
+  const socioBase = {
+    id: 473,
+    nombre: 'Florencia',
+    apellido: 'Carrascosa',
+    email: 'flor@test.com',
+    telefono: '2610000000',
+    plan: [],
+    fechaVencimiento: null,
+    creditosPwaPorDisciplina: [],
+  }
+
+  let cambiosEnviados
+  // `cuentas`: dni -> user id (lo que encuentra la búsqueda en profiles).
+  // `cuentaAlGuardar`: dni cuya cuenta "aparece" después del UPDATE, recién en
+  // la 2da consulta (como la crea on_socio_dni_upsert, en segundo plano).
+  function mockearBase({ cuentas = {}, cuentaAlGuardar = null, errorUpdate = null } = {}) {
+    cambiosEnviados = null
+    const cuentasVivas = { ...cuentas }
+    let consultasCuentaNueva = 0
+    supabase.rpc.mockResolvedValue({ data: null, error: null })
+    supabase.from.mockImplementation((tabla) => {
+      if (tabla === 'socios') {
+        return {
+          update: (cambios) => {
+            cambiosEnviados = cambios
+            return {
+              eq: () => ({
+                select: () =>
+                  Promise.resolve(errorUpdate ? { data: null, error: errorUpdate } : { data: [{ id: 473 }], error: null }),
+              }),
+            }
+          },
+        }
+      }
+      if (tabla === 'profiles') {
+        return {
+          select: () => ({
+            eq: (_col, valor) => ({
+              maybeSingle: () => {
+                if (!errorUpdate && cambiosEnviados && valor === cuentaAlGuardar) {
+                  consultasCuentaNueva += 1
+                  if (consultasCuentaNueva >= 2) cuentasVivas[valor] = 'u-nueva'
+                }
+                return Promise.resolve({ data: cuentasVivas[valor] ? { id: cuentasVivas[valor] } : null, error: null })
+              },
+            }),
+          }),
+        }
+      }
+      throw new Error(`tabla no mockeada: ${tabla}`)
+    })
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.spyOn(window, 'alert').mockImplementation(() => {})
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('socio sin DNI (null): editar el teléfono guarda SIN mandar dni y sin pedir DNI', async () => {
+    mockearBase()
+    const onSaved = vi.fn()
+    render(<NuevoSocioModal socio={{ ...socioBase, dni: null }} onClose={vi.fn()} onSaved={onSaved} esperaCuenta={ESPERA_CORTA} />)
+    fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '2619999999' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect(screen.queryByText(/DNI tiene que tener entre 6 y 10 dígitos/)).toBeNull()
+    expect(cambiosEnviados).toMatchObject({ telefono: '2619999999' })
+    expect('dni' in cambiosEnviados).toBe(false)
+    // Sin DNI no hay cuenta: no se sincroniza el teléfono con la app.
+    expect(supabase.rpc).not.toHaveBeenCalledWith('sincronizar_telefono_a_profile', expect.anything())
+  })
+
+  it('socio con DNI inválido histórico (".") sin tocarlo: guarda sin mandar dni', async () => {
+    mockearBase()
+    const onSaved = vi.fn()
+    render(<NuevoSocioModal socio={{ ...socioBase, dni: '.' }} onClose={vi.fn()} onSaved={onSaved} esperaCuenta={ESPERA_CORTA} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect('dni' in cambiosEnviados).toBe(false)
+  })
+
+  it('si se CAMBIA el DNI a uno inválido, bloquea sin llamar a Supabase', () => {
+    mockearBase()
+    render(<NuevoSocioModal socio={{ ...socioBase, dni: null }} onClose={vi.fn()} onSaved={vi.fn()} esperaCuenta={ESPERA_CORTA} />)
+    fireEvent.change(screen.getByLabelText('DNI'), { target: { value: '12.345' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    expect(screen.getByText(/DNI tiene que tener entre 6 y 10 dígitos/)).toBeTruthy()
+    expect(supabase.from).not.toHaveBeenCalledWith('socios')
+  })
+
+  it('borrarle el DNI a un socio que lo tenía bien es un cambio: se exige y no se manda ""', () => {
+    mockearBase()
+    render(<NuevoSocioModal socio={{ ...socioBase, dni: '30111222' }} onClose={vi.fn()} onSaved={vi.fn()} esperaCuenta={ESPERA_CORTA} />)
+    fireEvent.change(screen.getByLabelText('DNI'), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    expect(screen.getByText(/DNI tiene que tener entre 6 y 10 dígitos/)).toBeTruthy()
+    expect(cambiosEnviados).toBeNull()
+  })
+
+  it('cargarle el DNI: lo manda (sin espacios), muestra "Creando la cuenta en la app…" y cierra cuando la cuenta aparece', async () => {
+    mockearBase({ cuentaAlGuardar: '30111222' })
+    const onSaved = vi.fn()
+    const onClose = vi.fn()
+    render(
+      <NuevoSocioModal socio={{ ...socioBase, dni: null }} onClose={onClose} onSaved={onSaved} esperaCuenta={{ intentos: 3, esperaMs: 50 }} />,
+    )
+    fireEvent.change(screen.getByLabelText('DNI'), { target: { value: ' 30111222 ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    expect(await screen.findByText(/Creando la cuenta en la app… Tarda unos segundos/)).toBeTruthy()
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect(onClose).toHaveBeenCalled()
+    expect(cambiosEnviados.dni).toBe('30111222')
+    expect(window.alert).not.toHaveBeenCalled()
+  })
+
+  it('cargarle el DNI y la cuenta no aparece: avisa que los datos se guardaron y que no se pudo crear la cuenta', async () => {
+    mockearBase()
+    const onSaved = vi.fn()
+    render(<NuevoSocioModal socio={{ ...socioBase, dni: null }} onClose={vi.fn()} onSaved={onSaved} esperaCuenta={ESPERA_CORTA} />)
+    fireEvent.change(screen.getByLabelText('DNI'), { target: { value: '30111222' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect(window.alert).toHaveBeenCalledWith('Los datos del socio se guardaron. No se pudo crear la cuenta de la app. Avisale a Facundo.')
+  })
+
+  it('DNI-C: cambiarle el DNI a un socio CON cuenta -- muestra el mensaje tal cual y no guarda nada', async () => {
+    mockearBase({ cuentas: { 44537978: 'u-facundo' } })
+    const onSaved = vi.fn()
+    render(<NuevoSocioModal socio={{ ...socioBase, dni: '44537978' }} onClose={vi.fn()} onSaved={onSaved} esperaCuenta={ESPERA_CORTA} />)
+    fireEvent.change(screen.getByLabelText('DNI'), { target: { value: '44537979' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    expect(await screen.findByText(TEXTO_DNI_CON_CUENTA)).toBeTruthy()
+    expect(cambiosEnviados).toBeNull()
+    expect(onSaved).not.toHaveBeenCalled()
+  })
+
+  it('DNI-C: si la base rechaza el cambio (la consulta previa no vio la cuenta), muestra el mensaje de la base tal cual', async () => {
+    mockearBase({ errorUpdate: { code: '23514', message: TEXTO_DNI_CON_CUENTA } })
+    const onSaved = vi.fn()
+    render(<NuevoSocioModal socio={{ ...socioBase, dni: '44537978' }} onClose={vi.fn()} onSaved={onSaved} esperaCuenta={ESPERA_CORTA} />)
+    fireEvent.change(screen.getByLabelText('DNI'), { target: { value: '44537979' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    expect(await screen.findByText(TEXTO_DNI_CON_CUENTA)).toBeTruthy()
+    expect(onSaved).not.toHaveBeenCalled()
+  })
 })

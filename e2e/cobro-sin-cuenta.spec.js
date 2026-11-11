@@ -133,7 +133,7 @@ test('cobro: si falla la búsqueda de la cuenta, NO dice "no tiene cuenta" (R5)'
   expect(llamadas).toHaveLength(0)
 })
 
-test('"Pendientes de cargar": cartel, filtro con lo de la ficha y "Cargar créditos" abre Editar Socio', async ({ page }) => {
+test('"Pagos sin cargar en la app": cartel, filtro con lo de la ficha y "Cargar créditos" abre Editar Socio', async ({ page }) => {
   const tables = tablasBase()
   const hoy = new Date().toISOString().slice(0, 10)
   await loginComoAdmin(page, {
@@ -157,12 +157,12 @@ test('"Pendientes de cargar": cartel, filtro con lo de la ficha y "Cargar crédi
 
   await irASocios(page)
   const cartel = page.getByTestId('pendientes-de-cargar')
-  await expect(cartel).toContainText('1 socio pagó sin cuenta y ya tiene cuenta en la app')
+  await expect(cartel).toContainText('Martina Ríos pagó cuando todavía no tenía cuenta en la app')
 
-  await cartel.getByRole('button', { name: 'Ver pendientes' }).click()
-  const lista = page.getByRole('list', { name: 'Pendientes de cargar' })
+  await cartel.getByRole('button', { name: 'Ver quiénes' }).click()
+  const lista = page.getByRole('list', { name: 'Pagos sin cargar en la app' })
   await expect(lista).toContainText('Martina Ríos')
-  await expect(lista).toContainText('8 créditos · cobrado hasta el 02/12/2030')
+  await expect(lista).toContainText('8 créditos · hasta el 02/12/2030')
   // La tabla quedó filtrada: solo los pendientes.
   await expect(page.getByRole('table').getByText('Martina Ríos')).toBeVisible()
   await expect(page.getByRole('table').getByText('Bruno Otro')).toHaveCount(0)
@@ -171,7 +171,7 @@ test('"Pendientes de cargar": cartel, filtro con lo de la ficha y "Cargar crédi
   await expect(page.getByRole('heading', { name: 'Editar Socio' })).toBeVisible()
 })
 
-test('"Pendientes de cargar": si la consulta falla, cartel rojo con el motivo (R5)', async ({ page }) => {
+test('"Pagos sin cargar en la app": si la consulta falla, cartel rojo con el motivo (R5)', async ({ page }) => {
   await loginComoAdmin(page, {
     tables: tablasBase(),
     rpc: {
@@ -182,6 +182,6 @@ test('"Pendientes de cargar": si la consulta falla, cartel rojo con el motivo (R
   })
   await irASocios(page)
   await expect(page.getByTestId('pendientes-de-cargar-error')).toContainText(
-    'No se pudo calcular "Pendientes de cargar": function not found in schema cache',
+    'No se pudo calcular "Pagos sin cargar en la app": function not found in schema cache',
   )
 })

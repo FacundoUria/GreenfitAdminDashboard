@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Loader2, Minus, Pencil, Plus } from 'lucide-react'
+import { Loader2, Minus, Pencil, Plus, RefreshCw } from 'lucide-react'
+import {
+  ESPERA_CUENTA_CREDITOS,
+  TEXTO_CUENTA_EN_CREACION,
+  TEXTO_CUENTA_NO_CREADA,
+  tieneDniValido,
+} from '../utils/avisoSinCuenta'
 import { fechaMasUnAnio, formatFecha } from '../utils/fecha'
 import { diaArgentinaISO } from '../utils/fechaPlan'
 import { ahoraEnArgentina } from '../utils/ahoraArgentina'
@@ -110,7 +116,13 @@ function aFechaInput(valor) {
 // now()+30 días si no tiene nada), así que la disciplina nueva queda
 // automáticamente con la MISMA fecha que el resto sin que este componente
 // tenga que calcular ni pasar nada de fechas.
-function CreditosEditablesSocio({ socio, disciplinasActivas = [], onCreditosActualizados }) {
+function CreditosEditablesSocio({
+  socio,
+  disciplinasActivas = [],
+  onCreditosActualizados,
+  // Cuánto seguir buscando una cuenta que se está creando. Solo los tests lo achican.
+  esperaCuenta = ESPERA_CUENTA_CREDITOS,
+}) {
   const [userId, setUserId] = useState(null)
   const [filas, setFilas] = useState([])
   const [cargando, setCargando] = useState(true)
@@ -134,6 +146,19 @@ function CreditosEditablesSocio({ socio, disciplinasActivas = [], onCreditosActu
   // pisar el estado si el socio cambia (o el modal se cierra) a mitad de
   // una carga en vuelo.
   const [refrescarTick, setRefrescarTick] = useState(0)
+
+  // Cuenta en creación: el DNI se acaba de guardar y on_socio_dni_upsert crea
+  // la cuenta de la app en segundo plano (unos segundos). Antes se buscaba UNA
+  // vez al abrir y, si todavía no estaba, cada botón decía "no tiene cuenta".
+  // Ahora, con DNI válido y sin cuenta, se sigue buscando sola un rato
+  // (esperaCuenta); al aparecer se recarga todo. `intentoCuenta` lo bumpea
+  // "Reintentar"; `agotadoEn` marca qué búsqueda (dni#intento) terminó sin
+  // encontrarla, para no arrastrarlo si cambia el socio.
+  const [intentoCuenta, setIntentoCuenta] = useState(0)
+  const [agotadoEn, setAgotadoEn] = useState(null)
+  const claveBusqueda = `${socio.dni}#${intentoCuenta}`
+  const buscandoCuenta = !cargando && !error && !userId && tieneDniValido(socio.dni)
+  const cuentaAgotada = buscandoCuenta && agotadoEn === claveBusqueda
 
   // "+ Agregar disciplina" -- estado del mini-form inline, separado del de
   // las filas existentes (valores/procesando) para no pisarse entre sí.
@@ -216,6 +241,34 @@ function CreditosEditablesSocio({ socio, disciplinasActivas = [], onCreditosActu
       cancelado = true
     }
   }, [socio.dni, refrescarTick])
+
+  // Primitivos (no el objeto) en las dependencias: un objeto nuevo en cada
+  // render reiniciaría la búsqueda.
+  const { intentos: intentosCuenta, esperaMs: esperaMsCuenta } = esperaCuenta
+
+  useEffect(() => {
+    if (!buscandoCuenta || agotadoEn === claveBusqueda) return undefined
+    let cancelado = false
+
+    async function buscar() {
+      for (let i = 0; i < intentosCuenta; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, esperaMsCuenta))
+        if (cancelado) return
+        const id = await resolverUserIdPorDni(socio.dni)
+        if (cancelado) return
+        if (id) {
+          setRefrescarTick((tick) => tick + 1)
+          return
+        }
+      }
+      if (!cancelado) setAgotadoEn(claveBusqueda)
+    }
+
+    buscar()
+    return () => {
+      cancelado = true
+    }
+  }, [buscandoCuenta, agotadoEn, claveBusqueda, socio.dni, intentosCuenta, esperaMsCuenta])
 
   const handleChangeValor = (disciplineId) => (event) => {
     setValores((prev) => ({ ...prev, [disciplineId]: event.target.value }))
@@ -416,13 +469,37 @@ function CreditosEditablesSocio({ socio, disciplinasActivas = [], onCreditosActu
     filas.length === 0 &&
     disciplinasDisponibles.length === 0 &&
     !puedeAgregarAparatos &&
-    !tienePlanActivo
+    !tienePlanActivo &&
+    !buscandoCuenta
   )
     return null
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-white/10 bg-greenfit-dark/40 p-4 sm:col-span-2">
       <h3 className="text-sm font-semibold text-white">Créditos</h3>
+
+      {buscandoCuenta && (
+        <div
+          role="status"
+          data-testid="cuenta-en-creacion"
+          className={`flex flex-col gap-2 rounded-lg border p-3 text-sm sm:flex-row sm:items-center sm:justify-between ${
+            cuentaAgotada ? 'border-red-500/30 bg-red-500/5 text-red-300' : 'border-amber-400/30 bg-amber-400/5 text-amber-200'
+          }`}
+        >
+          <p className="flex items-start gap-2">
+            {!cuentaAgotada && <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />}
+            {cuentaAgotada ? TEXTO_CUENTA_NO_CREADA : TEXTO_CUENTA_EN_CREACION}
+          </p>
+          <button
+            type="button"
+            onClick={() => setIntentoCuenta((n) => n + 1)}
+            className="flex min-h-[44px] shrink-0 items-center justify-center gap-2 rounded-lg border border-white/15 px-3 py-1.5 text-xs font-medium hover:bg-white/5"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Reintentar
+          </button>
+        </div>
+      )}
 
       {cargando ? (
         <div className="flex items-center gap-2 py-2 text-sm text-gray-400">

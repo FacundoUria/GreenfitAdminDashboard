@@ -22,8 +22,10 @@
 --   4  Editar un socio histórico SIN DNI válido sin tocarle el DNI (null y no-null) -> pasa
 --   5  Cargarle un DNI válido a un socio histórico sin DNI -> pasa
 --   6  Cambiarle el DNI a un socio histórico por otro inválido -> rechazado
---   7  Borrarle / romperle el DNI a un socio que lo tiene bien -> rechazado
---   8  Editar un socio con DNI válido sin tocarle el DNI, y corregirle el DNI por otro válido -> pasa
+--   7  Borrarle / romperle el DNI a un socio que lo tiene bien (y SIN cuenta) -> rechazado
+--   8  Editar un socio con DNI válido (y SIN cuenta) sin tocarle el DNI, y corregirle el DNI por otro válido -> pasa
+--      ("sin cuenta" desde DNI-C: a un socio CON cuenta no se le puede cambiar el DNI; eso lo
+--       prueba prueba_dni_bloquear_cambio_con_cuenta.sql)
 --   9  Re-importar un socio existente sin DNI (insert ... on conflict, como importar_socios.js) -> rechazado
 -- =====================================================================================
 begin;
@@ -129,13 +131,13 @@ select pg_temp.probar('6', 'cambiarle el DNI inválido a un socio histórico por
 
 -- ── 7 y 8: socios con DNI válido ──
 select pg_temp.probar('7', 'borrarle el DNI (null) a un socio que lo tiene bien',
-  $q$ update socios set dni = null where id = (select id from socios where dni ~ '^\d{6,10}$' order by id limit 1) $q$, true);
+  $q$ update socios set dni = null where id = (select s2.id from socios s2 where s2.dni ~ '^\d{6,10}$' and not exists (select 1 from profiles p where p.dni = s2.dni) order by s2.id limit 1) $q$, true);
 select pg_temp.probar('7', 'cambiarle el DNI por uno con puntos a un socio que lo tiene bien',
-  $q$ update socios set dni = '99.999.904' where id = (select id from socios where dni ~ '^\d{6,10}$' order by id limit 1) $q$, true);
+  $q$ update socios set dni = '99.999.904' where id = (select s2.id from socios s2 where s2.dni ~ '^\d{6,10}$' and not exists (select 1 from profiles p where p.dni = s2.dni) order by s2.id limit 1) $q$, true);
 select pg_temp.probar('8', 'editar el teléfono de un socio con DNI válido',
-  $q$ update socios set telefono = coalesce(telefono, '') || '0' where id = (select id from socios where dni ~ '^\d{6,10}$' order by id limit 1) $q$, false);
+  $q$ update socios set telefono = coalesce(telefono, '') || '0' where id = (select s2.id from socios s2 where s2.dni ~ '^\d{6,10}$' and not exists (select 1 from profiles p where p.dni = s2.dni) order by s2.id limit 1) $q$, false);
 select pg_temp.probar('8', 'corregirle el DNI por otro válido a un socio con DNI válido',
-  $q$ update socios set dni = '99999904' where id = (select id from socios where dni ~ '^\d{6,10}$' order by id limit 1) $q$, false);
+  $q$ update socios set dni = '99999904' where id = (select s2.id from socios s2 where s2.dni ~ '^\d{6,10}$' and not exists (select 1 from profiles p where p.dni = s2.dni) order by s2.id limit 1) $q$, false);
 
 -- ── 9: re-importar sin DNI un socio que ya existe (lo que hacía importar_socios.js) ──
 -- "on conflict do nothing" SIN columna a propósito: no depende de que exista ninguna constraint

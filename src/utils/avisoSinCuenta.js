@@ -24,6 +24,24 @@ export function tieneDniValido(dni) {
 export const TEXTO_SIN_CUENTA =
   'Este socio no tiene cuenta en la app. Cuando se registre, cargale los créditos desde Editar Socio → Créditos.'
 
+// DNI-C -- mensaje EXACTO con el que validar_dni_socio() rechaza cambiarle el
+// DNI a un socio que ya tiene cuenta en la app
+// (supabase_migration_dni_bloquear_cambio_con_cuenta.sql). El Admin lo
+// muestra tal cual; si se cambia acá, cambiarlo también en la base.
+export const TEXTO_DNI_CON_CUENTA = 'Este socio ya tiene cuenta en la app. Para corregir el DNI avisale a Facundo.'
+
+// La cuenta de la app la crea on_socio_dni_upsert de forma asíncrona (pg_net):
+// tarda unos segundos desde que se guarda el DNI.
+export const TEXTO_CREANDO_CUENTA = 'Creando la cuenta en la app…'
+export const TEXTO_CUENTA_EN_CREACION =
+  'La cuenta de la app de este socio se está creando (tarda unos segundos). Cuando esté lista vas a poder cargarle los créditos.'
+export const TEXTO_CUENTA_NO_CREADA = 'No se pudo crear la cuenta de la app. Avisale a Facundo.'
+
+// Cuánto se espera a que aparezca una cuenta recién pedida (~15 s en el modal,
+// ~20 s en Créditos). Pasado eso se dice TEXTO_CUENTA_NO_CREADA.
+export const ESPERA_CUENTA_MODAL = { intentos: 19, esperaMs: 800 }
+export const ESPERA_CUENTA_CREDITOS = { intentos: 10, esperaMs: 2000 }
+
 export const TEXTO_SIN_DNI =
   'Este socio no tiene DNI cargado, así que no puede tener cuenta en la app. Cargale el DNI en Editar Socio; cuando tenga cuenta, cargale los créditos desde Editar Socio → Créditos.'
 

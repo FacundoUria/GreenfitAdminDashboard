@@ -6,7 +6,14 @@ import { ahoraEnArgentina } from '../utils/ahoraArgentina'
 import { PLANES_DISPONIBLES, normalizarPlanes, planesDeCreditos, tienePlanDeVencimiento } from '../utils/planes'
 import { resolverDisciplinaId } from '../utils/creditosPwa'
 import { resolverUserIdPorDni, esperarCuentaPwa } from '../utils/fichaSocioPwa'
-import { avisoSinCuenta, detalleDelCobro } from '../utils/avisoSinCuenta'
+import {
+  avisoSinCuenta,
+  detalleDelCobro,
+  ESPERA_CUENTA_MODAL,
+  TEXTO_CREANDO_CUENTA,
+  TEXTO_CUENTA_NO_CREADA,
+  TEXTO_DNI_CON_CUENTA,
+} from '../utils/avisoSinCuenta'
 import { normalizarTexto } from '../utils/coincidenciaSocios'
 import FichaSocioHistorial from './FichaSocioHistorial'
 import CreditosEditablesSocio from './CreditosEditablesSocio'
@@ -107,10 +114,16 @@ function NuevoSocioModal({
   // pasa el aviso al padre (Socios.jsx lo muestra con "Entendido" una vez
   // cerrado este modal). Sin esta prop, cae a window.alert con el mismo texto.
   onAvisoSinCuenta,
+  // Cuánto esperar a que aparezca la cuenta de la app recién pedida. Solo los
+  // tests lo achican.
+  esperaCuenta = ESPERA_CUENTA_MODAL,
 }) {
   const esEdicion = Boolean(socio)
   const [form, setForm] = useState(() => formInicial(socio))
   const [guardando, setGuardando] = useState(false)
+  // Mientras se espera a que on_socio_dni_upsert cree la cuenta de la app
+  // (asíncrono, unos segundos): cartel "Creando la cuenta en la app…".
+  const [esperandoCuenta, setEsperandoCuenta] = useState(false)
   const [error, setError] = useState(null)
   const [socioDuplicado, setSocioDuplicado] = useState(null)
   // Coincidencia por nombre (posible duplicado sin DNI, registro viejo, etc.)
@@ -251,10 +264,20 @@ function NuevoSocioModal({
   const handleSubmit = async (event) => {
     event.preventDefault()
 
-    if (!DNI_REGEX.test(form.dni.trim())) {
+    // Caso Florencia Carrascosa (socio 473): en EDICIÓN el DNI se exigía
+    // siempre, así que a ninguno de los ~670 socios históricos sin DNI válido
+    // se le podía editar nada. Ahora se exige (y se manda) solo si cambió;
+    // en el alta, siempre. Nunca se manda '' (para un DNI null eso es un
+    // "cambio" y la base lo rechaza).
+    const dniNuevo = form.dni.trim()
+    const dniOriginal = (socio?.dni ?? '').trim()
+    const dniCambio = !esEdicion || dniNuevo !== dniOriginal
+    if (dniCambio && !DNI_REGEX.test(dniNuevo)) {
       setError('El DNI tiene que tener entre 6 y 10 dígitos, sin puntos ni espacios.')
       return
     }
+    // El DNI con el que queda el socio (para el teléfono y la cuenta).
+    const dniFinal = dniCambio ? dniNuevo : (socio?.dni ?? null)
 
     // Solo en alta -- en edición, quedarse sin ninguna disciplina activa es
     // un resultado válido de sacarle la última que tenía (ver CAMBIO 2:
@@ -309,11 +332,26 @@ function NuevoSocioModal({
     setError(null)
     setSocioDuplicado(null)
 
+    // DNI-C -- la base no deja cambiarle el DNI a un socio que ya tiene cuenta
+    // (validar_dni_socio). Se pregunta ANTES de tocar nada para no dejar un
+    // guardado a medias (ej. una disciplina ya sacada abajo y el DNI
+    // rechazado después). Si esta consulta falla, la base lo frena igual.
+    if (esEdicion && dniCambio && dniOriginal !== '') {
+      const cuentaActual = await resolverUserIdPorDni(socio.dni)
+      if (cuentaActual) {
+        setError(TEXTO_DNI_CON_CUENTA)
+        setGuardando(false)
+        return
+      }
+    }
+
     // Se aplica ANTES del UPDATE de `socios` a propósito -- si el RPC
     // falla acá, se corta sin dejar socios.plan reflejando una
     // disciplina que en realidad no se pudo sacar de user_credits.
     if (disciplinasARemover.length > 0) {
-      const userId = await resolverUserIdPorDni(form.dni)
+      // La cuenta está vinculada al DNI que el socio tiene HOY (el nuevo todavía
+      // no se guardó).
+      const userId = await resolverUserIdPorDni(socio.dni)
       if (!userId) {
         setError('Este socio todavía no tiene cuenta en la app -- no se le puede sacar ninguna disciplina desde acá.')
         setGuardando(false)
@@ -349,7 +387,7 @@ function NuevoSocioModal({
       const cambios = {
         nombre: form.nombre,
         apellido: form.apellido,
-        dni: form.dni,
+        ...(dniCambio ? { dni: dniNuevo } : {}),
         email: form.email,
         telefono: form.telefono,
         // FIX (checkboxes "reflejan la realidad") -- ya no es form.planes
@@ -376,7 +414,7 @@ function NuevoSocioModal({
           .update({
             nombre: form.nombre,
             apellido: form.apellido,
-            dni: form.dni,
+            dni: dniNuevo,
             email: form.email,
             telefono: form.telefono,
             plan: form.planes,
@@ -394,7 +432,7 @@ function NuevoSocioModal({
           .insert({
             nombre: form.nombre,
             apellido: form.apellido,
-            dni: form.dni,
+            dni: dniNuevo,
             email: form.email,
             telefono: form.telefono,
             plan: form.planes,
@@ -417,11 +455,15 @@ function NuevoSocioModal({
       // al socio que ya tiene ese DNI para que se pueda ir directo a su
       // ficha en lugar de tener que buscarlo a mano en la tabla.
       const detalle = resultado.error?.message ?? ''
-      const existente = detalle.includes('socios_dni_key') ? onBuscarSocioPorDni?.(form.dni) : null
-      if (existente) {
+      const existente = detalle.includes('socios_dni_key') ? onBuscarSocioPorDni?.(dniNuevo) : null
+      if (detalle === TEXTO_DNI_CON_CUENTA) {
+        // DNI-C: la base rechazó el cambio de DNI (el socio ya tiene cuenta).
+        // Se muestra tal cual.
+        setError(TEXTO_DNI_CON_CUENTA)
+      } else if (existente) {
         setSocioDuplicado(existente)
       } else if (resultado.error?.code === '23505') {
-        setError(`Ya existe un socio registrado con el DNI ${form.dni}.`)
+        setError(`Ya existe un socio registrado con el DNI ${dniNuevo}.`)
       } else {
         setError(`No se pudo ${esEdicion ? 'actualizar' : 'guardar'} el socio. Intentá nuevamente.`)
       }
@@ -442,9 +484,10 @@ function NuevoSocioModal({
     // Best-effort a propósito -- no bloquea el guardado si la migración
     // todavía no corrió o el socio no tiene cuenta de PWA vinculada
     // (mismo criterio "fail open" que el resto de este puente por DNI).
-    if (esEdicion || socioAUnificar) {
+    // Sin DNI válido no puede haber cuenta: no hay nada que sincronizar.
+    if ((esEdicion || socioAUnificar) && DNI_REGEX.test(dniFinal ?? '')) {
       const { error: syncTelefonoError } = await supabase.rpc('sincronizar_telefono_a_profile', {
-        p_dni: form.dni,
+        p_dni: dniFinal,
         p_telefono: form.telefono,
       })
       if (syncTelefonoError) {
@@ -483,7 +526,9 @@ function NuevoSocioModal({
         .filter((item) => item.cantidad > 0)
 
       if (entradasCredito.length > 0 || necesitaVencimiento) {
-        const userId = await esperarCuentaPwa(form.dni)
+        setEsperandoCuenta(true)
+        const userId = await esperarCuentaPwa(dniNuevo, esperaCuenta)
+        setEsperandoCuenta(false)
         if (!userId) {
           // T5 -- antes: "cargá ... desde Registrar Pago" (eso registraba un
           // SEGUNDO cobro). Ahora el mismo aviso que el cobro sin cuenta: la
@@ -492,7 +537,7 @@ function NuevoSocioModal({
           // la ficha: el detalle del aviso es lo único que los deja anotados.
           aviso = avisoSinCuenta({
             titulo: 'Socio guardado en la ficha',
-            dni: form.dni,
+            dni: dniNuevo,
             detalle: detalleDelCobro({
               creditosPorDisciplina: entradasCredito,
               plan: form.planes,
@@ -532,6 +577,17 @@ function NuevoSocioModal({
         if (onAvisoSinCuenta) onAvisoSinCuenta(aviso)
         else window.alert([aviso.titulo, aviso.mensaje, aviso.detalle].filter(Boolean).join('\n'))
       }
+    }
+
+    // Edición con DNI nuevo (antes no tenía, o lo tenía mal y sin cuenta):
+    // on_socio_dni_upsert pide la cuenta de la app en segundo plano. Se espera
+    // a que exista antes de cerrar, así Seba puede cargarle el pack enseguida
+    // sin que Créditos le diga que no tiene cuenta.
+    if (esEdicion && dniCambio) {
+      setEsperandoCuenta(true)
+      const userId = await esperarCuentaPwa(dniNuevo, esperaCuenta)
+      setEsperandoCuenta(false)
+      if (!userId) window.alert(`Los datos del socio se guardaron. ${TEXTO_CUENTA_NO_CREADA}`)
     }
 
     setGuardando(false)
@@ -596,7 +652,9 @@ function NuevoSocioModal({
             <input
               id="dni"
               type="text"
-              required
+              // En edición puede quedar vacío (socio histórico sin DNI): se
+              // exige solo si se cambia (ver handleSubmit).
+              required={!esEdicion}
               value={form.dni}
               onChange={handleChange('dni')}
               className="rounded-lg border border-white/10 bg-greenfit-dark px-3 py-2.5 text-sm text-white outline-none focus:border-greenfit-primary"
@@ -821,6 +879,15 @@ function NuevoSocioModal({
 
           {esEdicion && <FichaSocioHistorial socio={socio} />}
 
+          {esperandoCuenta && (
+            <p
+              role="status"
+              className="flex items-center gap-2 rounded-lg border border-greenfit-primary/30 bg-greenfit-primary/5 px-3 py-2 text-sm text-gray-200 sm:col-span-2"
+            >
+              {TEXTO_CREANDO_CUENTA} Tarda unos segundos, no cierres esta ventana.
+            </p>
+          )}
+
           <div className="mt-2 flex flex-col-reverse gap-3 sm:col-span-2 sm:flex-row sm:justify-end">
             <button
               type="button"
@@ -834,7 +901,7 @@ function NuevoSocioModal({
               disabled={guardando}
               className="flex min-h-[44px] items-center justify-center rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90 disabled:opacity-60"
             >
-              {guardando ? 'Guardando...' : socioAUnificar ? 'Unificar' : 'Guardar'}
+              {esperandoCuenta ? TEXTO_CREANDO_CUENTA : guardando ? 'Guardando...' : socioAUnificar ? 'Unificar' : 'Guardar'}
             </button>
           </div>
         </form>
