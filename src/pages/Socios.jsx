@@ -63,8 +63,8 @@ const filtroOptions = [
   { value: 'por_vencer', label: `Por Vencer (${DIAS_POR_VENCER} días)` },
   { value: 'inactivo', label: 'Inactivo' },
   { value: 'nuevo', label: 'Nuevos del Mes' },
-  // T5 -- pagaron sin cuenta, ya tienen cuenta y en la app no tienen nada
-  // vigente (ver PendientesDeCargarAviso.jsx).
+  // T5 -- pagaron sin cuenta, ya tienen cuenta y desde su último pago no se
+  // les cargó nada en la app (ver PendientesDeCargarAviso.jsx).
   { value: 'pendientes', label: 'Pagos sin cargar en la app' },
   { value: 'todos', label: 'Todos' },
 ]

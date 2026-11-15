@@ -3,8 +3,9 @@ import { formatFecha } from '../utils/fecha'
 import { formatearPlanes } from '../utils/planes'
 
 // T5 -- cartel "Pendientes de cargar" arriba de la tabla de Socios.
-// Socios que pagaron sin cuenta en la app, ya tienen cuenta y en la app no
-// tienen nada vigente (admin_socios_pendientes_de_cargar). Desde T5 nadie les
+// Socios que pagaron sin cuenta en la app, ya tienen cuenta y desde su último
+// pago no se les creó ningún lote en la app, ni siquiera uno que ya venció
+// (admin_socios_pendientes_de_cargar, Pendientes-UP). Desde T5 nadie les
 // copia la ficha solo: Seba les carga los créditos desde Editar Socio →
 // Créditos.
 //

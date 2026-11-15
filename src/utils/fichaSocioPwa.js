@@ -135,9 +135,10 @@ export async function esperarCuentaPwa(dni, { intentos = 6, esperaMs = 800, busc
 }
 
 // T5 -- lista "Pendientes de cargar": socios con cuenta en la app, ficha con
-// fecha vigente y cobro reciente (últimos 35 días) y NADA vigente en
-// user_credits (ver admin_socios_pendientes_de_cargar() en
-// supabase_migration_t5_copiador_sin_filas.sql). R5: si falla, LANZA -- el
+// fecha vigente y cobro reciente (últimos 35 días) y NINGÚN lote creado en
+// user_credits desde el día de su último pago (ver
+// admin_socios_pendientes_de_cargar() en
+// supabase_migration_pendientes_desde_ultimo_pago.sql). R5: si falla, LANZA -- el
 // llamador lo muestra en rojo; nunca se devuelve una lista vacía en silencio.
 export async function fetchPendientesDeCargar() {
   const { data, error } = await supabase.rpc('admin_socios_pendientes_de_cargar')
