@@ -3,6 +3,15 @@ import { Loader2, Plus, Save, Trash2, X } from 'lucide-react'
 import { fetchExercises, fetchRoutineFull, saveRoutineFull } from '../../utils/routinesApi'
 import { GRUPOS_MUSCULARES } from '../../utils/muscleGroups'
 
+// Placeholders de la grilla Reps/Carga/Descanso: en itálica, más tenues y con
+// "ej: ... (opcional)" para que nadie confunda un campo VACÍO con un valor
+// cargado (el "20kg" de antes parecía un dato real y no se podía "borrar").
+// Vaciar el campo guarda null (ver saveRoutineFull) y la app no muestra nada.
+const PLACEHOLDER_REPS = 'ej: 10-12 (opcional)'
+const PLACEHOLDER_CARGA = 'ej: 20kg (opcional)'
+const PLACEHOLDER_DESCANSO = 'ej: 60 (opcional)'
+const CLASE_PLACEHOLDER_EJEMPLO = 'placeholder:italic placeholder:text-gray-500/60'
+
 function bloqueVacio() {
   return {
     exerciseId: null,
@@ -328,9 +337,10 @@ function RutinaEditorModal({ routineId, socioPreset, onClose, onSaved }) {
                               <input
                                 type="text"
                                 value={bloque.reps}
-                                placeholder="10-12"
+                                placeholder={PLACEHOLDER_REPS}
+                                aria-label="Reps"
                                 onChange={(e) => handleCambiarBloque(dayIdx, exIdx, 'reps', e.target.value)}
-                                className="rounded-md border border-white/10 bg-greenfit-dark px-2 py-1.5 text-sm text-white outline-none placeholder:text-gray-600 focus:border-greenfit-primary"
+                                className={`rounded-md border border-white/10 bg-greenfit-dark px-2 py-1.5 text-sm text-white outline-none focus:border-greenfit-primary ${CLASE_PLACEHOLDER_EJEMPLO}`}
                               />
                             </div>
                             <div className="flex flex-col gap-1">
@@ -338,9 +348,10 @@ function RutinaEditorModal({ routineId, socioPreset, onClose, onSaved }) {
                               <input
                                 type="text"
                                 value={bloque.weightSuggestion}
-                                placeholder="20kg"
+                                placeholder={PLACEHOLDER_CARGA}
+                                aria-label="Carga"
                                 onChange={(e) => handleCambiarBloque(dayIdx, exIdx, 'weightSuggestion', e.target.value)}
-                                className="rounded-md border border-white/10 bg-greenfit-dark px-2 py-1.5 text-sm text-white outline-none placeholder:text-gray-600 focus:border-greenfit-primary"
+                                className={`rounded-md border border-white/10 bg-greenfit-dark px-2 py-1.5 text-sm text-white outline-none focus:border-greenfit-primary ${CLASE_PLACEHOLDER_EJEMPLO}`}
                               />
                             </div>
                             <div className="flex flex-col gap-1">
@@ -349,8 +360,10 @@ function RutinaEditorModal({ routineId, socioPreset, onClose, onSaved }) {
                                 type="number"
                                 min="0"
                                 value={bloque.restSeconds}
+                                placeholder={PLACEHOLDER_DESCANSO}
+                                aria-label="Descanso (s)"
                                 onChange={(e) => handleCambiarBloque(dayIdx, exIdx, 'restSeconds', e.target.value)}
-                                className="rounded-md border border-white/10 bg-greenfit-dark px-2 py-1.5 text-sm text-white outline-none focus:border-greenfit-primary"
+                                className={`rounded-md border border-white/10 bg-greenfit-dark px-2 py-1.5 text-sm text-white outline-none focus:border-greenfit-primary ${CLASE_PLACEHOLDER_EJEMPLO}`}
                               />
                             </div>
                           </div>

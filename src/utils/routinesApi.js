@@ -111,9 +111,12 @@ function mapRoutineFull(routine, days) {
               muscleGroup: exercise?.muscle_group ?? '',
               exerciseDescription: exercise?.description ?? '',
               exerciseVideoUrl: exercise?.video_url ?? '',
-              sets: re.sets,
-              reps: re.reps,
-              restSeconds: re.rest_seconds,
+              // null de la base -> '' para el formulario: un input con
+              // value={null} queda "no controlado" (React avisa y deja de
+              // reflejar el estado). Al guardar, '' vuelve a ser null.
+              sets: re.sets ?? '',
+              reps: re.reps ?? '',
+              restSeconds: re.rest_seconds ?? '',
               weightSuggestion: re.weight_suggestion ?? '',
               notes: re.notes ?? '',
               orderIndex: re.order_index,
