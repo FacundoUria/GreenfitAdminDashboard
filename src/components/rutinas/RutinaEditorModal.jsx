@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Loader2, Plus, Save, Trash2, X } from 'lucide-react'
-import { fetchExercises, fetchRoutineFull, saveRoutineFull } from '../../utils/routinesApi'
+import { CopyPlus, Loader2, Plus, Save, Trash2, X } from 'lucide-react'
+import { CODIGO_BORRARIA_REGISTRO, fetchExercises, fetchRoutineFull, saveRoutineFull } from '../../utils/routinesApi'
 import { GRUPOS_MUSCULARES } from '../../utils/muscleGroups'
 
 // Placeholders de la grilla Reps/Carga/Descanso: en itálica, más tenues y con
@@ -35,12 +35,19 @@ function RutinaEditorModal({ routineId, socioPreset, onClose, onSaved }) {
   const [cargando, setCargando] = useState(true)
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState(null)
+  // GFR04: "Guardar cambios" borraría ejercicios con tildes del socio (su registro). El
+  // servidor no guarda nada; acá se ofrece "Guardar como rutina nueva" en el mismo aviso.
+  const [borrariaRegistro, setBorrariaRegistro] = useState(false)
   const [ejerciciosDisponibles, setEjerciciosDisponibles] = useState([])
 
   const [titulo, setTitulo] = useState('')
   const [notas, setNotas] = useState('')
-  const [esPlantilla, setEsPlantilla] = useState(!socioPreset)
   const [dias, setDias] = useState([diaVacio(1)])
+  // Sin socio = plantilla (lo decide el servidor: admin_guardar_rutina). Editando la
+  // rutina vigente de un socio hay dos formas de guardar: en el lugar, o como rutina nueva
+  // (la actual pasa a su historial tal como estaba).
+  const esPlantilla = !socioPreset
+  const editandoRutinaDeSocio = !!routineId && !!socioPreset
 
   useEffect(() => {
     let activo = true
@@ -55,10 +62,12 @@ function RutinaEditorModal({ routineId, socioPreset, onClose, onSaved }) {
           if (!activo) return
           setTitulo(rutina.title)
           setNotas(rutina.notes)
-          setEsPlantilla(rutina.isTemplate)
+          // Con sus ids: "Guardar cambios" actualiza en el lugar lo que sigue (los tildes
+          // de hoy del socio no se pierden).
           setDias(
             rutina.days.length > 0
               ? rutina.days.map((d) => ({
+                  id: d.id,
                   title: d.title,
                   exercises: d.exercises.map((e) => ({ ...e })),
                 }))
@@ -131,8 +140,9 @@ function RutinaEditorModal({ routineId, socioPreset, onClose, onSaved }) {
     )
   }
 
-  const handleGuardar = async () => {
+  const handleGuardar = async ({ comoNueva = false } = {}) => {
     setError(null)
+    setBorrariaRegistro(false)
     if (!titulo.trim()) {
       setError('Ponele un nombre a la rutina.')
       return
@@ -150,20 +160,29 @@ function RutinaEditorModal({ routineId, socioPreset, onClose, onSaved }) {
       }
     }
 
+    if (
+      comoNueva &&
+      !window.confirm(
+        `Se crea una rutina nueva para ${socioPreset?.full_name ?? 'el socio'} con estos cambios. La rutina actual pasa a su historial tal como estaba. ¿Seguir?`,
+      )
+    ) {
+      return
+    }
+
     setGuardando(true)
     try {
       await saveRoutineFull({
         id: routineId ?? null,
         title: titulo,
-        coachName: null,
         notes: notas,
-        isTemplate: esPlantilla,
         userId: socioPreset?.id ?? null,
         days: dias,
+        comoNueva,
       })
       onSaved()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo guardar la rutina.')
+      setBorrariaRegistro(err?.code === CODIGO_BORRARIA_REGISTRO)
     } finally {
       setGuardando(false)
     }
@@ -217,18 +236,6 @@ function RutinaEditorModal({ routineId, socioPreset, onClose, onSaved }) {
                   />
                 </div>
               </div>
-
-              {!socioPreset && (
-                <label className="flex items-center gap-2 text-sm text-gray-300">
-                  <input
-                    type="checkbox"
-                    checked={esPlantilla}
-                    onChange={(e) => setEsPlantilla(e.target.checked)}
-                    className="accent-greenfit-primary"
-                  />
-                  Guardar como plantilla base (no asignada a ningún socio)
-                </label>
-              )}
             </div>
 
             <div className="flex flex-col gap-4">
@@ -415,7 +422,26 @@ function RutinaEditorModal({ routineId, socioPreset, onClose, onSaved }) {
               </button>
             </div>
 
-            {error && <p className="text-sm text-red-400">{error}</p>}
+            {error &&
+              (borrariaRegistro && editandoRutinaDeSocio ? (
+                <div
+                  role="alert"
+                  className="flex flex-col gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <p className="text-sm text-amber-200">{error}</p>
+                  <button
+                    type="button"
+                    onClick={() => handleGuardar({ comoNueva: true })}
+                    disabled={guardando}
+                    className="flex min-h-[40px] shrink-0 items-center justify-center gap-2 rounded-lg bg-greenfit-primary px-4 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90 disabled:opacity-60"
+                  >
+                    <CopyPlus className="h-4 w-4" />
+                    Guardar como rutina nueva
+                  </button>
+                </div>
+              ) : (
+                <p className="text-sm text-red-400">{error}</p>
+              ))}
 
             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button
@@ -425,14 +451,25 @@ function RutinaEditorModal({ routineId, socioPreset, onClose, onSaved }) {
               >
                 Cancelar
               </button>
+              {editandoRutinaDeSocio && (
+                <button
+                  type="button"
+                  onClick={() => handleGuardar({ comoNueva: true })}
+                  disabled={guardando}
+                  className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-greenfit-primary/40 px-4 py-2 text-sm font-medium text-greenfit-primary transition-colors hover:bg-greenfit-primary/10 disabled:opacity-60"
+                >
+                  <CopyPlus className="h-4 w-4" />
+                  Guardar como rutina nueva
+                </button>
+              )}
               <button
                 type="button"
-                onClick={handleGuardar}
+                onClick={() => handleGuardar()}
                 disabled={guardando}
                 className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-greenfit-primary px-4 py-2 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90 disabled:opacity-60"
               >
                 <Save className="h-4 w-4" />
-                {guardando ? 'Guardando...' : 'Guardar rutina'}
+                {guardando ? 'Guardando...' : editandoRutinaDeSocio ? 'Guardar cambios' : 'Guardar rutina'}
               </button>
             </div>
           </div>

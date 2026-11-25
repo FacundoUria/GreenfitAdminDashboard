@@ -7,6 +7,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 // "ej: ... (opcional)" en itálica y tenue, y vaciar el campo guarda null.
 
 vi.mock('../../utils/routinesApi', () => ({
+  CODIGO_BORRARIA_REGISTRO: 'GFR04',
   fetchExercises: vi.fn(),
   fetchRoutineFull: vi.fn(),
   saveRoutineFull: vi.fn(),

@@ -4,10 +4,10 @@ import { formatFecha } from '../utils/fecha'
 import {
   resolverUserIdPorDni,
   fetchHistorialAsistencias,
-  fetchHistorialRutinas,
   fetchMetricasGamificacion,
   fetchHistorialPagos,
 } from '../utils/fichaSocioPwa'
+import RutinasDelSocio from './rutinas/RutinasDelSocio'
 
 // Sección "Historial y Actividad del Socio" de la Ficha 360° -- vive abajo
 // de los datos editables en NuevoSocioModal.jsx (solo en modo edición, un
@@ -102,7 +102,6 @@ function FichaSocioHistorial({ socio }) {
 
   const [pagos, setPagos] = useState([])
   const [asistencias, setAsistencias] = useState([])
-  const [rutinas, setRutinas] = useState([])
   const [metricas, setMetricas] = useState(null)
 
   useEffect(() => {
@@ -118,16 +117,14 @@ function FichaSocioHistorial({ socio }) {
           setCargando(false)
           return
         }
-        const [pagosData, asistenciasData, rutinasData, metricasData] = await Promise.all([
+        const [pagosData, asistenciasData, metricasData] = await Promise.all([
           fetchHistorialPagos(idResuelto),
           fetchHistorialAsistencias(idResuelto),
-          fetchHistorialRutinas(idResuelto),
           fetchMetricasGamificacion(idResuelto),
         ])
         if (cancelado) return
         setPagos(pagosData)
         setAsistencias(asistenciasData)
-        setRutinas(rutinasData)
         setMetricas(metricasData)
       } catch (err) {
         if (!cancelado) setError(err.message ?? 'No se pudo cargar el historial del socio.')
@@ -258,22 +255,13 @@ function FichaSocioHistorial({ socio }) {
                   </table>
                 ))}
 
-              {seccion === 'rutinas' &&
-                (rutinas.length === 0 ? (
-                  <p className="px-3 py-4 text-xs text-gray-500">Todavía no tiene rutinas asignadas.</p>
-                ) : (
-                  <div className="divide-y divide-white/5">
-                    {rutinas.map((r) => (
-                      <div key={r.id} className="flex items-center justify-between px-3 py-2.5">
-                        <div>
-                          <p className="text-xs font-semibold text-white">{r.titulo}</p>
-                          <p className="text-[11px] text-gray-500">{r.coach ? `Coach: ${r.coach}` : 'Sin coach asignado'}</p>
-                        </div>
-                        <span className="text-[11px] text-gray-500">{formatFecha(r.creadaEl)}</span>
-                      </div>
-                    ))}
-                  </div>
-                ))}
+              {/* Rutina actual + historial: el mismo componente que Rutinas > Asignación,
+                  acá solo para mirar (para cambiarla: Rutinas > Asignación a Socios). */}
+              {seccion === 'rutinas' && (
+                <div className="p-3">
+                  <RutinasDelSocio userId={userId} />
+                </div>
+              )}
 
               {seccion === 'metricas' && metricas && (
                 <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-4">

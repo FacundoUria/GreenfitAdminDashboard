@@ -44,7 +44,20 @@ test.describe('Admin -- Rutinas (rediseño Plantillas/Biblioteca/Editor)', () =>
   test('crear una plantilla nueva con la grilla compacta de Series/Reps/Carga/Descanso y verla en la Biblioteca', async ({
     page,
   }) => {
-    await loginComoAdmin(page, { tables: tablasBase() })
+    // Guardar va en UNA llamada al servidor (admin_guardar_rutina, historial de rutinas
+    // F1): el mock la emula agregando la plantilla a la tabla.
+    const tables = tablasBase()
+    const guardados = []
+    const rpc = {
+      admin_guardar_rutina: (request) => {
+        const { p_rutina } = request.postDataJSON()
+        guardados.push(p_rutina)
+        const id = `e2e-rutina-${guardados.length}`
+        tables.routines.push({ id, user_id: null, title: p_rutina.title, is_template: p_rutina.user_id === null, created_at: new Date().toISOString() })
+        return id
+      },
+    }
+    await loginComoAdmin(page, { tables, rpc })
 
     await irARutinas(page)
     await page.getByRole('button', { name: 'Crear la primera plantilla' }).click()
@@ -64,5 +77,18 @@ test.describe('Admin -- Rutinas (rediseño Plantillas/Biblioteca/Editor)', () =>
 
     await expect(page.getByRole('heading', { name: 'Nueva plantilla' })).not.toBeVisible()
     await expect(page.getByText('Adaptación 4 días')).toBeVisible()
+
+    // Lo que viajó: sin socio (= plantilla), y el ejercicio nuevo para crear en la biblioteca.
+    expect(guardados).toHaveLength(1)
+    expect(guardados[0]).toMatchObject({ id: null, user_id: null, como_nueva: false, title: 'Adaptación 4 días' })
+    expect(guardados[0].days[0]).toMatchObject({ title: 'Full Body' })
+    expect(guardados[0].days[0].exercises[0]).toMatchObject({
+      exercise_id: null,
+      nuevo: { name: 'Sentadilla' },
+      sets: 4,
+      reps: '8-10',
+      weight_suggestion: '40kg',
+      rest_seconds: 90,
+    })
   })
 })

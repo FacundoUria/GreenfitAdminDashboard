@@ -1,23 +1,24 @@
 import { useEffect, useState } from 'react'
-import { Loader2, Pencil, Plus, Search, User } from 'lucide-react'
-import {
-  duplicateRoutine,
-  fetchRoutinesList,
-  fetchSocioActiveRoutine,
-  searchSocios,
-} from '../../utils/routinesApi'
+import { Loader2, Search, User } from 'lucide-react'
+import { asignarRutina, fetchRoutinesList, searchSocios } from '../../utils/routinesApi'
 import RutinaEditorModal from './RutinaEditorModal'
+import RutinasDelSocio from './RutinasDelSocio'
 
+// Rutinas > Asignación a Socios. La rutina actual y el historial del socio los muestra
+// RutinasDelSocio (el mismo que la Ficha 360°), acá con acciones. Asignar una plantilla
+// NO toca la rutina que tenía: pasa a su historial con fecha de fin (lo hace la base, en
+// una transacción: admin_asignar_rutina).
 function AsignacionSocios() {
   const [busqueda, setBusqueda] = useState('')
   const [resultados, setResultados] = useState([])
   const [buscando, setBuscando] = useState(false)
   const [socioSeleccionado, setSocioSeleccionado] = useState(null)
-  const [rutinaSocio, setRutinaSocio] = useState(null)
-  const [cargandoRutina, setCargandoRutina] = useState(false)
+  const [vigente, setVigente] = useState(null)
   const [plantillas, setPlantillas] = useState([])
   const [asignando, setAsignando] = useState(false)
-  const [editorAbierto, setEditorAbierto] = useState(false)
+  const [recargar, setRecargar] = useState(0)
+  // undefined = cerrado; null = rutina nueva; id = editar esa rutina.
+  const [editorRutinaId, setEditorRutinaId] = useState(undefined)
   const [error, setError] = useState(null)
 
   useEffect(() => {
@@ -40,41 +41,38 @@ function AsignacionSocios() {
     return () => clearTimeout(timeout)
   }, [busqueda])
 
-  const handleElegirSocio = async (socio) => {
+  const handleElegirSocio = (socio) => {
     setSocioSeleccionado(socio)
+    setVigente(null)
     setResultados([])
     setBusqueda('')
-    setCargandoRutina(true)
     setError(null)
-    try {
-      setRutinaSocio(await fetchSocioActiveRoutine(socio.id))
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo cargar la rutina del socio.')
-    } finally {
-      setCargandoRutina(false)
-    }
   }
 
   const handleAsignarPlantilla = async (event) => {
     const plantillaId = event.target.value
+    event.target.value = ''
     if (!plantillaId || !socioSeleccionado) return
+    const plantilla = plantillas.find((p) => p.id === plantillaId)
+    if (
+      vigente &&
+      !window.confirm(
+        `¿Asignar "${plantilla?.title ?? 'la plantilla'}" a ${socioSeleccionado.full_name}? Su rutina actual ("${vigente.title}") pasa a su historial.`,
+      )
+    ) {
+      return
+    }
     setAsignando(true)
     setError(null)
     try {
-      await duplicateRoutine(plantillaId, {
-        userId: socioSeleccionado.id,
-        isTemplate: false,
-      })
-      setRutinaSocio(await fetchSocioActiveRoutine(socioSeleccionado.id))
+      await asignarRutina(socioSeleccionado.id, plantillaId)
+      setRecargar((n) => n + 1)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo asignar la plantilla.')
     } finally {
       setAsignando(false)
-      event.target.value = ''
     }
   }
-
-  const totalEjercicios = (rutina) => rutina?.days.reduce((acc, d) => acc + d.exercises.length, 0) ?? 0
 
   return (
     <div className="flex flex-col gap-5">
@@ -127,6 +125,7 @@ function AsignacionSocios() {
               onChange={handleAsignarPlantilla}
               disabled={asignando || plantillas.length === 0}
               defaultValue=""
+              aria-label="Asignar desde plantilla"
               className="min-h-[40px] rounded-lg border border-white/10 bg-greenfit-dark px-3 text-sm text-white outline-none focus:border-greenfit-primary disabled:opacity-50"
             >
               <option value="" disabled>
@@ -142,68 +141,34 @@ function AsignacionSocios() {
 
           {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
 
-          {cargandoRutina || asignando ? (
+          {asignando ? (
             <div className="flex items-center justify-center gap-2 py-10 text-sm text-gray-400">
               <Loader2 className="h-4 w-4 animate-spin" />
-              {asignando ? 'Asignando...' : 'Cargando...'}
-            </div>
-          ) : !rutinaSocio ? (
-            <div className="flex flex-col items-center gap-3 py-8 text-center">
-              <p className="text-sm text-gray-400">Este socio todavía no tiene una rutina asignada.</p>
-              <button
-                type="button"
-                onClick={() => setEditorAbierto(true)}
-                className="flex min-h-[40px] items-center justify-center gap-2 rounded-lg bg-greenfit-primary px-4 text-sm font-semibold text-greenfit-dark transition-opacity hover:opacity-90"
-              >
-                <Plus className="h-4 w-4" />
-                Crear rutina desde cero
-              </button>
+              Asignando...
             </div>
           ) : (
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-white">{rutinaSocio.title}</p>
-                  <p className="text-xs text-gray-400">
-                    {rutinaSocio.days.length} día{rutinaSocio.days.length !== 1 ? 's' : ''} ·{' '}
-                    {totalEjercicios(rutinaSocio)} ejercicios
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setEditorAbierto(true)}
-                  className="flex min-h-[40px] shrink-0 items-center justify-center gap-2 rounded-lg border border-white/10 px-4 text-sm font-medium text-gray-300 transition-colors hover:bg-white/5 hover:text-white"
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                  Editar
-                </button>
-              </div>
-              <ul className="flex flex-col gap-1.5">
-                {rutinaSocio.days.map((d) => (
-                  <li key={d.id} className="rounded-lg bg-greenfit-dark/40 px-3 py-2 text-xs text-gray-300">
-                    <span className="font-semibold text-white">{d.title}</span> — {d.exercises.length} ejercicios
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <RutinasDelSocio
+              key={socioSeleccionado.id}
+              userId={socioSeleccionado.id}
+              acciones
+              recargar={recargar}
+              onCargado={setVigente}
+              onEditarVigente={(id) => setEditorRutinaId(id)}
+              onCrearRutina={() => setEditorRutinaId(null)}
+            />
           )}
         </div>
       )}
 
-      {editorAbierto && socioSeleccionado && (
+      {editorRutinaId !== undefined && socioSeleccionado && (
         <RutinaEditorModal
-          key={rutinaSocio?.id ?? 'nueva'}
-          routineId={rutinaSocio?.id ?? null}
+          key={editorRutinaId ?? 'nueva'}
+          routineId={editorRutinaId}
           socioPreset={socioSeleccionado}
-          onClose={() => setEditorAbierto(false)}
-          onSaved={async () => {
-            setEditorAbierto(false)
-            setCargandoRutina(true)
-            try {
-              setRutinaSocio(await fetchSocioActiveRoutine(socioSeleccionado.id))
-            } finally {
-              setCargandoRutina(false)
-            }
+          onClose={() => setEditorRutinaId(undefined)}
+          onSaved={() => {
+            setEditorRutinaId(undefined)
+            setRecargar((n) => n + 1)
           }}
         />
       )}

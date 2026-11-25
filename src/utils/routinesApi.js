@@ -84,6 +84,20 @@ export async function fetchRoutinesList({ isTemplate }) {
   }))
 }
 
+// Errores propios del historial de rutinas (supabase_migration_historial_rutinas_f1.sql):
+// GFR01 = rutina del historial (solo lectura), GFR02 = una rutina de socio no se borra,
+// GFR03 = cambio no permitido, GFR04 = "Guardar cambios" borraría ejercicios con tildes del
+// socio (su registro): no se guarda nada y el editor ofrece "Guardar como rutina nueva".
+// El mensaje del servidor ya está en criollo.
+export const CODIGO_RUTINA_HISTORIAL = 'GFR01'
+export const CODIGO_BORRARIA_REGISTRO = 'GFR04'
+
+function errorConCodigo(error) {
+  const err = new Error(error.message)
+  err.code = error.code
+  return err
+}
+
 function mapRoutineFull(routine, days) {
   return {
     id: routine.id,
@@ -92,6 +106,8 @@ function mapRoutineFull(routine, days) {
     coachName: routine.coach_name ?? '',
     notes: routine.notes ?? '',
     isTemplate: routine.is_template,
+    vigenteDesde: routine.vigente_desde ?? null,
+    vigenteHasta: routine.vigente_hasta ?? null,
     days: (days ?? [])
       .slice()
       .sort((a, b) => a.order_index - b.order_index)
@@ -145,91 +161,92 @@ export async function fetchRoutineFull(routineId) {
   return mapRoutineFull(routine, days)
 }
 
-// Guarda la rutina entera (título/coach/notas + días + ejercicios) de una.
-// Estrategia simple: upsert la cabecera, borrar todos los días existentes
-// (cascadea a routine_exercises) y volver a insertar los del formulario tal
-// cual quedaron editados -- evita tener que diffear árboles anidados. Ojo:
-// esto reinicia routine_completions de esos ejercicios (cascade), aceptable
-// porque el progreso que importa es el de HOY, no un historial.
-export async function saveRoutineFull({ id, title, coachName, notes, isTemplate, userId, days }) {
-  const cabecera = {
+const textoONull = (valor) => String(valor ?? '').trim() || null
+
+// Lo que manda el editor -> el JSON que espera admin_guardar_rutina. Los ids de días y
+// ejercicios viajan: el servidor actualiza en el lugar lo que sigue (conserva ids y los
+// tildes de hoy del socio) en vez de borrar y volver a crear. Vacío -> null (el
+// placeholder "ej: 20kg" nunca se guarda). Un bloque sin ejercicio de la biblioteca va
+// con `nuevo`: el servidor lo crea en la misma transacción.
+export function armarPayloadRutina({ id, title, coachName, notes, userId, days, comoNueva = false }) {
+  const payload = {
+    id: id ?? null,
+    user_id: userId ?? null,
+    como_nueva: !!comoNueva,
     title: title.trim(),
-    coach_name: coachName?.trim() || null,
-    notes: notes?.trim() || null,
-    is_template: isTemplate,
-    user_id: userId || null,
-  }
-
-  let routineId = id
-  if (routineId) {
-    const { error } = await supabase.from('routines').update(cabecera).eq('id', routineId)
-    if (error) throw new Error(error.message)
-    const { error: deleteError } = await supabase.from('routine_days').delete().eq('routine_id', routineId)
-    if (deleteError) throw new Error(deleteError.message)
-  } else {
-    const { data, error } = await supabase.from('routines').insert(cabecera).select('id').single()
-    if (error) throw new Error(error.message)
-    routineId = data.id
-  }
-
-  for (let dayIndex = 0; dayIndex < days.length; dayIndex += 1) {
-    const day = days[dayIndex]
-    const { data: dayRow, error: dayError } = await supabase
-      .from('routine_days')
-      .insert({ routine_id: routineId, title: day.title.trim() || `Día ${dayIndex + 1}`, order_index: dayIndex })
-      .select('id')
-      .single()
-    if (dayError) throw new Error(dayError.message)
-
-    for (let exIndex = 0; exIndex < day.exercises.length; exIndex += 1) {
-      const bloque = day.exercises[exIndex]
-      let exerciseId = bloque.exerciseId
-      if (!exerciseId) {
-        const nuevo = await saveExercise({
-          name: bloque.exerciseName,
-          muscleGroup: bloque.muscleGroup,
-          description: bloque.exerciseDescription,
-          videoUrl: bloque.exerciseVideoUrl,
-        })
-        exerciseId = nuevo.id
-      }
-
-      const { error: reError } = await supabase.from('routine_exercises').insert({
-        day_id: dayRow.id,
-        exercise_id: exerciseId,
+    notes: textoONull(notes),
+    days: days.map((day, dayIndex) => ({
+      id: day.id ?? null,
+      title: textoONull(day.title) ?? `Día ${dayIndex + 1}`,
+      exercises: day.exercises.map((bloque) => ({
+        id: bloque.id ?? null,
+        exercise_id: bloque.exerciseId ?? null,
+        nuevo: bloque.exerciseId
+          ? null
+          : {
+              name: textoONull(bloque.exerciseName) ?? '',
+              muscle_group: bloque.muscleGroup,
+              description: textoONull(bloque.exerciseDescription),
+              video_url: textoONull(bloque.exerciseVideoUrl),
+            },
         sets: Number(bloque.sets) || null,
-        reps: bloque.reps?.trim() || null,
+        reps: textoONull(bloque.reps),
         rest_seconds: Number(bloque.restSeconds) || null,
-        weight_suggestion: bloque.weightSuggestion?.trim() || null,
-        notes: bloque.notes?.trim() || null,
-        order_index: exIndex,
-      })
-      if (reError) throw new Error(reError.message)
-    }
+        weight_suggestion: textoONull(bloque.weightSuggestion),
+        notes: textoONull(bloque.notes),
+      })),
+    })),
   }
-
-  return routineId
+  // Solo si se pasa: el editor no edita el coach, y así no lo borra al guardar.
+  if (coachName !== undefined) payload.coach_name = textoONull(coachName)
+  return payload
 }
 
+// Guarda la rutina entera (cabecera + días + ejercicios) en UNA transacción del servidor
+// (admin_guardar_rutina). Antes eran decenas de INSERT desde el navegador: si se cortaba a
+// mitad quedaba una rutina vacía o incompleta -- así nacieron 9 rutinas vacías en
+// producción. Con `id`: "Guardar cambios" (actualiza en el lugar). Con `id` y `comoNueva`:
+// "Guardar como rutina nueva" (la actual pasa al historial del socio intacta). Sin `id`:
+// crea (con `userId` = rutina del socio, que pasa a ser su vigente; sin él = plantilla).
+export async function saveRoutineFull({ id, title, coachName, notes, userId, days, comoNueva = false }) {
+  const { data, error } = await supabase.rpc('admin_guardar_rutina', {
+    p_rutina: armarPayloadRutina({ id, title, coachName, notes, userId, days, comoNueva }),
+  })
+  if (error) throw errorConCodigo(error)
+  return data
+}
+
+// Solo plantillas: las rutinas de los socios no se borran nunca (la base lo rechaza con
+// GFR02). En la Fase 2 del historial de rutinas, "Eliminar" pasa a "Archivar".
 export async function deleteRoutine(id) {
   const { error } = await supabase.from('routines').delete().eq('id', id)
-  if (error) throw new Error(error.message)
+  if (error) throw errorConCodigo(error)
 }
 
-// Duplica una rutina (plantilla o asignada) completa -- útil tanto para
-// "duplicar" en la Biblioteca como para asignar una plantilla a un socio
-// (se duplica la plantilla con user_id del socio e is_template=false).
-export async function duplicateRoutine(routineId, { title, userId, isTemplate }) {
+// Duplica una plantilla en la Biblioteca. Para darle una rutina a un socio se usa
+// asignarRutina (copia en el servidor, en una transacción).
+export async function duplicateRoutine(routineId, { title } = {}) {
   const original = await fetchRoutineFull(routineId)
   return saveRoutineFull({
     id: null,
     title: title ?? `${original.title} (copia)`,
     coachName: original.coachName,
     notes: original.notes,
-    isTemplate: isTemplate ?? original.isTemplate,
-    userId: userId ?? null,
-    days: original.days,
+    userId: null,
+    days: original.days.map((day) => ({
+      title: day.title,
+      exercises: day.exercises.map((bloque) => ({ ...bloque, id: null })),
+    })),
   })
+}
+
+// Le asigna al socio una COPIA de una plantilla, o de una rutina de su historial ("volver
+// a asignar"), como su rutina vigente. La que tenía pasa a su historial, con fecha de fin.
+// Todo en el servidor y en una transacción (admin_asignar_rutina). Devuelve el id nuevo.
+export async function asignarRutina(userId, origenId) {
+  const { data, error } = await supabase.rpc('admin_asignar_rutina', { p_user_id: userId, p_origen_id: origenId })
+  if (error) throw errorConCodigo(error)
+  return data
 }
 
 // ── Asignación a socios ─────────────────────────────────────────────
@@ -246,15 +263,109 @@ export async function searchSocios(query) {
   return data ?? []
 }
 
+// La rutina VIGENTE del socio (vigente_hasta null; la base garantiza que hay una sola).
 export async function fetchSocioActiveRoutine(userId) {
   const { data, error } = await supabase
     .from('routines')
     .select('id')
     .eq('user_id', userId)
+    .is('vigente_hasta', null)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
   if (error) throw new Error(error.message)
   if (!data) return null
   return fetchRoutineFull(data.id)
+}
+
+// ── Historial de rutinas del socio ──────────────────────────────────
+
+function mapCabeceraRutina(r) {
+  return {
+    id: r.id,
+    title: r.title,
+    coachName: r.coach_name ?? null,
+    notes: r.notes ?? null,
+    createdAt: r.created_at,
+    vigenteDesde: r.vigente_desde ?? r.created_at,
+    vigenteHasta: r.vigente_hasta ?? null,
+  }
+}
+
+const masNuevaPrimero = (a, b) => (a.vigenteDesde < b.vigenteDesde ? 1 : a.vigenteDesde > b.vigenteDesde ? -1 : 0)
+
+// La vigente y las anteriores (más nueva primero) de un socio. Las archivadas (las 9
+// copias vacías que dejó el panel viejo) no aparecen.
+export async function fetchRutinasDelSocio(userId) {
+  const { data, error } = await supabase
+    .from('routines')
+    .select('id, title, coach_name, notes, created_at, is_template, vigente_desde, vigente_hasta, archivada_en')
+    .eq('user_id', userId)
+    .is('archivada_en', null)
+    .order('vigente_desde', { ascending: false })
+  if (error) throw new Error(error.message)
+  const rutinas = (data ?? []).filter((r) => !r.is_template).map(mapCabeceraRutina)
+  return {
+    vigente: rutinas.find((r) => !r.vigenteHasta) ?? null,
+    anteriores: rutinas.filter((r) => r.vigenteHasta).sort(masNuevaPrimero),
+  }
+}
+
+// routine_id -> cuántos entrenamientos ("Finalizar") registró el socio en esa rutina.
+// Seba ve todos, también los que el socio ocultó. Las sesiones de antes de la Fase 1 no
+// tienen rutina todavía (se atribuyen en la Fase 2).
+export async function fetchEntrenamientosPorRutina(userId) {
+  const { data, error } = await supabase
+    .from('routine_history')
+    .select('routine_id, sesion_id')
+    .eq('user_id', userId)
+  if (error) throw new Error(error.message)
+  const sesiones = new Map()
+  for (const fila of data ?? []) {
+    if (!fila.routine_id) continue
+    if (!sesiones.has(fila.routine_id)) sesiones.set(fila.routine_id, new Set())
+    sesiones.get(fila.routine_id).add(fila.sesion_id)
+  }
+  return new Map(Array.from(sesiones, ([routineId, ids]) => [routineId, ids.size]))
+}
+
+// Entrenamientos registrados en UNA rutina, más nuevo primero, con lo que hizo en cada uno
+// (foto de ese momento: series, reps y la carga que usó).
+export async function fetchSesionesDeRutina(routineId) {
+  const { data, error } = await supabase
+    .from('routine_history')
+    .select('id, sesion_id, fecha, titulo_dia, nombre_ejercicio, series, repeticiones, peso, orden, total_ejercicios, completo, created_at, oculta_en')
+    .eq('routine_id', routineId)
+    .order('created_at', { ascending: false })
+  if (error) throw new Error(error.message)
+  return agruparSesiones(data ?? [])
+}
+
+export function agruparSesiones(filas) {
+  const sesiones = new Map()
+  for (const f of filas) {
+    if (!sesiones.has(f.sesion_id)) {
+      sesiones.set(f.sesion_id, {
+        sesionId: f.sesion_id,
+        fecha: f.fecha,
+        creadoEn: f.created_at,
+        tituloDia: f.titulo_dia,
+        totalEjercicios: f.total_ejercicios,
+        completo: f.completo,
+        oculta: !!f.oculta_en,
+        ejercicios: [],
+      })
+    }
+    sesiones.get(f.sesion_id).ejercicios.push({
+      id: f.id,
+      nombre: f.nombre_ejercicio,
+      series: f.series,
+      repeticiones: f.repeticiones,
+      peso: f.peso,
+      orden: f.orden,
+    })
+  }
+  return Array.from(sesiones.values())
+    .map((s) => ({ ...s, ejercicios: s.ejercicios.slice().sort((a, b) => a.orden - b.orden) }))
+    .sort((a, b) => (a.creadoEn < b.creadoEn ? 1 : a.creadoEn > b.creadoEn ? -1 : 0))
 }

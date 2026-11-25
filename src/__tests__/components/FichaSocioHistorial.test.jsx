@@ -4,7 +4,6 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 vi.mock('../../utils/fichaSocioPwa', () => ({
   resolverUserIdPorDni: vi.fn(),
   fetchHistorialAsistencias: vi.fn(),
-  fetchHistorialRutinas: vi.fn(),
   fetchMetricasGamificacion: vi.fn(),
   fetchHistorialPagos: vi.fn(),
 }))
@@ -12,10 +11,19 @@ vi.mock('../../utils/fichaSocioPwa', () => ({
 import {
   resolverUserIdPorDni,
   fetchHistorialAsistencias,
-  fetchHistorialRutinas,
   fetchMetricasGamificacion,
   fetchHistorialPagos,
 } from '../../utils/fichaSocioPwa'
+
+// La pestaña Rutinas usa el mismo componente que Rutinas > Asignación (tiene sus propios
+// tests): acá solo se verifica que la Ficha se lo pasa con el socio de la PWA y SIN
+// acciones (la Ficha es para mirar).
+vi.mock('../../components/rutinas/RutinasDelSocio', () => ({
+  default: ({ userId, acciones }) => (
+    <div>{`RutinasDelSocio de ${userId}${acciones ? ' con acciones' : ' solo lectura'}`}</div>
+  ),
+}))
+
 import FichaSocioHistorial from '../../components/FichaSocioHistorial'
 
 const SOCIO = { id: 's1', nombre: 'Martina', apellido: 'Ríos', dni: '30111222' }
@@ -41,7 +49,6 @@ const PAGOS = [
 function mockearCargaCompleta() {
   resolverUserIdPorDni.mockResolvedValue('u1')
   fetchHistorialAsistencias.mockResolvedValue(ASISTENCIAS_UNIFICADAS)
-  fetchHistorialRutinas.mockResolvedValue([])
   fetchMetricasGamificacion.mockResolvedValue({ nivel: 3, totalXp: 1150, racha: 2, totalAsistencias: 12, miembroDesde: '2025-01-15' })
   fetchHistorialPagos.mockResolvedValue(PAGOS)
 }
@@ -98,5 +105,14 @@ describe('FichaSocioHistorial (Ficha 360° -- Historial y Actividad del Socio)',
     await waitFor(() => expect(screen.getByText('N3')).toBeTruthy())
     expect(screen.getByText('2')).toBeTruthy() // racha
     expect(screen.getByText('12')).toBeTruthy() // asistencias totales
+  })
+
+  it('la pestaña Rutinas muestra la rutina actual y el historial del socio, solo lectura', async () => {
+    mockearCargaCompleta()
+    render(<FichaSocioHistorial socio={SOCIO} />)
+
+    fireEvent.click(await screen.findByText('🏋️ Rutinas'))
+
+    await waitFor(() => expect(screen.getByText('RutinasDelSocio de u1 solo lectura')).toBeTruthy())
   })
 })

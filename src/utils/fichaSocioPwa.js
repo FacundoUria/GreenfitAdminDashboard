@@ -471,24 +471,8 @@ export async function fetchHistorialAsistencias(userId) {
   return [...itemsReservas, ...itemsCheckins].sort((a, b) => (a.fecha < b.fecha ? 1 : -1))
 }
 
-// ============================================================
-// Ficha 360° -- Rutinas y Disciplinas Asignadas
-// ============================================================
-
-export async function fetchHistorialRutinas(userId) {
-  const { data, error } = await supabase
-    .from('routines')
-    .select('id, title, coach_name, created_at')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-  if (error) throw new Error(error.message)
-  return (data ?? []).map((rutina) => ({
-    id: rutina.id,
-    titulo: rutina.title,
-    coach: rutina.coach_name,
-    creadaEl: rutina.created_at,
-  }))
-}
+// Ficha 360° -- Rutinas: la pestaña usa RutinasDelSocio (components/rutinas), el mismo
+// componente que Rutinas > Asignación (rutina actual + historial de rutinas).
 
 // ============================================================
 // Ficha 360° -- Métricas Globales de Gamificación
